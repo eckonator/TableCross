@@ -75,6 +75,25 @@ pub enum Message {
     Heartbeat {
         seq: u32,
     },
+    /// Latency probe, sent as a datagram; answered with `Pong` carrying the same `seq`.
+    Ping {
+        seq: u32,
+    },
+    Pong {
+        seq: u32,
+    },
+    /// The sender removed the pairing; the receiver forgets the sender as well.
+    Unpair,
+}
+
+impl Message {
+    /// Messages that may travel as unreliable datagrams. Everything else needs the ordered stream.
+    pub fn is_datagram(&self) -> bool {
+        matches!(
+            self,
+            Message::MouseMove { .. } | Message::Wheel { .. } | Message::Ping { .. } | Message::Pong { .. }
+        )
+    }
 }
 
 impl Message {
@@ -161,6 +180,9 @@ mod tests {
             },
             Message::ReleaseAll,
             Message::Heartbeat { seq: u32::MAX },
+            Message::Ping { seq: 7 },
+            Message::Pong { seq: 7 },
+            Message::Unpair,
         ]
     }
 

@@ -1,0 +1,19 @@
+[package]
+name = "tablecross-cli"
+description = "Developer and test tool: pair and connect TableCross peers without a user interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tc-protocol = { path = "../crates/protocol" }
+tc-net = { path = "../crates/net" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+gethostname = "1"

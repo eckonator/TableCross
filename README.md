@@ -31,6 +31,20 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+## Command line tool
+
+`tablecross-cli` connects computers without the app, for development and testing:
+
+```sh
+tablecross-cli pair            # on the first computer: shows a 6-digit code
+tablecross-cli pair 123456     # on the second computer: finds the first one and pairs
+tablecross-cli ping            # on both: keeps the connection, prints round trip, losses and reconnects
+tablecross-cli peers           # paired computers and the ones found on the network
+```
+
+Without network discovery (`--no-discovery`) pass the address of the other computer with `--addr IP:PORT`.
+Traffic uses UDP port 24800; allow it in the firewall for private networks.
+
 ## License
 
 GPL-3.0-or-later, see [LICENSE](LICENSE).
