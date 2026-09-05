@@ -1,0 +1,13 @@
+[package]
+name = "tc-protocol"
+description = "TableCross messages and key state tracking (no networking, no OS code)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
