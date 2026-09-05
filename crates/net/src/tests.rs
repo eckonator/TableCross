@@ -134,14 +134,21 @@ async fn pairing_connects_and_messages_flow() {
         assert_eq!(got, Message::Key { usage, down: true });
     }
     // Datagram
-    assert!(b.node.send(&a.fp(), Message::MouseMove { dx: 2.5, dy: -1.0 }));
+    let motion = Message::MouseMove {
+        seq: 1,
+        x: 10.0,
+        y: 20.0,
+        dx: 2.5,
+        dy: -1.0,
+    };
+    assert!(b.node.send(&a.fp(), motion.clone()));
     let got = a
         .expect(SHORT, |e| match e {
             Event::Message { message, .. } => Some(message.clone()),
             _ => None,
         })
         .await;
-    assert_eq!(got, Message::MouseMove { dx: 2.5, dy: -1.0 });
+    assert_eq!(got, motion);
 
     // Latency probes run on their own
     tokio::time::sleep(Duration::from_millis(1600)).await;

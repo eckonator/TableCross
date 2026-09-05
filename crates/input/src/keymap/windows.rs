@@ -1,0 +1,180 @@
+//! Windows scan codes (set 1) ↔ USB HID usages (page 7). Extended keys (prefix E0) are written as
+//! `0xE0xx`.
+
+/// (scan code, HID usage)
+const TABLE: &[(u16, u16)] = &[
+    (0x1E, 0x04),   // A
+    (0x30, 0x05),   // B
+    (0x2E, 0x06),   // C
+    (0x20, 0x07),   // D
+    (0x12, 0x08),   // E
+    (0x21, 0x09),   // F
+    (0x22, 0x0A),   // G
+    (0x23, 0x0B),   // H
+    (0x17, 0x0C),   // I
+    (0x24, 0x0D),   // J
+    (0x25, 0x0E),   // K
+    (0x26, 0x0F),   // L
+    (0x32, 0x10),   // M
+    (0x31, 0x11),   // N
+    (0x18, 0x12),   // O
+    (0x19, 0x13),   // P
+    (0x10, 0x14),   // Q
+    (0x13, 0x15),   // R
+    (0x1F, 0x16),   // S
+    (0x14, 0x17),   // T
+    (0x16, 0x18),   // U
+    (0x2F, 0x19),   // V
+    (0x11, 0x1A),   // W
+    (0x2D, 0x1B),   // X
+    (0x15, 0x1C),   // Y
+    (0x2C, 0x1D),   // Z
+    (0x02, 0x1E),   // 1
+    (0x03, 0x1F),   // 2
+    (0x04, 0x20),   // 3
+    (0x05, 0x21),   // 4
+    (0x06, 0x22),   // 5
+    (0x07, 0x23),   // 6
+    (0x08, 0x24),   // 7
+    (0x09, 0x25),   // 8
+    (0x0A, 0x26),   // 9
+    (0x0B, 0x27),   // 0
+    (0x1C, 0x28),   // Enter
+    (0x01, 0x29),   // Escape
+    (0x0E, 0x2A),   // Backspace
+    (0x0F, 0x2B),   // Tab
+    (0x39, 0x2C),   // Space
+    (0x0C, 0x2D),   // -
+    (0x0D, 0x2E),   // =
+    (0x1A, 0x2F),   // [
+    (0x1B, 0x30),   // ]
+    (0x2B, 0x31),   // backslash (also non-US #)
+    (0x27, 0x33),   // ;
+    (0x28, 0x34),   // '
+    (0x29, 0x35),   // `
+    (0x33, 0x36),   // ,
+    (0x34, 0x37),   // .
+    (0x35, 0x38),   // /
+    (0x3A, 0x39),   // Caps Lock
+    (0x3B, 0x3A),   // F1
+    (0x3C, 0x3B),   // F2
+    (0x3D, 0x3C),   // F3
+    (0x3E, 0x3D),   // F4
+    (0x3F, 0x3E),   // F5
+    (0x40, 0x3F),   // F6
+    (0x41, 0x40),   // F7
+    (0x42, 0x41),   // F8
+    (0x43, 0x42),   // F9
+    (0x44, 0x43),   // F10
+    (0x57, 0x44),   // F11
+    (0x58, 0x45),   // F12
+    (0xE037, 0x46), // Print Screen
+    (0x46, 0x47),   // Scroll Lock
+    (0xE045, 0x48), // Pause (keyboards send E1 1D 45; the hook names it by its virtual key)
+    (0xE052, 0x49), // Insert
+    (0xE047, 0x4A), // Home
+    (0xE049, 0x4B), // Page Up
+    (0xE053, 0x4C), // Delete
+    (0xE04F, 0x4D), // End
+    (0xE051, 0x4E), // Page Down
+    (0xE04D, 0x4F), // right
+    (0xE04B, 0x50), // left
+    (0xE050, 0x51), // down
+    (0xE048, 0x52), // up
+    (0x45, 0x53),   // Num Lock
+    (0xE035, 0x54), // keypad /
+    (0x37, 0x55),   // keypad *
+    (0x4A, 0x56),   // keypad -
+    (0x4E, 0x57),   // keypad +
+    (0xE01C, 0x58), // keypad Enter
+    (0x4F, 0x59),   // keypad 1
+    (0x50, 0x5A),   // keypad 2
+    (0x51, 0x5B),   // keypad 3
+    (0x4B, 0x5C),   // keypad 4
+    (0x4C, 0x5D),   // keypad 5
+    (0x4D, 0x5E),   // keypad 6
+    (0x47, 0x5F),   // keypad 7
+    (0x48, 0x60),   // keypad 8
+    (0x49, 0x61),   // keypad 9
+    (0x52, 0x62),   // keypad 0
+    (0x53, 0x63),   // keypad .
+    (0x56, 0x64),   // non-US backslash (key next to left Shift)
+    (0xE05D, 0x65), // context menu
+    (0xE05E, 0x66), // power
+    (0x59, 0x67),   // keypad =
+    (0x64, 0x68),   // F13
+    (0x65, 0x69),   // F14
+    (0x66, 0x6A),   // F15
+    (0x67, 0x6B),   // F16
+    (0x68, 0x6C),   // F17
+    (0x69, 0x6D),   // F18
+    (0x6A, 0x6E),   // F19
+    (0x6B, 0x6F),   // F20
+    (0x6C, 0x70),   // F21
+    (0x6D, 0x71),   // F22
+    (0x6E, 0x72),   // F23
+    (0x76, 0x73),   // F24
+    (0xE020, 0x7F), // mute
+    (0xE030, 0x80), // volume up
+    (0xE02E, 0x81), // volume down
+    (0x7E, 0x85),   // keypad , (Brazil, JIS)
+    (0x73, 0x87),   // Ro
+    (0x70, 0x88),   // Katakana/Hiragana
+    (0x7D, 0x89),   // Yen
+    (0x79, 0x8A),   // Henkan
+    (0x7B, 0x8B),   // Muhenkan
+    (0x72, 0x90),   // Hangul / Kana
+    (0x71, 0x91),   // Hanja / Eisu
+    (0x1D, 0xE0),   // left Ctrl
+    (0x2A, 0xE1),   // left Shift
+    (0x38, 0xE2),   // left Alt
+    (0xE05B, 0xE3), // left Windows
+    (0xE01D, 0xE4), // right Ctrl
+    (0x36, 0xE5),   // right Shift
+    (0xE038, 0xE6), // right Alt / AltGr
+    (0xE05C, 0xE7), // right Windows
+];
+
+/// Non-US # is the backslash scan code; Help (Mac keyboards) goes to Insert, where it sits.
+const HID_ONLY: &[(u16, u16)] = &[(0x2B, 0x32), (0xE052, 0x75)];
+
+pub fn to_hid(scan: u16) -> Option<u16> {
+    TABLE.iter().find(|(s, _)| *s == scan).map(|(_, u)| *u)
+}
+
+pub fn from_hid(usage: u16) -> Option<u16> {
+    TABLE.iter().chain(HID_ONLY).find(|(_, u)| *u == usage).map(|(s, _)| *s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_and_no_duplicates() {
+        for (scan, usage) in TABLE {
+            assert!(tc_protocol::is_key_usage(*usage), "{usage:#x}");
+            assert_eq!(to_hid(*scan), Some(*usage));
+            assert_eq!(from_hid(*usage), Some(*scan), "{usage:#x}");
+        }
+        let mut scans: Vec<_> = TABLE.iter().map(|(s, _)| s).collect();
+        scans.sort();
+        scans.dedup();
+        assert_eq!(scans.len(), TABLE.len());
+    }
+
+    #[test]
+    fn mac_and_iso_extras() {
+        assert_eq!(from_hid(0x32), Some(0x2B));
+        assert_eq!(from_hid(0x75), Some(0xE052));
+        assert_eq!(from_hid(0x00), None);
+    }
+
+    #[test]
+    fn every_mac_key_has_a_pc_key_where_one_exists() {
+        // Keys a Mac sends that a PC keyboard also has
+        for usage in (0x04..=0x65).chain(0xE0..=0xE7) {
+            assert!(from_hid(usage).is_some(), "{usage:#x}");
+        }
+    }
+}

@@ -6,27 +6,20 @@ pub const PROTOCOL_VERSION: u16 = 1;
 /// Largest message in bytes. Larger payloads (clipboard, files) are sent in chunks.
 pub const MAX_MESSAGE_LEN: usize = 64 * 1024;
 
-/// One screen of a peer, in points (logical pixels) of its system.
+/// One screen of a peer, in the coordinates its system uses for the pointer ("native units"):
+/// points on macOS, physical pixels on Windows and X11.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Screen {
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    /// Pixels per point (Retina 2.0, Windows 150 % = 1.5)
+    /// Native units per logical point: 1.0 on macOS (already points), Windows at 150 % = 1.5.
+    /// Movement is converted through logical points, so the pointer moves equally fast everywhere.
     pub scale: f32,
 }
 
-/// Screen edge the pointer crosses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Edge {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MouseButton {
     Left,
     Right,
@@ -43,15 +36,21 @@ pub enum Message {
         name: String,
         screens: Vec<Screen>,
     },
-    /// The pointer enters the receiver at `edge`; `along` is the position along that edge (0 to 1).
+    /// The pointer enters the receiver at `(x, y)` in the receiver's native units; from now on the
+    /// sender controls it.
     Enter {
-        edge: Edge,
-        along: f32,
+        x: f32,
+        y: f32,
     },
-    /// The pointer leaves the receiver again. The receiver releases all keys.
+    /// The pointer left the receiver. The receiver releases everything it got from the sender.
     Leave,
-    /// Relative motion in the sender's points.
+    /// New pointer position in the receiver's native units (datagram). Absolute, so a lost datagram
+    /// costs nothing and no drift builds up; `seq` lets the receiver drop reordered old positions.
+    /// `dx`/`dy` is the same motion in logical points, for programs that read relative motion.
     MouseMove {
+        seq: u32,
+        x: f32,
+        y: f32,
         dx: f32,
         dy: f32,
     },
@@ -59,10 +58,13 @@ pub enum Message {
         button: MouseButton,
         down: bool,
     },
-    /// Scrolling in points (trackpad) or detents × 1.0.
+    /// Scrolling as the user saw it on the sender: positive `dy` shows more of the top of the content,
+    /// positive `dx` more of the right side. `precise`: in logical points (trackpad), otherwise
+    /// in detents of a wheel (fractions allowed).
     Wheel {
         dx: f32,
         dy: f32,
+        precise: bool,
     },
     /// Key as USB HID usage (page 7), independent of the keyboard layout.
     Key {
@@ -84,6 +86,9 @@ pub enum Message {
     },
     /// The sender removed the pairing; the receiver forgets the sender as well.
     Unpair,
+    /// Someone used the sender's own mouse or keyboard: the sender controls itself again, the receiver
+    /// stops sending input to it.
+    TakeOver,
 }
 
 impl Message {
@@ -101,8 +106,9 @@ impl Message {
     fn values_finite(&self) -> bool {
         match self {
             Message::Hello { screens, .. } => screens.iter().all(|s| s.scale.is_finite() && s.scale > 0.0),
-            Message::Enter { along, .. } => along.is_finite(),
-            Message::MouseMove { dx, dy } | Message::Wheel { dx, dy } => dx.is_finite() && dy.is_finite(),
+            Message::Enter { x, y } => x.is_finite() && y.is_finite(),
+            Message::MouseMove { x, y, dx, dy, .. } => [x, y, dx, dy].iter().all(|v| v.is_finite()),
+            Message::Wheel { dx, dy, .. } => dx.is_finite() && dy.is_finite(),
             _ => true,
         }
     }
@@ -163,17 +169,24 @@ mod tests {
                     scale: 2.0,
                 }],
             },
-            Message::Enter {
-                edge: Edge::Left,
-                along: 0.25,
-            },
+            Message::Enter { x: 10.0, y: 0.25 },
             Message::Leave,
-            Message::MouseMove { dx: -3.5, dy: 12.0 },
+            Message::MouseMove {
+                seq: 1,
+                x: 100.0,
+                y: 200.5,
+                dx: -3.5,
+                dy: 12.0,
+            },
             Message::MouseButton {
                 button: MouseButton::Right,
                 down: true,
             },
-            Message::Wheel { dx: 0.0, dy: -1.0 },
+            Message::Wheel {
+                dx: 0.0,
+                dy: -1.0,
+                precise: false,
+            },
             Message::Key {
                 usage: 0x04,
                 down: true,
@@ -183,6 +196,7 @@ mod tests {
             Message::Ping { seq: 7 },
             Message::Pong { seq: 7 },
             Message::Unpair,
+            Message::TakeOver,
         ]
     }
 
@@ -195,8 +209,15 @@ mod tests {
 
     #[test]
     fn input_messages_stay_small() {
-        // Mouse motion will be sent as individual datagrams
-        assert!(encode(&Message::MouseMove { dx: 1.0, dy: 1.0 }).len() <= 9);
+        // Mouse motion is sent as individual datagrams
+        let motion = Message::MouseMove {
+            seq: u32::MAX,
+            x: 1.0,
+            y: 1.0,
+            dx: 1.0,
+            dy: 1.0,
+        };
+        assert!(encode(&motion).len() <= 22);
         assert!(
             encode(&Message::Key {
                 usage: 0xE7,
@@ -210,15 +231,19 @@ mod tests {
     #[test]
     fn non_finite_numbers_are_rejected() {
         for m in [
-            Message::MouseMove { dx: f32::NAN, dy: 0.0 },
+            Message::MouseMove {
+                seq: 0,
+                x: 0.0,
+                y: f32::NAN,
+                dx: 0.0,
+                dy: 0.0,
+            },
             Message::Wheel {
                 dx: 0.0,
                 dy: f32::INFINITY,
+                precise: true,
             },
-            Message::Enter {
-                edge: Edge::Top,
-                along: f32::NAN,
-            },
+            Message::Enter { x: f32::NAN, y: 0.0 },
             Message::Hello {
                 version: 1,
                 name: String::new(),

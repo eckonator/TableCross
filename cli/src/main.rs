@@ -1,5 +1,7 @@
 //! Developer and test tool: pair and connect TableCross peers without a user interface.
 
+mod run;
+
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -60,6 +62,30 @@ enum Command {
         #[arg(long, value_parser = parse_peer_addr)]
         addr: Vec<(String, SocketAddr)>,
     },
+    /// Say where a paired computer stands, seen from this one (stored in layout.json)
+    Place {
+        /// Name or start of the fingerprint
+        peer: String,
+        side: PlaceSide,
+        /// Swap ⌘ and Ctrl while controlling that computer from here
+        #[arg(long)]
+        swap_cmd_ctrl: bool,
+    },
+    /// Show the screens as TableCross sees them
+    Screens,
+    /// Share mouse and keyboard with the placed computers
+    Run {
+        #[arg(long, value_parser = parse_peer_addr)]
+        addr: Vec<(String, SocketAddr)>,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum PlaceSide {
+    Left,
+    Right,
+    Above,
+    Below,
 }
 
 fn parse_peer_addr(s: &str) -> Result<(String, SocketAddr), String> {
@@ -98,6 +124,20 @@ async fn main() -> Result<()> {
             println!("Settings:     {}", dir.display());
             return Ok(());
         }
+        Command::Place {
+            peer,
+            side,
+            swap_cmd_ctrl,
+        } => {
+            return place(&dir, &identity, &store, peer, *side, *swap_cmd_ctrl);
+        }
+        Command::Screens => {
+            let backend = tc_input::platform()?;
+            for s in backend.inject.screens() {
+                println!("  {}×{} at ({}, {}), scale {}", s.width, s.height, s.x, s.y, s.scale);
+            }
+            return Ok(());
+        }
         Command::Peers if cli.no_discovery => {
             println!("Paired:");
             print_paired(store.peers());
@@ -110,9 +150,21 @@ async fn main() -> Result<()> {
     config.bind.set_port(cli.port);
     config.discovery = !cli.no_discovery;
     config.dial = !matches!(cli.command, Command::Listen | Command::Pair { .. } | Command::Peers);
+    let backend = match cli.command {
+        Command::Run { .. } => {
+            let backend = tc_input::platform()?;
+            config.screens = backend.inject.screens();
+            Some(backend)
+        }
+        _ => None,
+    };
     let (node, events) = Node::start(config, identity, store).await?;
     let result = match cli.command {
-        Command::Id => unreachable!("handled above"),
+        Command::Id | Command::Place { .. } | Command::Screens => unreachable!("handled above"),
+        Command::Run { addr } => {
+            add_addresses(&node, &addr)?;
+            run::run(&node, events, &dir, backend.expect("created above")).await
+        }
         Command::Peers => peers(&node).await,
         Command::Pair { code: None, .. } => show_code(&node, events).await,
         Command::Pair { code: Some(code), addr } => type_code(&node, &code, addr).await,
@@ -132,6 +184,53 @@ async fn main() -> Result<()> {
 }
 
 /// Host name without domain ("office-mac.fritz.box" → "office-mac").
+fn place(
+    dir: &std::path::Path,
+    identity: &Identity,
+    store: &PeerStore,
+    query: &str,
+    side: PlaceSide,
+    swap_cmd_ctrl: bool,
+) -> Result<()> {
+    let query_lower = query.to_lowercase();
+    let matches: Vec<_> = store
+        .peers()
+        .iter()
+        .filter(|p| p.name.to_lowercase() == query_lower || p.fingerprint.to_string().starts_with(&query_lower))
+        .collect();
+    let peer = match matches.as_slice() {
+        [one] => *one,
+        [] => bail!("no paired computer matches \"{query}\" (see: tablecross-cli peers)"),
+        _ => bail!("\"{query}\" matches several computers; use more of the fingerprint"),
+    };
+    // Fingerprints instead of names, so renaming a computer does not break the layout
+    let id = |fp: &Fingerprint| fp.to_string()[..16].to_string();
+    let (me, them) = (id(&identity.fingerprint()), id(&peer.fingerprint));
+    let mut file = run::load_layout_file(dir)?;
+    file.neighbors
+        .retain(|n| !((n.machine == them && n.of == me) || (n.machine == me && n.of == them)));
+    let (side, words) = match side {
+        PlaceSide::Left => (tc_core::Side::Left, "left of"),
+        PlaceSide::Right => (tc_core::Side::Right, "right of"),
+        PlaceSide::Above => (tc_core::Side::Top, "above"),
+        PlaceSide::Below => (tc_core::Side::Bottom, "below"),
+    };
+    // Anyone else on that side moves away
+    file.neighbors.retain(|n| !(n.of == me && n.side == side));
+    file.neighbors.push(tc_core::Neighbor {
+        machine: them.clone(),
+        side,
+        of: me,
+    });
+    file.swap_cmd_ctrl.retain(|m| *m != them);
+    if swap_cmd_ctrl {
+        file.swap_cmd_ctrl.push(them);
+    }
+    run::save_layout_file(dir, &file)?;
+    println!("{} is now {words} this computer.", peer.name);
+    Ok(())
+}
+
 fn host_name() -> String {
     let name = gethostname::gethostname().to_string_lossy().into_owned();
     name.split('.').next().unwrap_or_default().to_string()

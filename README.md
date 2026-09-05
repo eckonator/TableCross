@@ -42,6 +42,19 @@ tablecross-cli ping            # on both: keeps the connection, prints round tri
 tablecross-cli peers           # paired computers and the ones found on the network
 ```
 
+Sharing mouse and keyboard (both computers paired):
+
+```sh
+tablecross-cli place office-pc right   # on the Mac: the PC stands right of it
+tablecross-cli place macbook left      # on the PC: the Mac stands left of it
+tablecross-cli run                     # on both
+```
+
+Move the pointer over the edge to control the other computer; using a computer's own mouse or
+keyboard takes control back. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on
+`place` swaps ⌘ and Ctrl while controlling that computer. On macOS the terminal (later the app) needs
+the Accessibility permission.
+
 Without network discovery (`--no-discovery`) pass the address of the other computer with `--addr IP:PORT`.
 Traffic uses UDP port 24800; allow it in the firewall for private networks.
 

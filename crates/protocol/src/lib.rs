@@ -7,4 +7,4 @@ mod keys;
 mod message;
 
 pub use keys::{PressedKeys, is_key_usage};
-pub use message::{DecodeError, Edge, MAX_MESSAGE_LEN, Message, MouseButton, PROTOCOL_VERSION, Screen, decode, encode};
+pub use message::{DecodeError, MAX_MESSAGE_LEN, Message, MouseButton, PROTOCOL_VERSION, Screen, decode, encode};

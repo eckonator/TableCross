@@ -1191,11 +1191,35 @@ dependencies = [
  "anyhow",
  "clap",
  "gethostname",
+ "serde_json",
+ "tc-core",
+ "tc-input",
  "tc-net",
  "tc-protocol",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "tc-core"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tc-protocol",
+]
+
+[[package]]
+name = "tc-input"
+version = "0.0.1"
+dependencies = [
+ "core-foundation-sys",
+ "tc-core",
+ "tc-protocol",
+ "thiserror",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
