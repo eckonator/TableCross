@@ -306,7 +306,12 @@ async fn share(
         port,
         discovery,
     };
-    let (session, task) = Session::start(config, Some(backend), None).await?;
+    // Clipboard content up to 50 MB is shared
+    let clipboard = tc_clipboard::platform().map(|system| tc_session::Clipboard {
+        system: system.into(),
+        max_size: 50 * 1024 * 1024,
+    });
+    let (session, task) = Session::start(config, Some(backend), clipboard, None).await?;
     let mut notices = session.notices();
     let status = session.status();
     if !status.peers.iter().any(|p| p.side.is_some()) {
@@ -543,7 +548,7 @@ async fn run(node: &Node, mut events: UnboundedReceiver<Event>, ping: bool) -> R
                         println!("{} refused {who}: {}", stamp(), refusal_text(&reason));
                     }
                     Event::Woke { slept } => println!("{} woke up after about {} s, reconnecting", stamp(), slept.as_secs()),
-                    Event::PairingFailed { .. } | Event::PairingClosed => {}
+                    Event::PairingFailed { .. } | Event::PairingClosed | Event::Blob { .. } => {}
                 }
             }
             _ = tick.tick(), if ping => {

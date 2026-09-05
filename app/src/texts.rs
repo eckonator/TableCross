@@ -3,7 +3,7 @@
 use tc_core::Side;
 use tc_input::Problem;
 use tc_net::{Disconnect, PairError, Refusal};
-use tc_session::Notice;
+use tc_session::{Notice, Skip};
 
 use crate::i18n::{tr, trf};
 
@@ -25,6 +25,14 @@ pub fn notice(n: &Notice) -> String {
         Notice::EmergencyRelease => tr("Everything was released").into(),
         Notice::Problem(p) => problem(p),
         Notice::InputFailed(e) => trf("Mouse and keyboard cannot be captured: {}", &[e]),
+        Notice::ClipboardSkipped(Skip::Concealed) => {
+            tr("Copied password stays on this computer (marked as private)").into()
+        }
+        Notice::ClipboardSkipped(Skip::TooLarge(n)) => trf(
+            "Copied content stays on this computer: {} MB is more than allowed",
+            &[&format!("{:.1}", *n as f64 / 1_048_576.0)],
+        ),
+        Notice::ClipboardReceived(name) => trf("Clipboard taken over from {}", &[name]),
     }
 }
 

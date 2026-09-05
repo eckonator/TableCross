@@ -12,6 +12,7 @@ publish = false
 tc-protocol = { path = "../protocol" }
 tc-core = { path = "../core" }
 tc-input = { path = "../input" }
+tc-clipboard = { path = "../clipboard" }
 tc-net = { path = "../net" }
 anyhow = "1"
 serde_json = "1"

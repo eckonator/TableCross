@@ -40,6 +40,10 @@ pub struct Settings {
     pub discovery: bool,
     /// The setup steps were finished or skipped once.
     pub setup_done: bool,
+    /// Share the clipboard with the other computers.
+    pub clipboard: bool,
+    /// Larger clipboard content stays on this computer.
+    pub clipboard_max_mb: u32,
 }
 
 impl Default for Settings {
@@ -52,6 +56,8 @@ impl Default for Settings {
             port: tc_net::DEFAULT_PORT,
             discovery: true,
             setup_done: false,
+            clipboard: true,
+            clipboard_max_mb: 50,
         }
     }
 }
@@ -89,6 +95,8 @@ impl Settings {
             port: field(&fields, "port", d.port).max(1),
             discovery: field(&fields, "discovery", d.discovery),
             setup_done: field(&fields, "setup_done", d.setup_done),
+            clipboard: field(&fields, "clipboard", d.clipboard),
+            clipboard_max_mb: field(&fields, "clipboard_max_mb", d.clipboard_max_mb).clamp(1, 64),
         }
     }
 

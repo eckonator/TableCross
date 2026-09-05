@@ -8,7 +8,12 @@ use tc_input::{Backend, VirtualDevice, virtual_backend};
 use tc_net::{Identity, Node, NodeConfig, PeerStore};
 use tc_protocol::{Message, Screen};
 
-use crate::{Command, Notice, PairTarget, Session, SessionHandle};
+use std::sync::Arc;
+
+use tc_clipboard::{MemoryClipboard, Read};
+use tc_protocol::ClipContent;
+
+use crate::{Clipboard, Command, Notice, PairTarget, Session, SessionHandle, Skip};
 
 fn screen() -> Screen {
     Screen {
@@ -31,6 +36,7 @@ struct Machine {
     session: SessionHandle,
     device: VirtualDevice,
     node: Node,
+    clipboard: Arc<MemoryClipboard>,
 }
 
 async fn machine(name: &str) -> Machine {
@@ -46,10 +52,20 @@ async fn machine(name: &str) -> Machine {
         capture: Box::new(capture),
         inject,
     };
-    let (session, _task) = Session::with_node(node.clone(), events, dir(name), Some(backend), None)
+    let clipboard = Arc::new(MemoryClipboard::new());
+    let shared = Clipboard {
+        system: clipboard.clone(),
+        max_size: 4 * 1024 * 1024,
+    };
+    let (session, _task) = Session::with_node(node.clone(), events, dir(name), Some(backend), Some(shared), None)
         .await
         .unwrap();
-    Machine { session, device, node }
+    Machine {
+        session,
+        device,
+        node,
+        clipboard,
+    }
 }
 
 /// Waits until `check` holds, up to five seconds.
@@ -213,4 +229,83 @@ async fn wrong_code_is_reported() {
     })
     .await;
     assert!(a.session.status().peers.is_empty());
+}
+
+async fn paired_pair(a_name: &str, b_name: &str) -> (Machine, Machine) {
+    let a = machine(a_name).await;
+    let b = machine(b_name).await;
+    b.session.send(Command::StartPairing);
+    until("code shown", || b.session.status().pairing.is_some()).await;
+    let code = b.session.status().pairing.unwrap().0;
+    let b_addr = std::net::SocketAddr::from(([127, 0, 0, 1], b.node.local_addr().port()));
+    a.session.send(Command::Pair {
+        code: code.digits().to_string(),
+        target: PairTarget::Address(b_addr),
+    });
+    until("connected", || {
+        a.session.status().peers.first().is_some_and(|p| p.link.is_some())
+            && b.session.status().peers.first().is_some_and(|p| p.link.is_some())
+    })
+    .await;
+    // Let both clipboard watchers take their first look
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    (a, b)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clipboard_follows_in_both_directions() {
+    let (a, b) = paired_pair("clip-a", "clip-b").await;
+    let text = ClipContent {
+        text: Some("Grüße aus Alpha".into()),
+        html: Some("<b>Grüße</b>".into()),
+        ..ClipContent::default()
+    };
+    a.clipboard.set(Read::Content(text.clone()));
+    until("text arrives on Beta", || {
+        b.clipboard.get() == Read::Content(text.clone())
+    })
+    .await;
+
+    // And back, with an image larger than what is sent along at once
+    let image = ClipContent {
+        png: Some((0..2_000_000u32).map(|i| (i % 253) as u8).collect()),
+        ..ClipContent::default()
+    };
+    b.clipboard.set(Read::Content(image.clone()));
+    // Alpha is the computer in use (not controlling anyone), so it fetches it right away
+    until("image arrives on Alpha", || {
+        a.clipboard.get() == Read::Content(image.clone())
+    })
+    .await;
+
+    // Nothing bounces back and forth
+    let (count_a, count_b) = (
+        tc_clipboard::SystemClipboard::change_count(a.clipboard.as_ref()),
+        tc_clipboard::SystemClipboard::change_count(b.clipboard.as_ref()),
+    );
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        tc_clipboard::SystemClipboard::change_count(a.clipboard.as_ref()),
+        count_a
+    );
+    assert_eq!(
+        tc_clipboard::SystemClipboard::change_count(b.clipboard.as_ref()),
+        count_b
+    );
+
+    // Passwords stay where they are
+    let before = b.clipboard.get();
+    a.clipboard.set(Read::Concealed);
+    until("noticed as private", || {
+        a.session
+            .status()
+            .notices
+            .iter()
+            .any(|(_, n)| *n == Notice::ClipboardSkipped(Skip::Concealed))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(b.clipboard.get(), before);
+    a.session.send(Command::Shutdown);
+    b.session.send(Command::Shutdown);
 }

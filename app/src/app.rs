@@ -149,7 +149,16 @@ impl App {
         };
         let repaint = ctx.clone();
         let on_change: tc_session::OnChange = Arc::new(move || repaint.request_repaint());
-        match runtime.block_on(tc_session::Session::start(config, backend, Some(on_change))) {
+        let clipboard = self
+            .settings
+            .clipboard
+            .then(tc_clipboard::platform)
+            .flatten()
+            .map(|system| tc_session::Clipboard {
+                system: system.into(),
+                max_size: self.settings.clipboard_max_mb as usize * 1024 * 1024,
+            });
+        match runtime.block_on(tc_session::Session::start(config, backend, clipboard, Some(on_change))) {
             Ok((handle, task)) => {
                 self.session = Some(handle);
                 self.task = Some(task);
@@ -183,7 +192,9 @@ impl App {
         self.demo.is_none()
             && (self.settings.effective_name() != self.started_with.effective_name()
                 || self.settings.port != self.started_with.port
-                || self.settings.discovery != self.started_with.discovery)
+                || self.settings.discovery != self.started_with.discovery
+                || self.settings.clipboard != self.started_with.clipboard
+                || self.settings.clipboard_max_mb != self.started_with.clipboard_max_mb)
     }
 
     pub fn current_status(&self) -> Status {

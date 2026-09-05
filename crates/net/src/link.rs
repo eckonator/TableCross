@@ -241,6 +241,58 @@ pub(crate) enum LinkEnd {
 /// Hooks from the link into the node.
 pub(crate) trait LinkHost: Send + Sync + 'static {
     fn deliver(&self, peer: Fingerprint, message: Message);
+    fn deliver_blob(&self, peer: Fingerprint, header: Vec<u8>, data: Vec<u8>);
+}
+
+/// Largest header of a blob.
+const MAX_BLOB_HEADER: usize = 64 * 1024;
+/// Largest blob (clipboard content, later file chunks).
+pub const MAX_BLOB: usize = tc_protocol::MAX_CLIP_LEN + 1024;
+
+/// A blob on its own unidirectional stream: header length (u32), header, data length (u64), data.
+pub(crate) async fn write_blob(connection: &Connection, header: &[u8], data: &[u8]) -> Result<(), WireError> {
+    if header.len() > MAX_BLOB_HEADER || data.len() > MAX_BLOB {
+        return Err(WireError::TooLong);
+    }
+    let mut send = connection.open_uni().await.map_err(|_| WireError::Closed)?;
+    let mut prefix = Vec::with_capacity(12 + header.len());
+    prefix.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    prefix.extend_from_slice(header);
+    prefix.extend_from_slice(&(data.len() as u64).to_le_bytes());
+    send.write_all(&prefix).await.map_err(|_| WireError::Closed)?;
+    send.write_all(data).await.map_err(|_| WireError::Closed)?;
+    send.finish().map_err(|_| WireError::Closed)?;
+    // Wait until the peer has everything, so dropping the connection right after loses nothing
+    let _ = send.stopped().await;
+    Ok(())
+}
+
+async fn read_blob(recv: &mut RecvStream) -> Result<(Vec<u8>, Vec<u8>), WireError> {
+    let mut len = [0; 4];
+    recv.read_exact(&mut len).await.map_err(|_| WireError::Closed)?;
+    let header_len = u32::from_le_bytes(len) as usize;
+    if header_len > MAX_BLOB_HEADER {
+        return Err(WireError::TooLong);
+    }
+    let mut header = vec![0; header_len];
+    recv.read_exact(&mut header).await.map_err(|_| WireError::Closed)?;
+    let mut len = [0; 8];
+    recv.read_exact(&mut len).await.map_err(|_| WireError::Closed)?;
+    let data_len = usize::try_from(u64::from_le_bytes(len)).map_err(|_| WireError::TooLong)?;
+    if data_len > MAX_BLOB {
+        return Err(WireError::TooLong);
+    }
+    // Grows with what really arrives, so a lying length cannot reserve memory up front
+    let mut data = Vec::new();
+    let mut chunk = vec![0; 64 * 1024];
+    while data.len() < data_len {
+        let want = (data_len - data.len()).min(chunk.len());
+        match recv.read(&mut chunk[..want]).await {
+            Ok(Some(n)) => data.extend_from_slice(&chunk[..n]),
+            _ => return Err(WireError::Closed),
+        }
+    }
+    Ok((header, data))
 }
 
 /// Runs a link until it ends. `outgoing` carries stream messages from the node.
@@ -312,6 +364,26 @@ pub(crate) async fn run(
         }
     });
 
+    // Blobs on unidirectional streams, each read on its own so a big one never holds up the rest
+    let conn = connection.clone();
+    let blob_host = host.clone();
+    let blob_stats = stats.clone();
+    let blob_reader = tokio::spawn(async move {
+        while let Ok(mut recv) = conn.accept_uni().await {
+            let host = blob_host.clone();
+            let stats = blob_stats.clone();
+            tokio::spawn(async move {
+                match read_blob(&mut recv).await {
+                    Ok((header, data)) => {
+                        stats.lock().expect("stats lock").last_seen = Instant::now();
+                        host.deliver_blob(peer, header, data);
+                    }
+                    Err(e) => tracing::debug!("dropping an incomplete blob: {e}"),
+                }
+            });
+        }
+    });
+
     let mut tick = tokio::time::interval(HEARTBEAT);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut heartbeat = 0u32;
@@ -361,6 +433,7 @@ pub(crate) async fn run(
     };
     stream_reader.abort();
     datagram_reader.abort();
+    blob_reader.abort();
     end
 }
 

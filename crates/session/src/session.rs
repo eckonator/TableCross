@@ -14,10 +14,11 @@ use tc_net::{
     Disconnect, Discovered, Event, Fingerprint, Identity, LinkInfo, Node, NodeConfig, PairError, PairingCode,
     PeerStore, Refusal,
 };
-use tc_protocol::Screen;
+use tc_protocol::{Message, Screen};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::clip::{self, ClipAction, ClipSync, Clipboard, Skip};
 use crate::layout_file;
 
 const ESCAPE: u16 = 0x29;
@@ -100,6 +101,10 @@ pub enum Notice {
     EmergencyRelease,
     Problem(Problem),
     InputFailed(String),
+    /// Clipboard content from this computer stayed here.
+    ClipboardSkipped(Skip),
+    /// Clipboard content from this peer was taken over.
+    ClipboardReceived(String),
 }
 
 impl std::fmt::Display for Notice {
@@ -126,6 +131,9 @@ impl std::fmt::Display for Notice {
             Notice::EmergencyRelease => write!(f, "emergency release: everything released"),
             Notice::Problem(p) => write!(f, "warning: {p}"),
             Notice::InputFailed(e) => write!(f, "input capture not available: {e}"),
+            Notice::ClipboardSkipped(Skip::Concealed) => write!(f, "clipboard not shared: marked as private"),
+            Notice::ClipboardSkipped(Skip::TooLarge(n)) => write!(f, "clipboard not shared: too large ({n} bytes)"),
+            Notice::ClipboardReceived(n) => write!(f, "clipboard taken over from {n}"),
         }
     }
 }
@@ -197,6 +205,8 @@ pub type OnChange = Arc<dyn Fn() + Send + Sync>;
 enum Internal {
     Notice(Notice),
     PairDone(Result<String, PairError>),
+    ClipRead(Option<tc_clipboard::Read>),
+    ClipWritten(Fingerprint, Option<u64>),
 }
 
 struct Shared {
@@ -208,6 +218,8 @@ struct Shared {
     internal: mpsc::UnboundedSender<Internal>,
     on_change: Option<OnChange>,
     dir: PathBuf,
+    clipboard: Option<Clipboard>,
+    clip: Mutex<ClipSync>,
 }
 
 impl Shared {
@@ -389,6 +401,7 @@ impl Session {
     pub async fn start(
         config: SessionConfig,
         backend: Option<Backend>,
+        clipboard: Option<Clipboard>,
         on_change: Option<OnChange>,
     ) -> Result<(SessionHandle, JoinHandle<()>)> {
         let identity = Identity::load_or_create(&config.dir)?;
@@ -399,7 +412,7 @@ impl Session {
         node_config.discovery = config.discovery;
         node_config.screens = screens.clone();
         let (node, events) = Node::start(node_config, identity, store).await?;
-        Self::with_node(node, events, config.dir, backend, on_change).await
+        Self::with_node(node, events, config.dir, backend, clipboard, on_change).await
     }
 
     /// Like `start`, with a node that is already running (tests).
@@ -408,6 +421,7 @@ impl Session {
         events: mpsc::UnboundedReceiver<Event>,
         dir: PathBuf,
         backend: Option<Backend>,
+        clipboard: Option<Clipboard>,
         on_change: Option<OnChange>,
     ) -> Result<(SessionHandle, JoinHandle<()>)> {
         let screens = backend.as_ref().map(|b| b.inject.screens()).unwrap_or_default();
@@ -439,6 +453,8 @@ impl Session {
             internal: internal_tx,
             on_change,
             dir,
+            clipboard,
+            clip: Mutex::new(ClipSync::default()),
         });
         shared.reload_layout();
         shared.refresh();
@@ -480,6 +496,7 @@ async fn run(
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
     let mut screen_tick = tokio::time::interval(Duration::from_secs(2));
+    let mut clip_tick = tokio::time::interval(Duration::from_millis(300));
     loop {
         tokio::select! {
             event = events.recv() => {
@@ -499,6 +516,13 @@ async fn run(
             }
             Some(message) = internal.recv() => match message {
                 Internal::Notice(notice) => shared.notice(notice),
+                Internal::ClipRead(read) => clip_read(&shared, read),
+                Internal::ClipWritten(from, count) => {
+                    shared.clip.lock().expect("clip lock").write_done(count);
+                    if count.is_some() {
+                        shared.notice(Notice::ClipboardReceived(shared.name_of(&from.to_string())));
+                    }
+                }
                 Internal::PairDone(result) => {
                     shared.status.lock().expect("status lock").pairing_busy = false;
                     match result {
@@ -513,6 +537,12 @@ async fn run(
                 shared.execute(actions);
                 let now = shared.engine.lock().expect("engine lock").role();
                 if now != role {
+                    if !matches!(now, Role::Controlling(_)) {
+                        let request = shared.clip.lock().expect("clip lock").became_active();
+                        if let Some((peer, message)) = request {
+                            shared.node.send(&peer, message);
+                        }
+                    }
                     let notice = match &now {
                         Role::Idle => Notice::Local,
                         Role::Controlling(id) => Notice::Controlling(shared.name_of(id)),
@@ -535,6 +565,7 @@ async fn run(
                 }
                 shared.changed();
             }
+            _ = clip_tick.tick() => clip_poll(&shared),
             _ = screen_tick.tick() => {
                 if let Some(inject) = &shared.inject {
                     let now = inject.screens();
@@ -559,11 +590,48 @@ async fn run(
     shared.node.shutdown().await;
 }
 
+/// Looks whether the local clipboard changed and reads it if so.
+fn clip_poll(shared: &Arc<Shared>) {
+    let Some(clipboard) = &shared.clipboard else { return };
+    let count = clipboard.system.change_count();
+    if shared.clip.lock().expect("clip lock").poll(count) == Some(ClipAction::Read) {
+        let system = clipboard.system.clone();
+        let internal = shared.internal.clone();
+        tokio::task::spawn_blocking(move || {
+            let read = system.read().map_err(|e| tracing::debug!("clipboard: {e}")).ok();
+            let _ = internal.send(Internal::ClipRead(read));
+        });
+    }
+}
+
+fn clip_read(shared: &Arc<Shared>, read: Option<tc_clipboard::Read>) {
+    let Some(clipboard) = &shared.clipboard else { return };
+    let mut sync = shared.clip.lock().expect("clip lock");
+    let Some(read) = read else {
+        sync.read_failed();
+        return;
+    };
+    let (announcement, skip) = sync.read_done(read, clipboard.max_size);
+    drop(sync);
+    if let Some(skip) = skip {
+        shared.notice(Notice::ClipboardSkipped(skip));
+    }
+    if let Some((offer, eager)) = announcement {
+        for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
+            clip::announce(&shared.node, &peer.peer.fingerprint, &offer, eager.as_ref());
+        }
+    }
+}
+
 fn handle_event(shared: &Arc<Shared>, event: Event) {
     match event {
         Event::Connected {
             peer, name, screens, ..
         } => {
+            let offer = shared.clip.lock().expect("clip lock").for_new_peer();
+            if let Some((offer, eager)) = offer {
+                clip::announce(&shared.node, &peer, &offer, eager.as_ref());
+            }
             shared
                 .engine
                 .lock()
@@ -581,6 +649,40 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             shared.execute(actions);
             if !matches!(reason, Disconnect::Replaced) {
                 shared.notice(Notice::Disconnected(shared.name_of(&peer.to_string()), reason));
+            }
+        }
+        Event::Message {
+            peer,
+            message: Message::ClipboardOffer { id, size, .. },
+        } => {
+            let active = !matches!(shared.engine.lock().expect("engine lock").role(), Role::Controlling(_));
+            let request = shared.clip.lock().expect("clip lock").offered(peer, id, size, active);
+            if let Some(request) = request {
+                shared.node.send(&peer, request);
+            }
+        }
+        Event::Message {
+            peer,
+            message: Message::ClipboardRequest { id },
+        } => {
+            let content = shared.clip.lock().expect("clip lock").requested(id);
+            if let Some((header, data)) = content {
+                shared.node.send_blob(&peer, header, data.as_ref().clone());
+            }
+        }
+        Event::Blob { peer, header, data } => {
+            let action = clip::parse_header(&header)
+                .and_then(|id| shared.clip.lock().expect("clip lock").received(peer, id, &data));
+            if let (Some(ClipAction::Write { content, .. }), Some(clipboard)) = (action, &shared.clipboard) {
+                let system = clipboard.system.clone();
+                let internal = shared.internal.clone();
+                tokio::task::spawn_blocking(move || {
+                    let count = system
+                        .write(&content)
+                        .map_err(|e| tracing::warn!("clipboard: {e}"))
+                        .ok();
+                    let _ = internal.send(Internal::ClipWritten(peer, count));
+                });
             }
         }
         Event::Message { peer, message } => {

@@ -110,20 +110,54 @@ impl App {
             }
         });
         ui.add_space(8.0);
-        card(ui, tr("Keyboard shortcuts"), |ui| {
-            egui::Grid::new("shortcuts")
-                .num_columns(2)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label(RichText::new(tr("Ctrl + Shift + Alt + Esc")).monospace());
-                    ui.label(tr(
-                        "Release everything: all keys up, mouse and keyboard back to this computer",
-                    ));
-                    ui.end_row();
-                    ui.label(RichText::new(tr("Ctrl + Shift + Alt + arrow key")).monospace());
-                    ui.label(tr("Go to the computer on that side"));
-                    ui.end_row();
+        card(ui, tr("Clipboard"), |ui| {
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.clipboard,
+                    tr("Share the clipboard with the other computers"),
+                )
+                .changed();
+            ui.add_enabled_ui(self.settings.clipboard, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(tr("Largest content"));
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut self.settings.clipboard_max_mb).range(1..=64).suffix(" MB"))
+                        .changed();
                 });
+                ui.label(
+                    RichText::new(tr(
+                        "Text, formatted text and images. Passwords copied from a password manager stay on this computer.",
+                    ))
+                    .weak(),
+                );
+            });
+            if self.needs_restart() {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(tr("Takes effect after a restart of the connection.")).weak());
+                    if ui.button(tr("Restart now")).clicked() {
+                        let ctx = ui.ctx().clone();
+                        self.restart_session(&ctx);
+                    }
+                });
+            }
+        });
+        ui.add_space(8.0);
+        card(ui, tr("Keyboard shortcuts"), |ui| {
+            for (keys, what) in [
+                (
+                    tr("Ctrl + Shift + Alt + Esc"),
+                    tr("Release everything: all keys up, mouse and keyboard back to this computer"),
+                ),
+                (
+                    tr("Ctrl + Shift + Alt + arrow key"),
+                    tr("Go to the computer on that side"),
+                ),
+            ] {
+                ui.label(RichText::new(keys).monospace().strong());
+                ui.label(what);
+                ui.add_space(4.0);
+            }
         });
         ui.add_space(8.0);
         card(ui, tr("Files"), |ui| {

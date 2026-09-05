@@ -28,6 +28,16 @@ pub enum MouseButton {
     Forward,
 }
 
+/// Clipboard formats that travel between systems.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ClipFormat {
+    Text,
+    Html,
+    Rtf,
+    /// Images, always as PNG.
+    Png,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Message {
     /// First message after connecting, sent in both directions.
@@ -89,6 +99,17 @@ pub enum Message {
     /// Someone used the sender's own mouse or keyboard: the sender controls itself again, the receiver
     /// stops sending input to it.
     TakeOver,
+    /// The sender's clipboard changed (`size` in bytes over all formats). The content follows on a
+    /// stream of its own right away if it is small, else when asked for.
+    ClipboardOffer {
+        id: u64,
+        formats: Vec<ClipFormat>,
+        size: u64,
+    },
+    /// Please send the content of offer `id`.
+    ClipboardRequest {
+        id: u64,
+    },
 }
 
 impl Message {
@@ -197,6 +218,12 @@ mod tests {
             Message::Pong { seq: 7 },
             Message::Unpair,
             Message::TakeOver,
+            Message::ClipboardOffer {
+                id: 9,
+                formats: vec![ClipFormat::Text, ClipFormat::Png],
+                size: 1234,
+            },
+            Message::ClipboardRequest { id: 9 },
         ]
     }
 

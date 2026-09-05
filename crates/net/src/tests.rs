@@ -150,6 +150,18 @@ async fn pairing_connects_and_messages_flow() {
         .await;
     assert_eq!(got, motion);
 
+    // Bulk data on its own stream, larger than any message
+    let data: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    assert!(a.node.send_blob(&b.fp(), b"clip".to_vec(), data.clone()));
+    let (header, got) = b
+        .expect(SHORT, |e| match e {
+            Event::Blob { header, data, .. } => Some((header.clone(), data.clone())),
+            _ => None,
+        })
+        .await;
+    assert_eq!(header, b"clip");
+    assert_eq!(got, data);
+
     // Latency probes run on their own
     tokio::time::sleep(Duration::from_millis(1600)).await;
     let status = a.node.status();

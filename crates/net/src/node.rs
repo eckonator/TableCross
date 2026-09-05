@@ -125,6 +125,12 @@ pub enum Event {
     Disconnected { peer: Fingerprint, reason: Disconnect },
     /// A message from the peer (stream or datagram), except the ones the network layer handles itself.
     Message { peer: Fingerprint, message: Message },
+    /// Bulk data from the peer (clipboard content), sent with `Node::send_blob`.
+    Blob {
+        peer: Fingerprint,
+        header: Vec<u8>,
+        data: Vec<u8>,
+    },
     /// Pairing succeeded (on either side).
     Paired { peer: PairedPeer },
     /// Someone typed a wrong code for the code shown here.
@@ -182,6 +188,8 @@ struct LinkEntry {
     since: Instant,
     name: String,
     screens: Vec<Screen>,
+    /// The blob being sent; a new one replaces it.
+    blob: Option<JoinHandle<()>>,
 }
 
 struct State {
@@ -217,6 +225,10 @@ struct Inner {
 impl LinkHost for Inner {
     fn deliver(&self, peer: Fingerprint, message: Message) {
         let _ = self.events.send(Event::Message { peer, message });
+    }
+
+    fn deliver_blob(&self, peer: Fingerprint, header: Vec<u8>, data: Vec<u8>) {
+        let _ = self.events.send(Event::Blob { peer, header, data });
     }
 }
 
@@ -398,6 +410,28 @@ impl Node {
         } else {
             entry.outgoing.send(message).is_ok()
         }
+    }
+
+    /// Sends bulk data on a stream of its own; a blob still on its way to that peer is abandoned.
+    /// `false` if the peer is not connected or the data is too large.
+    pub fn send_blob(&self, peer: &Fingerprint, header: Vec<u8>, data: Vec<u8>) -> bool {
+        if data.len() > link::MAX_BLOB {
+            return false;
+        }
+        let mut state = self.inner.lock();
+        let Some(entry) = state.links.get_mut(peer) else {
+            return false;
+        };
+        if let Some(previous) = entry.blob.take() {
+            previous.abort();
+        }
+        let connection = entry.connection.clone();
+        entry.blob = Some(tokio::spawn(async move {
+            if let Err(e) = link::write_blob(&connection, &header, &data).await {
+                tracing::debug!("blob not sent: {e}");
+            }
+        }));
+        true
     }
 
     pub fn paired(&self) -> Vec<PairedPeer> {
@@ -687,6 +721,7 @@ async fn run_link(inner: Arc<Inner>, connection: Connection, dialed: bool) -> bo
             since: Instant::now(),
             name: established.name.clone(),
             screens: established.screens.clone(),
+            blob: None,
         };
         registered = inner.register(peer, entry, address);
         if !registered {

@@ -14,6 +14,7 @@ tc-net = { path = "../crates/net" }
 tc-core = { path = "../crates/core" }
 tc-input = { path = "../crates/input" }
 tc-session = { path = "../crates/session" }
+tc-clipboard = { path = "../crates/clipboard" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }

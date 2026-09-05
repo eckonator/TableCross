@@ -100,6 +100,8 @@ fn de(en: &str) -> Option<&'static str> {
         "cannot save the pairing ({})" => "Kopplung lässt sich nicht speichern ({})",
         "captured" => "erfasst",
         "Check again" => "Erneut prüfen",
+        "Clipboard" => "Zwischenablage",
+        "Clipboard taken over from {}" => "Zwischenablage von {} übernommen",
         "Code" => "Code",
         "Computers" => "Rechner",
         "Connected at {} · round trip {} · lost {} of {} · reconnects {}" => {
@@ -113,6 +115,12 @@ fn de(en: &str) -> Option<&'static str> {
         "Could not change the start with the system: {}" => "Der Start mit dem System ließ sich nicht ändern: {}",
         "Ctrl + Shift + Alt + arrow key" => "Strg + Umschalt + Alt + Pfeiltaste",
         "Ctrl + Shift + Alt + Esc" => "Strg + Umschalt + Alt + Esc",
+        "Copied content stays on this computer: {} MB is more than allowed" => {
+            "Kopierter Inhalt bleibt auf diesem Rechner: {} MB sind mehr als erlaubt"
+        }
+        "Copied password stays on this computer (marked as private)" => {
+            "Kopiertes Passwort bleibt auf diesem Rechner (als privat markiert)"
+        }
         "Dark" => "Dunkel",
         "Diagnostics copied to the clipboard." => "Diagnose in die Zwischenablage kopiert.",
         "Done" => "Fertig",
@@ -135,6 +143,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Go to the computer on that side" => "Zum Rechner auf dieser Seite wechseln",
         "Install system helper …" => "Systemhelfer installieren …",
         "Keyboard shortcuts" => "Tastenkürzel",
+        "Largest content" => "Größter Inhalt",
         "Language" => "Sprache",
         "left of this computer" => "links von diesem Rechner",
         "License" => "Lizenz",
@@ -203,6 +212,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
         "Show pairing code" => "Kopplungscode zeigen",
+        "Share the clipboard with the other computers" => "Zwischenablage mit den anderen Rechnern teilen",
         "Show TableCross" => "TableCross zeigen",
         "Skip setup" => "Einrichtung überspringen",
         "Source code" => "Quellcode",
@@ -237,6 +247,9 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "the other computer was not found on the network" => "der andere Rechner wurde im Netz nicht gefunden",
         "the other computer went to sleep" => "der andere Rechner ist in den Ruhezustand gegangen",
+        "Text, formatted text and images. Passwords copied from a password manager stay on this computer." => {
+            "Text, formatierter Text und Bilder. Aus einem Passwortmanager kopierte Passwörter bleiben auf diesem Rechner."
+        }
         "The pairing code is no longer valid after too many attempts" => {
             "Der Kopplungscode gilt nach zu vielen Versuchen nicht mehr"
         }
