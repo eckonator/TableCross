@@ -1,0 +1,28 @@
+[package]
+name = "tablecross"
+description = "Share mouse, keyboard and clipboard between computers on the local network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tc-protocol = { path = "../crates/protocol" }
+tc-core = { path = "../crates/core" }
+tc-input = { path = "../crates/input" }
+tc-net = { path = "../crates/net" }
+tc-session = { path = "../crates/session" }
+anyhow = "1"
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "accesskit", "wayland", "x11"] }
+serde = { workspace = true }
+serde_json = "1"
+sys-locale = "0.3"
+gethostname = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+tray-icon = "0.26"

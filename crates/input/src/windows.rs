@@ -36,7 +36,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::keymap::windows as keymap;
-use crate::{Backend, Capture, Handler, Health, Inject, InputError};
+use crate::{Backend, Capture, Handler, Health, Inject, InputError, Problem};
 
 /// Marks input we send ourselves, so the hooks let it through untouched.
 const OWN_INPUT: usize = 0x7462_6C78; // "tblx"
@@ -195,13 +195,11 @@ impl Capture for WinCapture {
         let capturing = self.shared.hook_thread.load(Ordering::SeqCst) != 0;
         let mut problems = Vec::new();
         if !capturing {
-            problems.push("the input hooks are not installed".into());
+            problems.push(Problem::CaptureStopped);
         }
         let reinstalled = self.shared.hooks_reinstalled.load(Ordering::SeqCst);
         if reinstalled > 0 {
-            problems.push(format!(
-                "Windows removed the input hooks {reinstalled} times (installed again)"
-            ));
+            problems.push(Problem::HooksRemoved(reinstalled));
         }
         Health { capturing, problems }
     }

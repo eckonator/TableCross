@@ -559,3 +559,32 @@ fn emergency_release() {
     assert!(!sim.os("mac").grabbed);
     assert!(sim.os("pc").keys.is_empty());
 }
+
+#[test]
+fn keyboard_shortcut_switches_machines() {
+    let mut sim = Sim::mac_pc();
+    sim.key("mac", LEFT_SHIFT, true);
+    let actions = sim.machines.get_mut("mac").unwrap().engine.switch_side(Side::Right);
+    sim.apply("mac", actions);
+    assert_eq!(sim.role("mac"), Role::Controlling("pc".into()));
+    assert_eq!(sim.os("pc").pointer, Point::new(1920.0, 1080.0));
+    assert_eq!(sim.os("pc").keys, BTreeSet::from([LEFT_SHIFT]));
+    // Nothing further right
+    let actions = sim.machines.get_mut("mac").unwrap().engine.switch_side(Side::Right);
+    assert!(actions.is_empty());
+    // Back home, to the middle of the Mac
+    let actions = sim.machines.get_mut("mac").unwrap().engine.switch_side(Side::Left);
+    sim.apply("mac", actions);
+    assert_eq!(sim.role("mac"), Role::Idle);
+    assert_eq!(sim.os("mac").pointer, Point::new(756.0, 491.0));
+    sim.key("mac", LEFT_SHIFT, false);
+    sim.assert_all_released();
+
+    // From the controlled side: the PC user takes over and leaves for the Mac
+    cross_to_pc(&mut sim);
+    let actions = sim.machines.get_mut("pc").unwrap().engine.switch_to("mac");
+    sim.apply("pc", actions);
+    assert_eq!(sim.role("pc"), Role::Controlling("mac".into()));
+    assert_eq!(sim.role("mac"), Role::ControlledBy("pc".into()));
+    sim.assert_all_released();
+}

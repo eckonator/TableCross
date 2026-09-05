@@ -1,8 +1,55 @@
 //! Developer and test tool: pair and connect TableCross peers without a user interface.
 
 #[cfg(target_os = "macos")]
-mod helper;
-mod run;
+mod helper {
+    use anyhow::Result;
+    use tc_input::helper_protocol::HELPER_VERSION;
+    use tc_session::helper_install::{self, HelperState, LOG_FILE};
+
+    pub fn install() -> Result<()> {
+        helper_install::install()?;
+        println!("Installed. The helper now asks for the Input Monitoring permission:");
+        println!("System Settings → Privacy & Security → Input Monitoring → enable “de.eckonator.tablecross.helper”.");
+        println!(
+            "It picks the permission up by itself within half a minute; check with `tablecross-cli helper status`."
+        );
+        Ok(())
+    }
+
+    pub fn uninstall() -> Result<()> {
+        helper_install::uninstall()?;
+        println!("Removed.");
+        Ok(())
+    }
+
+    pub fn restart() -> Result<()> {
+        helper_install::restart()?;
+        println!("Restarted.");
+        Ok(())
+    }
+
+    pub fn status() -> Result<()> {
+        match helper_install::status() {
+            HelperState::NotRunning => println!("Not running. Install with `tablecross-cli helper install`."),
+            HelperState::Running { version, access } => {
+                let outdated = if version == HELPER_VERSION {
+                    ""
+                } else {
+                    " (outdated, install again)"
+                };
+                println!("Running, version {version}{outdated}.");
+                if access {
+                    println!("Input Monitoring: granted.");
+                } else {
+                    println!("Input Monitoring: missing. System Settings → Privacy & Security → Input Monitoring.");
+                }
+            }
+            HelperState::Unknown(e) => println!("Something answers, but not as expected: {e}"),
+        }
+        println!("Log: {LOG_FILE}");
+        Ok(())
+    }
+}
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -12,6 +59,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use tc_net::{Disconnect, Event, Fingerprint, Identity, Node, NodeConfig, PairingCode, PeerStore, Refusal};
+use tc_session::{Command as SessionCommand, Session, SessionConfig, layout_file};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 #[derive(Parser)]
@@ -183,22 +231,14 @@ async fn main() -> Result<()> {
     config.bind.set_port(cli.port);
     config.discovery = !cli.no_discovery;
     config.dial = !matches!(cli.command, Command::Listen | Command::Pair { .. } | Command::Peers);
-    let backend = match cli.command {
-        Command::Run { .. } => {
-            let backend = tc_input::platform()?;
-            config.screens = backend.inject.screens();
-            Some(backend)
-        }
-        _ => None,
-    };
+    if let Command::Run { addr } = &cli.command {
+        drop(store);
+        return share(dir, config.name, cli.port, !cli.no_discovery, addr).await;
+    }
     let (node, events) = Node::start(config, identity, store).await?;
     let result = match cli.command {
-        Command::Id | Command::Place { .. } | Command::Screens | Command::Helper { .. } => {
+        Command::Id | Command::Place { .. } | Command::Screens | Command::Helper { .. } | Command::Run { .. } => {
             unreachable!("handled above")
-        }
-        Command::Run { addr } => {
-            add_addresses(&node, &addr)?;
-            run::run(&node, events, &dir, backend.expect("created above")).await
         }
         Command::Peers => peers(&node).await,
         Command::Pair { code: None, .. } => show_code(&node, events).await,
@@ -218,7 +258,6 @@ async fn main() -> Result<()> {
     result
 }
 
-/// Host name without domain ("office-mac.fritz.box" → "office-mac").
 fn place(
     dir: &std::path::Path,
     identity: &Identity,
@@ -238,34 +277,76 @@ fn place(
         [] => bail!("no paired computer matches \"{query}\" (see: tablecross-cli peers)"),
         _ => bail!("\"{query}\" matches several computers; use more of the fingerprint"),
     };
-    // Fingerprints instead of names, so renaming a computer does not break the layout
-    let id = |fp: &Fingerprint| fp.to_string()[..16].to_string();
-    let (me, them) = (id(&identity.fingerprint()), id(&peer.fingerprint));
-    let mut file = run::load_layout_file(dir)?;
-    file.neighbors
-        .retain(|n| !((n.machine == them && n.of == me) || (n.machine == me && n.of == them)));
     let (side, words) = match side {
         PlaceSide::Left => (tc_core::Side::Left, "left of"),
         PlaceSide::Right => (tc_core::Side::Right, "right of"),
         PlaceSide::Above => (tc_core::Side::Top, "above"),
         PlaceSide::Below => (tc_core::Side::Bottom, "below"),
     };
-    // Anyone else on that side moves away
-    file.neighbors.retain(|n| !(n.of == me && n.side == side));
-    file.neighbors.push(tc_core::Neighbor {
-        machine: them.clone(),
-        side,
-        of: me,
-    });
-    file.swap_cmd_ctrl.retain(|m| *m != them);
-    if swap_cmd_ctrl {
-        file.swap_cmd_ctrl.push(them);
-    }
-    run::save_layout_file(dir, &file)?;
+    let mut file = layout_file::load(dir)?;
+    layout_file::place(&mut file, &identity.fingerprint(), &peer.fingerprint, Some(side));
+    layout_file::set_swap(&mut file, &peer.fingerprint, swap_cmd_ctrl);
+    layout_file::save(dir, &file)?;
     println!("{} is now {words} this computer.", peer.name);
     Ok(())
 }
 
+/// Shares mouse and keyboard until Ctrl+C.
+async fn share(
+    dir: PathBuf,
+    name: String,
+    port: u16,
+    discovery: bool,
+    addresses: &[(String, SocketAddr)],
+) -> Result<()> {
+    let backend = tc_input::platform()?;
+    let config = SessionConfig {
+        dir,
+        name,
+        port,
+        discovery,
+    };
+    let (session, task) = Session::start(config, Some(backend), None).await?;
+    let mut notices = session.notices();
+    let status = session.status();
+    if !status.peers.iter().any(|p| p.side.is_some()) {
+        session.send(SessionCommand::Shutdown);
+        let _ = task.await;
+        bail!("no computer placed next to this one; e.g. `tablecross-cli place <NAME> right`");
+    }
+    for (query, address) in addresses {
+        let query = query.to_lowercase();
+        match status
+            .peers
+            .iter()
+            .find(|p| p.name.to_lowercase() == query || p.fingerprint.to_string().starts_with(&query))
+        {
+            Some(p) => session.send(SessionCommand::AddAddress {
+                peer: p.fingerprint,
+                address: *address,
+            }),
+            None => bail!("no paired computer matches \"{query}\""),
+        }
+    }
+    println!("Screens: {:?}", status.screens);
+    println!("Running. Ctrl+Shift+Alt+Esc releases everything, Ctrl+Shift+Alt+arrow switches; Ctrl+C quits.");
+    let started = Instant::now();
+    loop {
+        tokio::select! {
+            notice = notices.recv() => match notice {
+                Ok(notice) => println!("{:>8.3}s {notice}", started.elapsed().as_secs_f64()),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => break,
+            },
+            _ = tokio::signal::ctrl_c() => break,
+        }
+    }
+    session.send(SessionCommand::Shutdown);
+    let _ = task.await;
+    Ok(())
+}
+
+/// Host name without domain ("office-mac.fritz.box" → "office-mac").
 fn host_name() -> String {
     let name = gethostname::gethostname().to_string_lossy().into_owned();
     name.split('.').next().unwrap_or_default().to_string()

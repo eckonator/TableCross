@@ -1,5 +1,6 @@
 //! Installing the macOS system helper as a LaunchDaemon (administrator password via the system
-//! dialog). Later the app installs it the same way, or via `SMAppService` once it is signed.
+//! dialog), used by the app and the command line tool. `SMAppService` needs a signed app; until then
+//! this is the way.
 
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
@@ -16,6 +17,10 @@ const LOG: &str = "/Library/Logs/TableCross/helper.log";
 unsafe extern "C" {
     fn getuid() -> u32;
 }
+
+/// Where to grant the helper its permission.
+pub const INPUT_MONITORING_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
 
 /// The helper binary next to this program.
 fn built_helper() -> Result<PathBuf> {
@@ -114,50 +119,46 @@ pub fn uninstall() -> Result<()> {
     as_admin(&format!(
         "launchctl bootout system/{LABEL} 2>/dev/null || true
 rm -f {PLIST} {INSTALLED_BINARY}"
-    ))?;
-    println!("Removed.");
-    Ok(())
+    ))
 }
 
 pub fn restart() -> Result<()> {
-    as_admin(&format!("launchctl kickstart -k system/{LABEL}"))?;
-    println!("Restarted.");
-    Ok(())
+    as_admin(&format!("launchctl kickstart -k system/{LABEL}"))
 }
 
-pub fn status() -> Result<()> {
-    let path = socket_path();
-    let Ok(mut stream) = UnixStream::connect(&path) else {
-        println!("Not running (no {path}). Install with `tablecross-cli helper install`.");
-        return Ok(());
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelperState {
+    NotRunning,
+    Running {
+        version: u16,
+        access: bool,
+    },
+    /// Something answers on the socket but not as expected.
+    Unknown(String),
+}
+
+pub fn status() -> HelperState {
+    let Ok(mut stream) = UnixStream::connect(socket_path()) else {
+        return HelperState::NotRunning;
     };
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
-    write_frame(
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let Ok(clone) = stream.try_clone() else {
+        return HelperState::NotRunning;
+    };
+    let mut reader = BufReader::new(clone);
+    if let Err(e) = write_frame(
         &mut stream,
         &ToHelper::Hello {
             version: HELPER_VERSION,
         },
-    )?;
-    match read_frame::<FromHelper>(&mut reader) {
-        Ok(FromHelper::Hello { version, access }) => {
-            println!(
-                "Running, version {version}{}.",
-                if version == HELPER_VERSION {
-                    ""
-                } else {
-                    " (outdated, install again)"
-                }
-            );
-            if access {
-                println!("Input Monitoring: granted.");
-            } else {
-                println!("Input Monitoring: missing. System Settings → Privacy & Security → Input Monitoring.");
-            }
-        }
-        Ok(other) => println!("Unexpected answer: {other:?}"),
-        Err(e) => println!("Running, but it did not answer ({e}); is it this user's helper?"),
+    ) {
+        return HelperState::Unknown(e.to_string());
     }
-    println!("Log: {LOG}");
-    Ok(())
+    match read_frame::<FromHelper>(&mut reader) {
+        Ok(FromHelper::Hello { version, access }) => HelperState::Running { version, access },
+        Ok(other) => HelperState::Unknown(format!("{other:?}")),
+        Err(e) => HelperState::Unknown(e.to_string()),
+    }
 }
+
+pub const LOG_FILE: &str = LOG;

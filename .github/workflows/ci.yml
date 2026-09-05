@@ -23,18 +23,26 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Linux libraries for the window
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev pkg-config
       - name: Formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # The test tool for trying connections between real computers (plus the macOS system helper)
+      # App, test tool and macOS system helper for trying it on real computers
       - name: Build tablecross-cli
-        run: cargo build --release -p tablecross-cli -p tablecross-helper
+        run: cargo build --release -p tablecross -p tablecross-cli -p tablecross-helper
       - uses: actions/upload-artifact@v4
         with:
-          name: tablecross-cli-${{ runner.os }}
+          name: tablecross-${{ runner.os }}
           path: |
+            target/release/tablecross
+            target/release/tablecross.exe
             target/release/tablecross-cli
             target/release/tablecross-cli.exe
             target/release/tablecross-helper

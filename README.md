@@ -4,7 +4,14 @@ Share one mouse, keyboard and clipboard between computers on your desk: macOS, W
 (Wayland on GNOME and KDE Plasma, and X11). Move the pointer over the edge of one screen and keep working
 on the next computer.
 
-> **Status: early development.** Nothing to install yet.
+> **Status: early development.** No installer yet; CI builds the app and tools for macOS, Windows and Linux.
+
+## The app
+
+`tablecross` opens a window with three setup steps (permissions, pairing with a code, arranging the
+computers by dragging) and a status page per computer (connection, round trip, problems with a way
+out, recent messages, “copy diagnostics”). Closing the window keeps TableCross running in the menu
+bar (macOS) or notification area (Windows). The interface is in English and German.
 
 ## Goals
 

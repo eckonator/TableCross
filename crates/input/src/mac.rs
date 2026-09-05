@@ -23,7 +23,7 @@ use tc_protocol::{Message, MouseButton, PressedKeys, Screen};
 
 use crate::keymap::mac as keymap;
 use crate::mac_helper::HelperClient;
-use crate::{Backend, Capture, Handler, Health, Inject, InputError};
+use crate::{Backend, Capture, Handler, Health, Inject, InputError, Problem};
 
 type Ref = *mut c_void;
 
@@ -401,15 +401,10 @@ impl Capture for MacCapture {
         let capturing = !tap.is_null() && unsafe { CGEventTapIsEnabled(tap.cast()) };
         let mut problems = Vec::new();
         if !unsafe { AXIsProcessTrusted() } {
-            problems.push("Accessibility permission is missing".into());
-        }
-        if unsafe { IsSecureEventInputEnabled() } {
-            problems.push(
-                "a program holds Secure Input (password field): letters do not reach TableCross right now".into(),
-            );
+            problems.push(Problem::AccessibilityMissing);
         }
         if !capturing {
-            problems.push("the event tap is not running".into());
+            problems.push(Problem::CaptureStopped);
         }
         let helper = self
             .shared
@@ -418,30 +413,27 @@ impl Capture for MacCapture {
             .expect("helper lock")
             .as_ref()
             .map(|h| h.status());
-        match helper {
+        let covered = match helper {
             Some(status) if status.connected => {
                 if !status.access {
-                    problems.push(
-                        "the system helper lacks Input Monitoring (System Settings → Privacy & Security → \
-                         Input Monitoring → tablecross-helper)"
-                            .into(),
-                    );
+                    problems.push(Problem::HelperNoAccess);
                 }
                 if status.failed > 0 {
-                    problems.push(format!(
-                        "the system helper could not take {} keyboard(s); their keys also reach this Mac",
-                        status.failed
-                    ));
+                    problems.push(Problem::HelperKeyboardsBusy(status.failed));
                 }
+                status.access
             }
             Some(status) if status.version_mismatch.is_some() => {
-                problems.push("the system helper is outdated; install it again".into())
+                problems.push(Problem::HelperOutdated);
+                false
             }
-            _ => problems.push(
-                "the system helper is not running: while a program holds Secure Input, keys do not reach \
-                 the other computer"
-                    .into(),
-            ),
+            _ => {
+                problems.push(Problem::HelperMissing);
+                false
+            }
+        };
+        if !covered && unsafe { IsSecureEventInputEnabled() } {
+            problems.push(Problem::SecureInput);
         }
         Health { capturing, problems }
     }

@@ -1,0 +1,123 @@
+//! Words for things the session reports, in the user's language.
+
+use tc_core::Side;
+use tc_input::Problem;
+use tc_net::{Disconnect, PairError, Refusal};
+use tc_session::Notice;
+
+use crate::i18n::{tr, trf};
+
+pub fn notice(n: &Notice) -> String {
+    match n {
+        Notice::Connected(name) => trf("Connected to {}", &[name]),
+        Notice::Disconnected(name, reason) => trf("Connection to {} ended: {}", &[name, &disconnect(reason)]),
+        Notice::Refused(who, reason) => trf("{} was refused: {}", &[who, &refusal(reason)]),
+        Notice::Paired(name) => trf("Paired with {}", &[name]),
+        Notice::PairingFailed(left) => trf("A wrong code was entered ({} attempts left)", &[left]),
+        Notice::PairingClosed => tr("The pairing code is no longer valid after too many attempts").into(),
+        Notice::PairError(e) => trf("Pairing failed: {}", &[&pair_error(e)]),
+        Notice::Unpaired(name, true) => trf("{} removed the pairing", &[name]),
+        Notice::Unpaired(name, false) => trf("Pairing with {} removed", &[name]),
+        Notice::Woke => tr("Woke from sleep, connecting again").into(),
+        Notice::Controlling(name) => trf("Mouse and keyboard now control {}", &[name]),
+        Notice::Local => tr("Mouse and keyboard work on this computer").into(),
+        Notice::ControlledBy(name) => trf("{} controls this computer", &[name]),
+        Notice::EmergencyRelease => tr("Everything was released").into(),
+        Notice::Problem(p) => problem(p),
+        Notice::InputFailed(e) => trf("Mouse and keyboard cannot be captured: {}", &[e]),
+    }
+}
+
+pub fn disconnect(d: &Disconnect) -> String {
+    match d {
+        Disconnect::Timeout => tr("no answer for 2 seconds").into(),
+        Disconnect::PeerShutdown => tr("the other computer quit TableCross").into(),
+        Disconnect::PeerSlept => tr("the other computer went to sleep").into(),
+        Disconnect::Slept => tr("this computer was asleep").into(),
+        Disconnect::Replaced => tr("replaced by a newer connection").into(),
+        Disconnect::Unpaired => tr("pairing removed").into(),
+        Disconnect::Shutdown => tr("TableCross is shutting down").into(),
+        Disconnect::ProtocolError(e) => trf("protocol error ({})", &[e]),
+        Disconnect::Lost(e) => trf("network error ({})", &[e]),
+    }
+}
+
+pub fn refusal(r: &Refusal) -> String {
+    match r {
+        Refusal::NotPaired => tr("not paired with this computer").into(),
+        Refusal::VersionMismatch { ours, theirs } => trf(
+            "the other computer uses version {} of the protocol, this one {}: please update the older one",
+            &[theirs, ours],
+        ),
+        Refusal::WrongPeer => tr("another device answered at the known address").into(),
+        Refusal::ProtocolError(e) => trf("protocol error ({})", &[e]),
+    }
+}
+
+pub fn pair_error(e: &PairError) -> String {
+    match e {
+        PairError::NoAddress => tr("the other computer was not found on the network").into(),
+        PairError::Unreachable => tr("the other computer cannot be reached").into(),
+        PairError::NotShowingCode => {
+            tr("the other computer is not showing a code (expired or too many attempts)").into()
+        }
+        PairError::WrongCode => tr("wrong code").into(),
+        PairError::VersionMismatch { ours, theirs } => trf(
+            "the other computer uses version {} of the protocol, this one {}: please update the older one",
+            &[theirs, ours],
+        ),
+        PairError::Protocol(e) => trf("protocol error ({})", &[e]),
+        PairError::Store(e) => trf("cannot save the pairing ({})", &[e]),
+    }
+}
+
+pub fn problem(p: &Problem) -> String {
+    match p {
+        Problem::AccessibilityMissing => {
+            tr("TableCross needs the Accessibility permission to use mouse and keyboard.").into()
+        }
+        Problem::SecureInput => tr(
+            "A program holds Secure Input (password field): typing does not reach other computers right now. \
+             The system helper solves this.",
+        )
+        .into(),
+        Problem::CaptureStopped => tr("Mouse and keyboard are not captured right now.").into(),
+        Problem::HelperMissing => tr(
+            "The system helper is not installed. Without it, typing on other computers stops while a password \
+             field is active on this Mac.",
+        )
+        .into(),
+        Problem::HelperNoAccess => tr("The system helper still needs the Input Monitoring permission.").into(),
+        Problem::HelperOutdated => tr("The system helper is outdated; please install it again.").into(),
+        Problem::HelperKeyboardsBusy(n) => trf(
+            "The system helper could not take {} keyboard(s); their keys also reach this Mac.",
+            &[n],
+        ),
+        Problem::HooksRemoved(n) => trf(
+            "Windows switched off the input capture {} times; it was restarted.",
+            &[n],
+        ),
+    }
+}
+
+/// "right of this computer"
+pub fn side(s: Option<Side>) -> &'static str {
+    match s {
+        Some(Side::Left) => tr("left of this computer"),
+        Some(Side::Right) => tr("right of this computer"),
+        Some(Side::Top) => tr("above this computer"),
+        Some(Side::Bottom) => tr("below this computer"),
+        None => tr("not placed"),
+    }
+}
+
+/// "5 s", "3 min", "2 h" since `t`.
+pub fn ago(t: std::time::SystemTime) -> String {
+    let secs = t.elapsed().map_or(0, |d| d.as_secs());
+    match secs {
+        0..=4 => tr("now").into(),
+        5..=59 => trf("{} s ago", &[&secs]),
+        60..=3599 => trf("{} min ago", &[&(secs / 60)]),
+        _ => trf("{} h ago", &[&(secs / 3600)]),
+    }
+}

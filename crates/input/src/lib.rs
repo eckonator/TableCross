@@ -32,8 +32,51 @@ pub type Handler = Box<dyn FnMut(Captured) -> bool + Send>;
 pub struct Health {
     /// Events of the local devices arrive.
     pub capturing: bool,
-    /// What is wrong, in words for the user.
-    pub problems: Vec<String>,
+    pub problems: Vec<Problem>,
+}
+
+/// Something the user should know about; the app shows each one in their language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Problem {
+    /// macOS: Accessibility permission missing (capturing and injecting impossible).
+    AccessibilityMissing,
+    /// macOS: a program holds Secure Input and no working helper covers it: letters stay on this Mac.
+    SecureInput,
+    /// The event tap or the hooks do not run.
+    CaptureStopped,
+    /// macOS: the system helper is not installed or not running.
+    HelperMissing,
+    /// macOS: the system helper lacks the Input Monitoring permission.
+    HelperNoAccess,
+    /// macOS: the system helper is from another version.
+    HelperOutdated,
+    /// macOS: keyboards the helper could not take away from the system.
+    HelperKeyboardsBusy(u16),
+    /// Windows removed the hooks this many times (they were installed again).
+    HooksRemoved(u32),
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Problem::AccessibilityMissing => write!(f, "Accessibility permission is missing"),
+            Problem::SecureInput => write!(
+                f,
+                "a program holds Secure Input (password field): keys do not reach the other computer"
+            ),
+            Problem::CaptureStopped => write!(f, "input capture is not running"),
+            Problem::HelperMissing => write!(f, "the system helper is not running"),
+            Problem::HelperNoAccess => write!(f, "the system helper lacks the Input Monitoring permission"),
+            Problem::HelperOutdated => write!(f, "the system helper is outdated; install it again"),
+            Problem::HelperKeyboardsBusy(n) => {
+                write!(
+                    f,
+                    "the system helper could not take {n} keyboard(s); their keys also reach this Mac"
+                )
+            }
+            Problem::HooksRemoved(n) => write!(f, "Windows removed the input hooks {n} times (installed again)"),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

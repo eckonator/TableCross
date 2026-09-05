@@ -12,7 +12,11 @@ targets = [
 ]
 
 [advisories]
-ignore = []
+ignore = [
+    # Only reachable through tray-icon's Linux dependencies (GTK 0.18), which TableCross does not use
+    # on Linux (the status icon is macOS and Windows only for now).
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk-rs, not built for any target we ship" },
+]
 
 [licenses]
 allow = [
@@ -35,6 +39,16 @@ allow = [
     "Unicode-3.0",
 ]
 confidence-threshold = 0.9
+
+# egui embeds its default fonts (Ubuntu-Light, Hack, Noto Emoji); font licenses allow bundling them
+# with any software.
+[[licenses.exceptions]]
+crate = "epaint"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
 
 [bans]
 multiple-versions = "allow"

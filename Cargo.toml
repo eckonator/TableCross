@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/core", "crates/input", "crates/net", "cli", "helper/macos", "tools/secure-input-probe"]
+members = ["crates/protocol", "crates/core", "crates/input", "crates/net", "crates/session", "cli", "app", "helper/macos", "tools/secure-input-probe"]
 
 [workspace.package]
 version = "0.0.1"

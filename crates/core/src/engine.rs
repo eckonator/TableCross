@@ -123,6 +123,8 @@ pub struct Engine {
     seq: u32,
     resend: bool,
     takeover_motion: f64,
+    /// Last known position of the local pointer (from motion while not grabbed).
+    local_pointer: Point,
 }
 
 pub fn is_modifier(usage: u16) -> bool {
@@ -164,6 +166,7 @@ impl Engine {
             seq: 0,
             resend: false,
             takeover_motion: 0.0,
+            local_pointer: Point::default(),
         }
     }
 
@@ -351,6 +354,85 @@ impl Engine {
         actions
     }
 
+    /// Moves control to the neighbor beside the machine the pointer is on now (keyboard shortcut).
+    pub fn switch_side(&mut self, side: Side) -> Vec<Action> {
+        let current = match &self.mode {
+            Mode::Remote { target, .. } => target.clone(),
+            _ => self.me.clone(),
+        };
+        match self.layout.neighbor(&current, side) {
+            Some(next) => {
+                let next = next.to_string();
+                self.switch_to(&next)
+            }
+            None => Vec::new(),
+        }
+    }
+
+    /// Puts the pointer in the middle of `machine` (this one or a connected peer).
+    pub fn switch_to(&mut self, machine: &str) -> Vec<Action> {
+        let mut actions = Vec::new();
+        if let Mode::Controlled { by, .. } = &self.mode {
+            // Asked for on this machine's own keyboard: take control first
+            let by = by.clone();
+            self.release_injected(&mut actions);
+            actions.push(Action::Send {
+                to: by,
+                message: Message::TakeOver,
+            });
+            self.mode = Mode::Local;
+        }
+        let Some(center) = self.machines.get(machine).map(|s| {
+            let r = s.rects()[0];
+            Point::new(((r.left + r.right) / 2.0).floor(), ((r.top + r.bottom) / 2.0).floor())
+        }) else {
+            return actions;
+        };
+        match self.mode.clone() {
+            Mode::Remote { target, .. } if target == machine => {}
+            Mode::Remote {
+                target, exit, scale, ..
+            } => {
+                self.leave_remote(&target, &mut actions);
+                if machine == self.me {
+                    self.mode = Mode::Local;
+                    self.sync_modifiers_home(&mut actions);
+                    actions.push(Action::Ungrab { at: center });
+                } else {
+                    self.enter_remote(machine, center, &mut actions);
+                    self.mode = Mode::Remote {
+                        target: machine.to_string(),
+                        pos: center,
+                        exit,
+                        scale,
+                    };
+                }
+            }
+            _ if machine == self.me => {}
+            _ => {
+                let park = self.local_pointer;
+                let scale = self.machines.get(&self.me).map_or(1.0, |s| s.screen_at(park).scale);
+                for (button, dests) in &mut self.held_buttons {
+                    if dests.remove(&Dest::Local) {
+                        actions.push(Action::Inject(Message::MouseButton {
+                            button: *button,
+                            down: false,
+                        }));
+                    }
+                }
+                actions.push(Action::Grab { park });
+                self.enter_remote(machine, center, &mut actions);
+                self.mode = Mode::Remote {
+                    target: machine.to_string(),
+                    pos: center,
+                    exit: park,
+                    scale,
+                };
+            }
+        }
+        actions
+    }
+
     /// Emergency: give everything back to the local system and release all keys everywhere.
     pub fn release_everything(&mut self) -> Vec<Action> {
         let mut actions = Vec::new();
@@ -374,6 +456,7 @@ impl Engine {
     fn motion(&mut self, p: Point, dx: f64, dy: f64, actions: &mut Vec<Action>) {
         match self.mode.clone() {
             Mode::Local => {
+                self.local_pointer = p;
                 let Some(mine) = self.machines.get(&self.me) else {
                     return;
                 };
