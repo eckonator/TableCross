@@ -1,4 +1,5 @@
-//! Symbol in the menu bar (macOS) or notification area (Windows) with a small menu. TableCross keeps
+//! Symbol in the menu bar (macOS), notification area (Windows) or status area (Linux, through
+//! StatusNotifierItem; GNOME needs the AppIndicator extension) with a small menu. TableCross keeps
 //! running when its window is closed; the symbol brings the window back.
 
 use std::sync::Arc;

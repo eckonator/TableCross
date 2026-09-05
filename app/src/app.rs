@@ -46,7 +46,6 @@ pub struct App {
     pub isolated: bool,
     pub log_file: Option<PathBuf>,
     quit_flag: Arc<AtomicBool>,
-    #[cfg(any(target_os = "macos", windows))]
     tray: Option<crate::tray::Tray>,
     dev: DevTools,
     background: bool,
@@ -84,7 +83,6 @@ impl App {
             isolated,
             log_file,
             quit_flag: Arc::new(AtomicBool::new(false)),
-            #[cfg(any(target_os = "macos", windows))]
             tray: None,
             dev,
             background,
@@ -104,7 +102,6 @@ impl App {
             .setup_step
             .map(|s| s.clamp(1, 3) - 1)
             .or((first_start && app.dev.page.is_none()).then_some(0));
-        #[cfg(any(target_os = "macos", windows))]
         if !app.dev.quitting_after_screenshot() {
             app.tray = crate::tray::Tray::new(&ctx, app.session.clone(), app.quit_flag.clone());
         }
@@ -115,10 +112,7 @@ impl App {
     }
 
     fn has_tray(&self) -> bool {
-        #[cfg(any(target_os = "macos", windows))]
-        return self.tray.is_some();
-        #[cfg(not(any(target_os = "macos", windows)))]
-        false
+        self.tray.is_some()
     }
 
     fn start_session(&mut self, ctx: &egui::Context) {
@@ -245,7 +239,6 @@ impl App {
 
     pub fn language_changed(&self) {
         i18n::apply_setting(self.settings.language);
-        #[cfg(any(target_os = "macos", windows))]
         if let Some(tray) = &self.tray {
             tray.retranslate();
         }

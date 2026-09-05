@@ -12,11 +12,7 @@ targets = [
 ]
 
 [advisories]
-ignore = [
-    # Only reachable through tray-icon's Linux dependencies (GTK 0.18), which TableCross does not use
-    # on Linux (the status icon is macOS and Windows only for now).
-    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk-rs, not built for any target we ship" },
-]
+ignore = []
 
 [licenses]
 allow = [
@@ -37,6 +33,8 @@ allow = [
     "CC0-1.0",
     "MPL-2.0",
     "Unicode-3.0",
+    # Public domain dedication, compatible with the GPL (ksni, the Linux status icon)
+    "Unlicense",
 ]
 confidence-threshold = 0.9
 

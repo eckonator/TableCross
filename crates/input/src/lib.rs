@@ -4,6 +4,7 @@
 
 pub mod keymap {
     //! Native key codes ↔ USB HID usages. Plain tables, compiled and tested on every system.
+    pub mod linux;
     pub mod mac;
     pub mod windows;
 }

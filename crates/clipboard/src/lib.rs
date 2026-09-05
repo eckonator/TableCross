@@ -6,6 +6,8 @@
 #[cfg(any(windows, test))]
 mod cf_html;
 mod dib;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(windows)]
@@ -49,7 +51,9 @@ pub fn platform() -> Option<Box<dyn SystemClipboard>> {
     return Some(Box::new(mac::MacClipboard::default()));
     #[cfg(windows)]
     return Some(Box::new(windows::WinClipboard));
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    return linux::LinuxClipboard::new().map(|c| Box::new(c) as Box<dyn SystemClipboard>);
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     None
 }
 

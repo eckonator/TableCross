@@ -13,7 +13,6 @@ mod logging;
 mod pages;
 mod settings;
 mod texts;
-#[cfg(any(target_os = "macos", windows))]
 mod tray;
 
 use eframe::egui;

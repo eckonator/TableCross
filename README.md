@@ -29,6 +29,12 @@ bar (macOS) or notification area (Windows). The interface is in English and Germ
 
 Local network only, no cloud, no account, no telemetry.
 
+On Linux, X11 sessions work directly. Wayland sessions use the desktop portals (GNOME 45 or newer,
+KDE Plasma 6.1 or newer): the system asks once for permission to control this computer, and again
+when TableCross starts capturing. While a Wayland computer is controlled from elsewhere, its own
+mouse cannot take control back (the system does not tell programs about input); use the keyboard
+shortcut on the controlling computer instead.
+
 ## Building
 
 Requires Rust 1.99 or newer.

@@ -30,3 +30,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.14", features = ["xinput", "xtest", "xfixes", "randr"] }
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "input_capture", "remote_desktop", "screencast"] }
+reis = { version = "0.7", features = ["tokio"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net"] }
