@@ -8,8 +8,11 @@ pub mod keymap {
     pub mod windows;
 }
 
+pub mod helper_protocol;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod mac_helper;
 mod virtual_input;
 #[cfg(windows)]
 mod windows;

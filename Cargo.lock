@@ -1202,6 +1202,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tablecross-helper"
+version = "0.0.1"
+dependencies = [
+ "core-foundation-sys",
+ "tc-input",
+]
+
+[[package]]
 name = "tc-core"
 version = "0.0.1"
 dependencies = [
@@ -1215,6 +1223,8 @@ name = "tc-input"
 version = "0.0.1"
 dependencies = [
  "core-foundation-sys",
+ "postcard",
+ "serde",
  "tc-core",
  "tc-protocol",
  "thiserror",

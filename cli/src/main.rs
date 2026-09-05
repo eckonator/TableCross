@@ -1,5 +1,7 @@
 //! Developer and test tool: pair and connect TableCross peers without a user interface.
 
+#[cfg(target_os = "macos")]
+mod helper;
 mod run;
 
 use std::collections::HashMap;
@@ -73,11 +75,28 @@ enum Command {
     },
     /// Show the screens as TableCross sees them
     Screens,
+    /// The macOS system helper that keeps the keyboard working during Secure Input
+    Helper {
+        #[command(subcommand)]
+        action: HelperAction,
+    },
     /// Share mouse and keyboard with the placed computers
     Run {
         #[arg(long, value_parser = parse_peer_addr)]
         addr: Vec<(String, SocketAddr)>,
     },
+}
+
+#[derive(Subcommand)]
+enum HelperAction {
+    /// Install or update (asks for the administrator password)
+    Install,
+    /// Remove (asks for the administrator password)
+    Uninstall,
+    /// Restart, e.g. after granting a permission
+    Restart,
+    /// Is it running, does it have its permission?
+    Status,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -131,6 +150,20 @@ async fn main() -> Result<()> {
         } => {
             return place(&dir, &identity, &store, peer, *side, *swap_cmd_ctrl);
         }
+        Command::Helper { action } => {
+            #[cfg(target_os = "macos")]
+            return match action {
+                HelperAction::Install => helper::install(),
+                HelperAction::Uninstall => helper::uninstall(),
+                HelperAction::Restart => helper::restart(),
+                HelperAction::Status => helper::status(),
+            };
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = action;
+                bail!("the system helper is only needed on macOS");
+            }
+        }
         Command::Screens => {
             let backend = tc_input::platform()?;
             for s in backend.inject.screens() {
@@ -160,7 +193,9 @@ async fn main() -> Result<()> {
     };
     let (node, events) = Node::start(config, identity, store).await?;
     let result = match cli.command {
-        Command::Id | Command::Place { .. } | Command::Screens => unreachable!("handled above"),
+        Command::Id | Command::Place { .. } | Command::Screens | Command::Helper { .. } => {
+            unreachable!("handled above")
+        }
         Command::Run { addr } => {
             add_addresses(&node, &addr)?;
             run::run(&node, events, &dir, backend.expect("created above")).await

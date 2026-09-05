@@ -154,6 +154,7 @@ pub async fn share(
     let started = Instant::now();
     let stamp = move || format!("{:>8.3}s", started.elapsed().as_secs_f64());
     let mut role = Role::Idle;
+    let mut problems: Vec<String> = Vec::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut screen_check = tokio::time::interval(Duration::from_secs(2));
     tokio::pin!(stop);
@@ -192,6 +193,11 @@ pub async fn share(
                 }
             }
             _ = screen_check.tick() => {
+                let health = capture.health();
+                for problem in health.problems.iter().filter(|p| !problems.contains(p)) {
+                    println!("{} warning: {problem}", stamp());
+                }
+                problems = health.problems;
                 let now = inject.screens();
                 if !now.is_empty() && now != screens {
                     println!("{} screens changed: {now:?}", stamp());

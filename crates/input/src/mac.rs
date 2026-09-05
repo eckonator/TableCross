@@ -22,6 +22,7 @@ use tc_core::{Captured, Point};
 use tc_protocol::{Message, MouseButton, PressedKeys, Screen};
 
 use crate::keymap::mac as keymap;
+use crate::mac_helper::HelperClient;
 use crate::{Backend, Capture, Handler, Health, Inject, InputError};
 
 type Ref = *mut c_void;
@@ -223,6 +224,8 @@ fn request_accessibility() -> bool {
 /// State shared by capture and injection.
 struct Shared {
     grabbed: AtomicBool,
+    /// The system helper, once capture runs.
+    helper: Mutex<Option<Arc<HelperClient>>>,
     tap: AtomicPtr<c_void>,
     run_loop: AtomicPtr<c_void>,
     inject: Mutex<InjectState>,
@@ -255,6 +258,7 @@ pub fn backend() -> Result<Backend, InputError> {
     }
     let shared = Arc::new(Shared {
         grabbed: AtomicBool::new(false),
+        helper: Mutex::new(None),
         tap: AtomicPtr::new(std::ptr::null_mut()),
         run_loop: AtomicPtr::new(std::ptr::null_mut()),
         inject: Mutex::new(InjectState {
@@ -290,7 +294,8 @@ pub struct MacCapture {
 }
 
 struct TapContext {
-    handler: Handler,
+    /// Shared with the helper client, which delivers keys while the keyboards are taken.
+    handler: Arc<Mutex<Handler>>,
     shared: Arc<Shared>,
     iso: bool,
 }
@@ -307,6 +312,16 @@ impl Capture for MacCapture {
             ));
         }
         let shared = self.shared.clone();
+        let handler = Arc::new(Mutex::new(handler));
+        {
+            let handler = handler.clone();
+            let helper = HelperClient::start(move |usage, down| {
+                if let Ok(mut handler) = handler.lock() {
+                    handler(Captured::Key { usage, down });
+                }
+            });
+            *self.shared.helper.lock().expect("helper lock") = Some(helper);
+        }
         let (ready_tx, ready_rx) = mpsc::channel();
         std::thread::Builder::new()
             .name("tablecross-capture".into())
@@ -396,6 +411,38 @@ impl Capture for MacCapture {
         if !capturing {
             problems.push("the event tap is not running".into());
         }
+        let helper = self
+            .shared
+            .helper
+            .lock()
+            .expect("helper lock")
+            .as_ref()
+            .map(|h| h.status());
+        match helper {
+            Some(status) if status.connected => {
+                if !status.access {
+                    problems.push(
+                        "the system helper lacks Input Monitoring (System Settings → Privacy & Security → \
+                         Input Monitoring → tablecross-helper)"
+                            .into(),
+                    );
+                }
+                if status.failed > 0 {
+                    problems.push(format!(
+                        "the system helper could not take {} keyboard(s); their keys also reach this Mac",
+                        status.failed
+                    ));
+                }
+            }
+            Some(status) if status.version_mismatch.is_some() => {
+                problems.push("the system helper is outdated; install it again".into())
+            }
+            _ => problems.push(
+                "the system helper is not running: while a program holds Secure Input, keys do not reach \
+                 the other computer"
+                    .into(),
+            ),
+        }
         Health { capturing, problems }
     }
 }
@@ -416,8 +463,11 @@ extern "C" fn tap_callback(_proxy: Ref, kind: u32, event: Ref, user_info: *mut c
     }
     let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut pass = true;
+        let Ok(mut handler) = context.handler.lock() else {
+            return true;
+        };
         for captured in translate(kind, event, context.iso) {
-            pass &= (context.handler)(captured);
+            pass &= handler(captured);
         }
         pass
     }))
@@ -507,6 +557,15 @@ fn translate(kind: u32, event: Ref, iso: bool) -> Vec<Captured> {
 
 pub struct MacInject {
     shared: Arc<Shared>,
+}
+
+impl MacInject {
+    /// While grabbed, the helper takes the keyboards, so keys arrive even under Secure Input.
+    fn set_seize(&self, seize: bool) {
+        if let Some(helper) = self.shared.helper.lock().expect("helper lock").as_ref() {
+            helper.set_seize(seize);
+        }
+    }
 }
 
 impl InjectState {
@@ -657,6 +716,7 @@ impl InjectState {
 impl Inject for MacInject {
     fn grab(&self, park: Point) -> Result<(), InputError> {
         self.shared.grabbed.store(true, Ordering::SeqCst);
+        self.set_seize(true);
         let mut state = self.shared.inject.lock().expect("inject lock");
         unsafe {
             CGWarpMouseCursorPosition(CGPoint { x: park.x, y: park.y });
@@ -671,6 +731,7 @@ impl Inject for MacInject {
 
     fn ungrab(&self, at: Point) -> Result<(), InputError> {
         self.shared.grabbed.store(false, Ordering::SeqCst);
+        self.set_seize(false);
         let mut state = self.shared.inject.lock().expect("inject lock");
         state.position = at;
         unsafe {
@@ -700,6 +761,7 @@ impl Inject for MacInject {
     }
 
     fn release_all(&self) {
+        self.set_seize(false);
         self.shared.inject.lock().expect("inject lock").release_all();
     }
 

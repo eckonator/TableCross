@@ -13,6 +13,8 @@ tc-protocol = { path = "../protocol" }
 tc-core = { path = "../core" }
 thiserror = "2"
 tracing = "0.1"
+serde.workspace = true
+postcard.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation-sys = "0.8"

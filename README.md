@@ -55,6 +55,17 @@ keyboard takes control back. Ctrl+Shift+Alt+Esc releases everything at once. `--
 `place` swaps ⌘ and Ctrl while controlling that computer. On macOS the terminal (later the app) needs
 the Accessibility permission.
 
+On macOS, typing on the other computer stops working while a program holds Secure Input (password
+fields, some terminals and password managers). The system helper reads the keyboard below that
+barrier and takes it away from the Mac only while the pointer is on the other computer:
+
+```sh
+tablecross-cli helper install   # asks for the administrator password
+tablecross-cli helper status    # then allow it under Privacy & Security → Input Monitoring
+```
+
+If TableCross stops or crashes, the helper gives the keyboard back within a second.
+
 Without network discovery (`--no-discovery`) pass the address of the other computer with `--addr IP:PORT`.
 Traffic uses UDP port 24800; allow it in the firewall for private networks.
 
