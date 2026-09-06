@@ -2,11 +2,15 @@
 
 use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyObject;
+use std::path::PathBuf;
+
+use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardTypeHTML, NSPasteboardTypePNG,
-    NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeTIFF,
+    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardItem, NSPasteboardTypeFileURL,
+    NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeTIFF,
+    NSPasteboardWriting,
 };
-use objc2_foundation::{NSData, NSDictionary, NSString};
+use objc2_foundation::{NSArray, NSData, NSDictionary, NSString, NSURL};
 
 use crate::{ClipContent, ClipError, Read, SystemClipboard};
 
@@ -50,6 +54,23 @@ impl SystemClipboard for MacClipboard {
                 .unwrap_or_default();
             if types.iter().any(|t| PRIVATE_TYPES.contains(&t.as_str())) {
                 return Ok(Read::Concealed);
+            }
+            if types.iter().any(|t| t == "public.file-url") {
+                let files: Vec<PathBuf> = board
+                    .pasteboardItems()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| unsafe { item.stringForType(NSPasteboardTypeFileURL) })
+                            .filter_map(|url| NSURL::URLWithString(&url))
+                            .filter_map(|url| url.path())
+                            .map(|path| PathBuf::from(path.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !files.is_empty() {
+                    return Ok(Read::Files(files));
+                }
             }
             let data = |kind: &NSString| board.dataForType(kind).map(|d| d.to_vec());
             let png = unsafe {
@@ -97,6 +118,34 @@ impl SystemClipboard for MacClipboard {
             Ok(board.changeCount() as u64)
         })
     }
+
+    fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
+        self.write_files_inner(files)
+    }
+}
+
+impl MacClipboard {
+    fn write_files_inner(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
+        autoreleasepool(|_| {
+            let board = self.board();
+            board.clearContents();
+            let items: Vec<objc2::rc::Retained<ProtocolObject<dyn NSPasteboardWriting>>> = files
+                .iter()
+                .map(|path| {
+                    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+                    let item = NSPasteboardItem::new();
+                    if let Some(text) = url.absoluteString() {
+                        unsafe { item.setString_forType(&text, NSPasteboardTypeFileURL) };
+                    }
+                    ProtocolObject::from_retained(item)
+                })
+                .collect();
+            if !board.writeObjects(&NSArray::from_retained_slice(&items)) {
+                return Err(ClipError::System("the pasteboard refused the files".into()));
+            }
+            Ok(board.changeCount() as u64)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -121,6 +170,10 @@ mod tests {
         assert_eq!(clip.read().unwrap(), Read::Content(content));
         clip.board().clearContents();
         assert_eq!(clip.read().unwrap(), Read::Empty);
+
+        let files = vec![PathBuf::from("/tmp/notes.txt"), PathBuf::from("/tmp/a folder")];
+        clip.write_files(&files).unwrap();
+        assert_eq!(clip.read().unwrap(), Read::Files(files));
     }
 
     fn tiny_png() -> Vec<u8> {

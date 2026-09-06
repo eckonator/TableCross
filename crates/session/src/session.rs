@@ -19,7 +19,9 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::clip::{self, ClipAction, ClipSync, Clipboard, Skip};
+use crate::files::{self, Listing};
 use crate::layout_file;
+use crate::transfer::{self, Cancels, Progress, TransferState, TransferView};
 
 const ESCAPE: u16 = 0x29;
 const ARROWS: [(u16, Side); 4] = [
@@ -79,6 +81,7 @@ pub enum Command {
     ReleaseAll,
     /// Try to start input capture again (after granting a permission).
     RetryInput,
+    CancelTransfer(u64),
     Shutdown,
 }
 
@@ -105,6 +108,9 @@ pub enum Notice {
     ClipboardSkipped(Skip),
     /// Clipboard content from this peer was taken over.
     ClipboardReceived(String),
+    /// Files from this peer arrived in the folder; they are on the clipboard as well.
+    FilesReceived(String, u64, PathBuf),
+    TransferFailed(String, String),
 }
 
 impl std::fmt::Display for Notice {
@@ -134,6 +140,10 @@ impl std::fmt::Display for Notice {
             Notice::ClipboardSkipped(Skip::Concealed) => write!(f, "clipboard not shared: marked as private"),
             Notice::ClipboardSkipped(Skip::TooLarge(n)) => write!(f, "clipboard not shared: too large ({n} bytes)"),
             Notice::ClipboardReceived(n) => write!(f, "clipboard taken over from {n}"),
+            Notice::FilesReceived(n, count, dir) => {
+                write!(f, "{count} file(s) from {n} in {}", dir.display())
+            }
+            Notice::TransferFailed(n, e) => write!(f, "file transfer with {n} failed: {e}"),
         }
     }
 }
@@ -175,6 +185,10 @@ pub struct Status {
     pub screens: Vec<Screen>,
     pub notices: VecDeque<(SystemTime, Notice)>,
     pub layout: LayoutFile,
+    /// File transfers, newest last.
+    pub transfers: Vec<TransferView>,
+    /// Files copied on another computer that come over when the pointer arrives here.
+    pub files_waiting: Option<String>,
 }
 
 /// Talks to a running session; cheap to clone.
@@ -207,6 +221,21 @@ enum Internal {
     PairDone(Result<String, PairError>),
     ClipRead(Option<tc_clipboard::Read>),
     ClipWritten(Fingerprint, Option<u64>),
+    FilesListed(Result<Listing, String>),
+}
+
+/// Copied files and running transfers.
+#[derive(Default)]
+struct FileState {
+    /// Our copied files, if they are the newest content anywhere.
+    local: Option<(u64, Arc<Listing>)>,
+    /// Files waiting on a peer: peer, id, label, count, size.
+    remote: Option<(Fingerprint, u64, String, u64, u64)>,
+    requested: Option<u64>,
+    /// What we put on the clipboard after a transfer (not announced again).
+    written: Vec<PathBuf>,
+    cancels: Cancels,
+    counter: u64,
 }
 
 struct Shared {
@@ -220,6 +249,7 @@ struct Shared {
     dir: PathBuf,
     clipboard: Option<Clipboard>,
     clip: Mutex<ClipSync>,
+    files: Mutex<FileState>,
 }
 
 impl Shared {
@@ -455,6 +485,7 @@ impl Session {
             dir,
             clipboard,
             clip: Mutex::new(ClipSync::default()),
+            files: Mutex::new(FileState::default()),
         });
         shared.reload_layout();
         shared.refresh();
@@ -506,6 +537,9 @@ async fn run(
             command = commands.recv() => {
                 match command {
                     None | Some(Command::Shutdown) => break,
+                    Some(Command::CancelTransfer(id)) => {
+                        shared.files.lock().expect("files lock").cancels.cancel(id);
+                    }
                     Some(Command::RetryInput) => {
                         if !matches!(shared.status.lock().expect("status lock").input, InputState::Running) {
                             start_capture(&shared, &mut capture);
@@ -517,6 +551,7 @@ async fn run(
             Some(message) = internal.recv() => match message {
                 Internal::Notice(notice) => shared.notice(notice),
                 Internal::ClipRead(read) => clip_read(&shared, read),
+                Internal::FilesListed(listing) => files_listed(&shared, listing),
                 Internal::ClipWritten(from, count) => {
                     shared.clip.lock().expect("clip lock").write_done(count);
                     if count.is_some() {
@@ -537,6 +572,11 @@ async fn run(
                 shared.execute(actions);
                 let now = shared.engine.lock().expect("engine lock").role();
                 if now != role {
+                    let arrived = matches!(now, Role::ControlledBy(_))
+                        || (now == Role::Idle && matches!(role, Role::Controlling(_)));
+                    if arrived {
+                        request_files(&shared);
+                    }
                     if !matches!(now, Role::Controlling(_)) {
                         let request = shared.clip.lock().expect("clip lock").became_active();
                         if let Some((peer, message)) = request {
@@ -590,6 +630,180 @@ async fn run(
     shared.node.shutdown().await;
 }
 
+fn files_offer(id: u64, listing: &Listing) -> Message {
+    Message::FilesOffer {
+        id,
+        names: listing.shown_names(),
+        count: listing.count(),
+        size: listing.size(),
+    }
+}
+
+/// Files were copied here: announce them to everyone connected.
+fn files_listed(shared: &Arc<Shared>, listing: Result<Listing, String>) {
+    let listing = match listing {
+        Ok(l) if !l.entries.is_empty() => l,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::warn!("cannot read the copied files: {e}");
+            return;
+        }
+    };
+    let offer = {
+        let mut state = shared.files.lock().expect("files lock");
+        state.counter += 1;
+        let id = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64)
+            ^ state.counter.rotate_left(40);
+        let offer = files_offer(id, &listing);
+        state.local = Some((id, Arc::new(listing)));
+        state.remote = None;
+        offer
+    };
+    shared.status.lock().expect("status lock").files_waiting = None;
+    for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
+        shared.node.send(&peer.peer.fingerprint, offer.clone());
+    }
+}
+
+/// Asks for files waiting on a peer (the pointer just arrived here).
+fn request_files(shared: &Arc<Shared>) {
+    let mut state = shared.files.lock().expect("files lock");
+    let Some((peer, id, ..)) = state.remote else { return };
+    if state.requested == Some(id) {
+        return;
+    }
+    state.requested = Some(id);
+    drop(state);
+    shared.node.send(&peer, Message::FilesRequest { id });
+}
+
+fn update_transfer(shared: &Shared, id: u64, update: impl FnOnce(&mut TransferView)) {
+    let mut status = shared.status.lock().expect("status lock");
+    if let Some(t) = status.transfers.iter_mut().find(|t| t.id == id) {
+        update(t);
+    }
+    drop(status);
+    shared.changed();
+}
+
+fn add_transfer(shared: &Shared, view: TransferView) {
+    let mut status = shared.status.lock().expect("status lock");
+    status.transfers.retain(|t| t.id != view.id);
+    status.transfers.push(view);
+    if status.transfers.len() > 10 {
+        status.transfers.remove(0);
+    }
+}
+
+fn send_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64) {
+    let (listing, cancel) = {
+        let mut state = shared.files.lock().expect("files lock");
+        match &state.local {
+            Some((ours, listing)) if *ours == id => {
+                let listing = listing.clone();
+                (listing, state.cancels.add(id))
+            }
+            _ => return,
+        }
+    };
+    add_transfer(
+        shared,
+        TransferView {
+            id,
+            peer: shared.name_of(&peer.to_string()),
+            incoming: false,
+            label: listing.shown_names().join(", "),
+            count: listing.count(),
+            done: 0,
+            total: listing.size(),
+            state: TransferState::Running,
+        },
+    );
+    let shared = shared.clone();
+    tokio::spawn(async move {
+        let progress_shared = shared.clone();
+        let mut progress = Progress::new(move |done| update_transfer(&progress_shared, id, |t| t.done = done));
+        let result = transfer::send(&shared.node, &peer, id, &listing, &cancel, &mut progress).await;
+        let cancelled = cancel.load(std::sync::atomic::Ordering::SeqCst);
+        shared.files.lock().expect("files lock").cancels.finished(id);
+        update_transfer(&shared, id, |t| {
+            t.state = match &result {
+                Ok(()) => TransferState::Done(None),
+                Err(_) if cancelled => TransferState::Cancelled,
+                Err(e) => TransferState::Failed(e.clone()),
+            }
+        });
+    });
+}
+
+fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_net::InStream) {
+    let (label, count, total, cancel) = {
+        let mut state = shared.files.lock().expect("files lock");
+        match &state.remote {
+            Some((from, newest, label, count, size)) if *from == peer && *newest == id => {
+                let (label, count, size) = (label.clone(), *count, *size);
+                state.remote = None;
+                (label, count, size, state.cancels.add(id))
+            }
+            _ => {
+                drop(state);
+                stream.cancel();
+                return;
+            }
+        }
+    };
+    shared.status.lock().expect("status lock").files_waiting = None;
+    let peer_name = shared.name_of(&peer.to_string());
+    add_transfer(
+        shared,
+        TransferView {
+            id,
+            peer: peer_name.clone(),
+            incoming: true,
+            label,
+            count,
+            done: 0,
+            total,
+            state: TransferState::Running,
+        },
+    );
+    let shared = shared.clone();
+    tokio::spawn(async move {
+        let target = files::download_dir();
+        let progress_shared = shared.clone();
+        let mut progress = Progress::new(move |done| update_transfer(&progress_shared, id, |t| t.done = done));
+        let result = match tokio::fs::create_dir_all(&target).await {
+            Ok(()) => transfer::receive(stream, id, &target, &cancel, &mut progress).await,
+            Err(e) => Err(e.to_string()),
+        };
+        let cancelled = cancel.load(std::sync::atomic::Ordering::SeqCst);
+        shared.files.lock().expect("files lock").cancels.finished(id);
+        match result {
+            Ok(placed) => {
+                update_transfer(&shared, id, |t| t.state = TransferState::Done(Some(target.clone())));
+                shared.files.lock().expect("files lock").written = placed.clone();
+                if let Some(clipboard) = &shared.clipboard {
+                    let system = clipboard.system.clone();
+                    let written = placed.clone();
+                    let count = tokio::task::spawn_blocking(move || system.write_files(&written).ok())
+                        .await
+                        .ok()
+                        .flatten();
+                    shared.clip.lock().expect("clip lock").write_done(count);
+                }
+                shared.notice(Notice::FilesReceived(peer_name, count, target));
+            }
+            Err(_) if cancelled => update_transfer(&shared, id, |t| t.state = TransferState::Cancelled),
+            Err(e) => {
+                update_transfer(&shared, id, |t| t.state = TransferState::Failed(e.clone()));
+                shared.notice(Notice::TransferFailed(peer_name, e));
+            }
+        }
+    });
+}
+
 /// Writes content from a peer into the local clipboard (on a blocking thread).
 fn clip_write(shared: &Arc<Shared>, peer: Fingerprint, action: Option<ClipAction>) {
     if let (Some(ClipAction::Write { content, .. }), Some(clipboard)) = (action, &shared.clipboard) {
@@ -626,6 +840,19 @@ fn clip_read(shared: &Arc<Shared>, read: Option<tc_clipboard::Read>) {
         sync.read_failed();
         return;
     };
+    if let tc_clipboard::Read::Files(paths) = &read {
+        sync.files_copied();
+        drop(sync);
+        if shared.files.lock().expect("files lock").written == *paths {
+            return; // What a transfer just put there
+        }
+        let paths = paths.clone();
+        let internal = shared.internal.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = internal.send(Internal::FilesListed(files::list(&paths).map_err(|e| e.to_string())));
+        });
+        return;
+    }
     let (announcement, skip) = sync.read_done(read, clipboard.max_size);
     drop(sync);
     if let Some(skip) = skip {
@@ -646,6 +873,16 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             let offer = shared.clip.lock().expect("clip lock").for_new_peer();
             if let Some((offer, eager)) = offer {
                 clip::announce(&shared.node, &peer, &offer, eager.as_ref());
+            }
+            let files_offer = shared
+                .files
+                .lock()
+                .expect("files lock")
+                .local
+                .as_ref()
+                .map(|(id, l)| files_offer(*id, l));
+            if let Some(offer) = files_offer {
+                shared.node.send(&peer, offer);
             }
             shared
                 .engine
@@ -670,6 +907,8 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             peer,
             message: Message::ClipboardOffer { id, size, .. },
         } => {
+            shared.files.lock().expect("files lock").remote = None;
+            shared.status.lock().expect("status lock").files_waiting = None;
             let active = !matches!(shared.engine.lock().expect("engine lock").role(), Role::Controlling(_));
             let mut sync = shared.clip.lock().expect("clip lock");
             let request = sync.offered(peer, id, size, active);
@@ -681,6 +920,34 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 shared.node.send(&peer, request);
             }
             clip_write(shared, peer, early);
+        }
+        Event::Message {
+            peer,
+            message: Message::FilesOffer { id, names, count, size },
+        } => {
+            shared.clip.lock().expect("clip lock").clear_remote();
+            let label = names.join(", ");
+            {
+                let mut state = shared.files.lock().expect("files lock");
+                state.local = None;
+                state.remote = Some((peer, id, label.clone(), count, size));
+                state.requested = None;
+            }
+            shared.status.lock().expect("status lock").files_waiting = Some(label);
+            if matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_)) {
+                request_files(shared);
+            }
+        }
+        Event::Message {
+            peer,
+            message: Message::FilesRequest { id },
+        } => send_files(shared, peer, id),
+        Event::Stream { peer, header, stream } => {
+            let Some(stream) = stream.take() else { return };
+            match files::parse_header(&header) {
+                Some(id) => receive_files(shared, peer, id, stream),
+                None => stream.cancel(),
+            }
         }
         Event::Message {
             peer,
@@ -789,7 +1056,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             }
             shared.notice(Notice::EmergencyRelease);
         }
-        Command::RetryInput | Command::Shutdown => unreachable!("handled in the loop"),
+        Command::RetryInput | Command::Shutdown | Command::CancelTransfer(_) => unreachable!("handled in the loop"),
     }
     shared.refresh();
     shared.changed();

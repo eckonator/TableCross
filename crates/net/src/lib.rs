@@ -25,8 +25,8 @@ use std::net::SocketAddr;
 
 pub use discovery::{Discovered, SERVICE_TYPE};
 pub use identity::{Fingerprint, Identity, IdentityError};
-pub use link::LinkInfo;
-pub use node::{Disconnect, Event, Node, NodeConfig, NodeError, PairError, PeerStatus, Refusal};
+pub use link::{InStream, LinkInfo, OutStream};
+pub use node::{Disconnect, Event, Node, NodeConfig, NodeError, PairError, PeerStatus, Refusal, StreamSlot};
 pub use pairing::{MAX_ATTEMPTS, PAIRING_WINDOW, PairingCode};
 pub use store::{PairedPeer, PeerStore};
 

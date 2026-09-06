@@ -82,5 +82,28 @@ pub fn status() -> Status {
         ]
         .into(),
         layout: Default::default(),
+        transfers: vec![
+            tc_session::TransferView {
+                id: 1,
+                peer: "Office-PC".into(),
+                incoming: true,
+                label: "Fotos, Notizen.txt".into(),
+                count: 1240,
+                done: 1_310_000_000,
+                total: 2_050_000_000,
+                state: tc_session::TransferState::Running,
+            },
+            tc_session::TransferView {
+                id: 2,
+                peer: "Office-PC".into(),
+                incoming: false,
+                label: "Angebot.pdf".into(),
+                count: 1,
+                done: 350_000,
+                total: 350_000,
+                state: tc_session::TransferState::Done(Some("/Users/demo/Downloads/TableCross".into())),
+            },
+        ],
+        files_waiting: None,
     }
 }

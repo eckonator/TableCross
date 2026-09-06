@@ -242,6 +242,69 @@ pub(crate) enum LinkEnd {
 pub(crate) trait LinkHost: Send + Sync + 'static {
     fn deliver(&self, peer: Fingerprint, message: Message);
     fn deliver_blob(&self, peer: Fingerprint, header: Vec<u8>, data: Vec<u8>);
+    fn deliver_stream(&self, peer: Fingerprint, header: Vec<u8>, stream: InStream);
+}
+
+/// Data length that marks a stream without a fixed size (files): read until it ends.
+const STREAMED: u64 = u64::MAX;
+/// Application code when a stream is cancelled.
+const CANCELLED: u32 = 1;
+
+/// Bulk data of unknown length from the peer (a file transfer). Dropping it without reading to the
+/// end cancels the transfer on the sender's side.
+pub struct InStream(RecvStream);
+
+impl InStream {
+    /// Reads some bytes; 0 at the end.
+    pub async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.0.read(buf).await {
+            Ok(Some(n)) => Ok(n),
+            Ok(None) => Ok(0),
+            Err(e) => Err(std::io::Error::other(e)),
+        }
+    }
+
+    pub fn cancel(mut self) {
+        let _ = self.0.stop(quinn::VarInt::from_u32(CANCELLED));
+    }
+}
+
+/// Bulk data of unknown length to the peer.
+pub struct OutStream(SendStream);
+
+impl OutStream {
+    pub async fn write_all(&mut self, data: &[u8]) -> std::io::Result<()> {
+        self.0.write_all(data).await.map_err(std::io::Error::other)
+    }
+
+    /// Ends the stream and waits until the peer has everything.
+    pub async fn finish(mut self) -> std::io::Result<()> {
+        self.0.finish().map_err(std::io::Error::other)?;
+        let _ = self.0.stopped().await;
+        Ok(())
+    }
+
+    pub fn cancel(mut self) {
+        let _ = self.0.reset(quinn::VarInt::from_u32(CANCELLED));
+    }
+}
+
+pub(crate) async fn open_stream(connection: &Connection, header: &[u8]) -> Result<OutStream, WireError> {
+    if header.len() > MAX_BLOB_HEADER {
+        return Err(WireError::TooLong);
+    }
+    let mut send = connection.open_uni().await.map_err(|_| WireError::Closed)?;
+    let mut prefix = Vec::with_capacity(12 + header.len());
+    prefix.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    prefix.extend_from_slice(header);
+    prefix.extend_from_slice(&STREAMED.to_le_bytes());
+    send.write_all(&prefix).await.map_err(|_| WireError::Closed)?;
+    Ok(OutStream(send))
+}
+
+enum UniStream {
+    Blob(Vec<u8>, Vec<u8>),
+    Stream(Vec<u8>, RecvStream),
 }
 
 /// Largest header of a blob.
@@ -267,7 +330,7 @@ pub(crate) async fn write_blob(connection: &Connection, header: &[u8], data: &[u
     Ok(())
 }
 
-async fn read_blob(recv: &mut RecvStream) -> Result<(Vec<u8>, Vec<u8>), WireError> {
+async fn read_blob(mut recv: RecvStream) -> Result<UniStream, WireError> {
     let mut len = [0; 4];
     recv.read_exact(&mut len).await.map_err(|_| WireError::Closed)?;
     let header_len = u32::from_le_bytes(len) as usize;
@@ -278,6 +341,9 @@ async fn read_blob(recv: &mut RecvStream) -> Result<(Vec<u8>, Vec<u8>), WireErro
     recv.read_exact(&mut header).await.map_err(|_| WireError::Closed)?;
     let mut len = [0; 8];
     recv.read_exact(&mut len).await.map_err(|_| WireError::Closed)?;
+    if u64::from_le_bytes(len) == STREAMED {
+        return Ok(UniStream::Stream(header, recv));
+    }
     let data_len = usize::try_from(u64::from_le_bytes(len)).map_err(|_| WireError::TooLong)?;
     if data_len > MAX_BLOB {
         return Err(WireError::TooLong);
@@ -292,7 +358,7 @@ async fn read_blob(recv: &mut RecvStream) -> Result<(Vec<u8>, Vec<u8>), WireErro
             _ => return Err(WireError::Closed),
         }
     }
-    Ok((header, data))
+    Ok(UniStream::Blob(header, data))
 }
 
 /// Runs a link until it ends. `outgoing` carries stream messages from the node.
@@ -369,15 +435,16 @@ pub(crate) async fn run(
     let blob_host = host.clone();
     let blob_stats = stats.clone();
     let blob_reader = tokio::spawn(async move {
-        while let Ok(mut recv) = conn.accept_uni().await {
+        while let Ok(recv) = conn.accept_uni().await {
             let host = blob_host.clone();
             let stats = blob_stats.clone();
             tokio::spawn(async move {
-                match read_blob(&mut recv).await {
-                    Ok((header, data)) => {
+                match read_blob(recv).await {
+                    Ok(UniStream::Blob(header, data)) => {
                         stats.lock().expect("stats lock").last_seen = Instant::now();
                         host.deliver_blob(peer, header, data);
                     }
+                    Ok(UniStream::Stream(header, recv)) => host.deliver_stream(peer, header, InStream(recv)),
                     Err(e) => tracing::debug!("dropping an incomplete blob: {e}"),
                 }
             });

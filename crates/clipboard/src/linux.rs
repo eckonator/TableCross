@@ -6,6 +6,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -82,10 +83,11 @@ fn image_of(png_bytes: &[u8]) -> Option<ImageData<'static>> {
 }
 
 impl State {
-    fn texts(&mut self) -> (Option<String>, Option<String>) {
+    fn texts(&mut self) -> (Option<String>, Option<String>, Option<Vec<PathBuf>>) {
         let text = self.clipboard.get_text().ok();
         let html = self.clipboard.get().html().ok();
-        (text, html)
+        let files = self.clipboard.get().file_list().ok().filter(|f| !f.is_empty());
+        (text, html, files)
     }
 }
 
@@ -112,7 +114,10 @@ impl SystemClipboard for LinuxClipboard {
 
     fn read(&self) -> Result<Read, ClipError> {
         let mut state = self.state.lock().expect("clipboard lock");
-        let (text, html) = state.texts();
+        let (text, html, files) = state.texts();
+        if let Some(files) = files {
+            return Ok(Read::Files(files));
+        }
         let png = state.clipboard.get_image().ok().and_then(|i| png_of(&i));
         let content = ClipContent {
             text,
@@ -146,5 +151,16 @@ impl SystemClipboard for LinuxClipboard {
         state.image_checked = None;
         drop(state);
         Ok(self.change_count().max(count))
+    }
+
+    fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
+        self.state
+            .lock()
+            .expect("clipboard lock")
+            .clipboard
+            .set()
+            .file_list(files)
+            .map_err(|e| ClipError::System(e.to_string()))?;
+        Ok(self.change_count())
     }
 }

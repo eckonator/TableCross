@@ -548,7 +548,7 @@ async fn run(node: &Node, mut events: UnboundedReceiver<Event>, ping: bool) -> R
                         println!("{} refused {who}: {}", stamp(), refusal_text(&reason));
                     }
                     Event::Woke { slept } => println!("{} woke up after about {} s, reconnecting", stamp(), slept.as_secs()),
-                    Event::PairingFailed { .. } | Event::PairingClosed | Event::Blob { .. } => {}
+                    Event::PairingFailed { .. } | Event::PairingClosed | Event::Blob { .. } | Event::Stream { .. } => {}
                 }
             }
             _ = tick.tick(), if ping => {

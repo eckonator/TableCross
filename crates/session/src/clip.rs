@@ -116,6 +116,7 @@ impl ClipSync {
             Read::Content(c) => c,
             Read::Empty => return (None, None),
             Read::Concealed => return (None, Some(Skip::Concealed)),
+            Read::Files(_) => return (None, None),
         };
         let size = content.size();
         if size > max_size {
@@ -140,6 +141,18 @@ impl ClipSync {
 
     pub fn read_failed(&mut self) {
         self.busy = false;
+    }
+
+    /// Files were copied: they are the newest content now (handled by the file transfers).
+    pub fn files_copied(&mut self) {
+        self.busy = false;
+        self.local = None;
+        self.remote = None;
+    }
+
+    /// A peer announced files: its earlier clipboard content is no longer the newest.
+    pub fn clear_remote(&mut self) {
+        self.remote = None;
     }
 
     /// What a peer that just connected should get.

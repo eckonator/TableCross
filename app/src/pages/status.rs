@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, RichText};
 use tc_input::Problem;
-use tc_session::{Command, InputState, Status};
+use tc_session::{Command, InputState, Status, TransferState};
 
 use super::{card, ok_color, warn_color};
 use crate::app::App;
@@ -93,6 +93,10 @@ impl App {
                 ui.add_space(4.0);
             }
         });
+        if !status.transfers.is_empty() || status.files_waiting.is_some() {
+            ui.add_space(8.0);
+            card(ui, tr("Files"), |ui| self.transfers(ui, &status));
+        }
         ui.add_space(8.0);
         card(ui, tr("Recent messages"), |ui| {
             if status.notices.is_empty() {
@@ -121,6 +125,60 @@ impl App {
                 }
             });
         });
+    }
+
+    fn transfers(&mut self, ui: &mut egui::Ui, status: &Status) {
+        if let Some(waiting) = &status.files_waiting {
+            ui.label(trf(
+                "Copied on another computer: {}. They come over when the pointer arrives here.",
+                &[waiting],
+            ));
+            ui.add_space(4.0);
+        }
+        for t in status.transfers.iter().rev() {
+            let direction = if t.incoming {
+                trf("from {}", &[&t.peer])
+            } else {
+                trf("to {}", &[&t.peer])
+            };
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&t.label).strong());
+                ui.label(RichText::new(direction).weak());
+            });
+            let fraction = if t.total == 0 {
+                1.0
+            } else {
+                t.done as f32 / t.total as f32
+            };
+            let size = format!("{} / {}", texts::bytes(t.done), texts::bytes(t.total));
+            match &t.state {
+                TransferState::Running => {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::ProgressBar::new(fraction).desired_width(260.0).text(size));
+                        if ui.button(tr("Cancel")).clicked() {
+                            self.send(Command::CancelTransfer(t.id));
+                        }
+                    });
+                }
+                TransferState::Done(folder) => {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(ok_color(ui), trf("{} file(s), done", &[&t.count]));
+                        if let Some(folder) = folder
+                            && ui.small_button(tr("Open folder")).clicked()
+                        {
+                            super::open(&folder.display().to_string());
+                        }
+                    });
+                }
+                TransferState::Cancelled => {
+                    ui.label(RichText::new(tr("cancelled")).weak());
+                }
+                TransferState::Failed(e) => {
+                    ui.colored_label(warn_color(ui), trf("failed: {}", &[e]));
+                }
+            }
+            ui.add_space(4.0);
+        }
     }
 
     /// Problems at the top, each with what can be done.

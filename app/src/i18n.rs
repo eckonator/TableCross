@@ -286,6 +286,17 @@ fn de(en: &str) -> Option<&'static str> {
         "{} removed the pairing" => "{} hat die Kopplung entfernt",
         "{} s ago" => "vor {} s",
         "{} was refused: {}" => "{} wurde abgewiesen: {}",
+        "Copied on another computer: {}. They come over when the pointer arrives here." => {
+            "Auf einem anderen Rechner kopiert: {}. Die Dateien kommen, sobald der Zeiger hierher wechselt."
+        }
+        "from {}" => "von {}",
+        "to {}" => "an {}",
+        "{} file(s), done" => "{} Datei(en), fertig",
+        "Open folder" => "Ordner öffnen",
+        "cancelled" => "abgebrochen",
+        "failed: {}" => "fehlgeschlagen: {}",
+        "{} files from {} are in {} and on the clipboard" => "{} Dateien von {} liegen in {} und in der Zwischenablage",
+        "File transfer with {} failed: {}" => "Dateiübertragung mit {} fehlgeschlagen: {}",
         _ => return None,
     })
 }

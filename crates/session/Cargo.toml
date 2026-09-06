@@ -15,6 +15,9 @@ tc-input = { path = "../input" }
 tc-clipboard = { path = "../clipboard" }
 tc-net = { path = "../net" }
 anyhow = "1"
+postcard.workspace = true
+serde.workspace = true
+unicode-normalization = "0.1"
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
 tracing = "0.1"

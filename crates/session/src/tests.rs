@@ -309,3 +309,104 @@ async fn clipboard_follows_in_both_directions() {
     a.session.send(Command::Shutdown);
     b.session.send(Command::Shutdown);
 }
+
+/// Both file tests use `TC_DOWNLOAD_DIR`; they must not run at the same time.
+static DOWNLOAD_DIR: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[tokio::test(flavor = "multi_thread")]
+async fn copied_files_arrive_when_the_pointer_does() {
+    let _guard = DOWNLOAD_DIR.lock().await;
+    let source = dir("files-source");
+    std::fs::create_dir_all(source.join("Fotos/Urlaub")).unwrap();
+    let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 249) as u8).collect();
+    std::fs::write(source.join("Fotos/Urlaub/big.bin"), &big).unwrap();
+    std::fs::write(source.join("Fotos/a.txt"), "Grüße").unwrap();
+    std::fs::write(source.join("notes.txt"), "hello").unwrap();
+    let target = dir("files-target");
+    // Only this test uses the variable
+    unsafe { std::env::set_var("TC_DOWNLOAD_DIR", &target) };
+
+    let (a, b) = paired_pair("files-a", "files-b").await;
+    a.clipboard
+        .set(Read::Files(vec![source.join("Fotos"), source.join("notes.txt")]));
+    until("Beta knows about the files", || {
+        b.session.status().files_waiting.is_some()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !target.join("Fotos").exists(),
+        "nothing moves before the pointer arrives"
+    );
+
+    a.session.send(Command::SwitchTo(Some(b.node.fingerprint())));
+    until("files arrived", || {
+        b.session
+            .status()
+            .notices
+            .iter()
+            .any(|(_, n)| matches!(n, Notice::FilesReceived(..)))
+    })
+    .await;
+    assert_eq!(std::fs::read(target.join("Fotos/Urlaub/big.bin")).unwrap(), big);
+    assert_eq!(std::fs::read_to_string(target.join("Fotos/a.txt")).unwrap(), "Grüße");
+    assert_eq!(std::fs::read_to_string(target.join("notes.txt")).unwrap(), "hello");
+    assert_eq!(
+        b.clipboard.get(),
+        Read::Files(vec![target.join("Fotos"), target.join("notes.txt")])
+    );
+    // No part folder left, and the files are not announced back
+    let leftovers: Vec<_> = std::fs::read_dir(&target)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".tablecross-part"))
+        .collect();
+    assert!(leftovers.is_empty());
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert!(a.session.status().files_waiting.is_none());
+    let transfers = b.session.status().transfers;
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].done, transfers[0].total);
+    a.session.send(Command::Shutdown);
+    b.session.send(Command::Shutdown);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_transfer_leaves_nothing_behind() {
+    let _guard = DOWNLOAD_DIR.lock().await;
+    let source = dir("cancel-source");
+    std::fs::write(source.join("huge.bin"), vec![1u8; 300_000_000]).unwrap();
+    let target = dir("cancel-target");
+    unsafe { std::env::set_var("TC_DOWNLOAD_DIR", &target) };
+    let (a, b) = paired_pair("cancel-a", "cancel-b").await;
+    a.clipboard.set(Read::Files(vec![source.join("huge.bin")]));
+    until("Beta knows about the file", || {
+        b.session.status().files_waiting.is_some()
+    })
+    .await;
+    a.session.send(Command::SwitchTo(Some(b.node.fingerprint())));
+    until("transfer running", || {
+        b.session.status().transfers.first().is_some_and(|t| t.done > 0)
+    })
+    .await;
+    let id = b.session.status().transfers[0].id;
+    b.session.send(Command::CancelTransfer(id));
+    until("cancelled", || {
+        b.session.status().transfers[0].state == crate::TransferState::Cancelled
+    })
+    .await;
+    until("sender noticed", || {
+        a.session
+            .status()
+            .transfers
+            .first()
+            .is_some_and(|t| t.state != crate::TransferState::Running)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let left: Vec<_> = std::fs::read_dir(&target).unwrap().filter_map(Result::ok).collect();
+    assert!(left.is_empty(), "{left:?}");
+    let _ = std::fs::remove_dir_all(&source);
+    a.session.send(Command::Shutdown);
+    b.session.send(Command::Shutdown);
+}

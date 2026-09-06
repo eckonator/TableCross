@@ -162,6 +162,54 @@ async fn pairing_connects_and_messages_flow() {
     assert_eq!(header, b"clip");
     assert_eq!(got, data);
 
+    // A stream of unknown length, read piece by piece
+    let mut out = a.node.open_stream(&b.fp(), b"files").await.unwrap();
+    let send_task = tokio::spawn(async move {
+        for _ in 0..50 {
+            out.write_all(&[7u8; 100_000]).await.unwrap();
+        }
+        out.finish().await.unwrap();
+    });
+    let slot = b
+        .expect(SHORT, |e| match e {
+            Event::Stream { header, stream, .. } if header == b"files" => Some(stream.clone()),
+            _ => None,
+        })
+        .await;
+    let mut stream = slot.take().unwrap();
+    assert!(slot.take().is_none(), "taken once");
+    let mut total = 0;
+    let mut buf = vec![0; 65536];
+    loop {
+        let n = stream.read(&mut buf).await.unwrap();
+        if n == 0 {
+            break;
+        }
+        assert!(buf[..n].iter().all(|b| *b == 7));
+        total += n;
+    }
+    assert_eq!(total, 5_000_000);
+    send_task.await.unwrap();
+
+    // Cancelled by the receiver: the sender notices
+    let mut out = a.node.open_stream(&b.fp(), b"cancel").await.unwrap();
+    out.write_all(&[1u8; 10]).await.unwrap();
+    let slot = b
+        .expect(SHORT, |e| match e {
+            Event::Stream { header, stream, .. } if header == b"cancel" => Some(stream.clone()),
+            _ => None,
+        })
+        .await;
+    slot.take().unwrap().cancel();
+    let mut failed = false;
+    for _ in 0..200 {
+        if out.write_all(&[1u8; 100_000]).await.is_err() {
+            failed = true;
+            break;
+        }
+    }
+    assert!(failed, "writing after the cancel fails");
+
     // Latency probes run on their own
     tokio::time::sleep(Duration::from_millis(1600)).await;
     let status = a.node.status();

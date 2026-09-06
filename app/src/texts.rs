@@ -33,6 +33,11 @@ pub fn notice(n: &Notice) -> String {
             &[&format!("{:.1}", *n as f64 / 1_048_576.0)],
         ),
         Notice::ClipboardReceived(name) => trf("Clipboard taken over from {}", &[name]),
+        Notice::FilesReceived(name, count, dir) => trf(
+            "{} files from {} are in {} and on the clipboard",
+            &[count, name, &dir.display()],
+        ),
+        Notice::TransferFailed(name, e) => trf("File transfer with {} failed: {}", &[name, e]),
     }
 }
 
@@ -127,5 +132,19 @@ pub fn ago(t: std::time::SystemTime) -> String {
         5..=59 => trf("{} s ago", &[&secs]),
         60..=3599 => trf("{} min ago", &[&(secs / 60)]),
         _ => trf("{} h ago", &[&(secs / 3600)]),
+    }
+}
+
+/// "1.4 GB", "350 KB"
+pub fn bytes(n: u64) -> String {
+    let n = n as f64;
+    if n >= 1e9 {
+        format!("{:.1} GB", n / 1e9)
+    } else if n >= 1e6 {
+        format!("{:.1} MB", n / 1e6)
+    } else if n >= 1e3 {
+        format!("{:.0} KB", n / 1e3)
+    } else {
+        format!("{n:.0} B")
     }
 }

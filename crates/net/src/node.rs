@@ -131,6 +131,12 @@ pub enum Event {
         header: Vec<u8>,
         data: Vec<u8>,
     },
+    /// A stream of unknown length from the peer (files), opened with `Node::open_stream`.
+    Stream {
+        peer: Fingerprint,
+        header: Vec<u8>,
+        stream: StreamSlot,
+    },
     /// Pairing succeeded (on either side).
     Paired { peer: PairedPeer },
     /// Someone typed a wrong code for the code shown here.
@@ -147,6 +153,22 @@ pub enum Event {
     Unpaired { peer: Fingerprint, by_peer: bool },
     /// This computer woke from sleep after about `slept`; links are being rebuilt.
     Woke { slept: Duration },
+}
+
+/// Holds an incoming stream inside an event (events are cloneable, the stream is taken once).
+#[derive(Clone)]
+pub struct StreamSlot(Arc<Mutex<Option<link::InStream>>>);
+
+impl StreamSlot {
+    pub fn take(&self) -> Option<link::InStream> {
+        self.0.lock().expect("stream slot").take()
+    }
+}
+
+impl std::fmt::Debug for StreamSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StreamSlot")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -229,6 +251,14 @@ impl LinkHost for Inner {
 
     fn deliver_blob(&self, peer: Fingerprint, header: Vec<u8>, data: Vec<u8>) {
         let _ = self.events.send(Event::Blob { peer, header, data });
+    }
+
+    fn deliver_stream(&self, peer: Fingerprint, header: Vec<u8>, stream: link::InStream) {
+        let _ = self.events.send(Event::Stream {
+            peer,
+            header,
+            stream: StreamSlot(Arc::new(Mutex::new(Some(stream)))),
+        });
     }
 }
 
@@ -432,6 +462,20 @@ impl Node {
             }
         }));
         true
+    }
+
+    /// Opens a stream of unknown length to a connected peer (file transfers).
+    pub async fn open_stream(&self, peer: &Fingerprint, header: &[u8]) -> io::Result<link::OutStream> {
+        let connection = self
+            .inner
+            .lock()
+            .links
+            .get(peer)
+            .map(|e| e.connection.clone())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "peer not connected"))?;
+        link::open_stream(&connection, header)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     pub fn paired(&self) -> Vec<PairedPeer> {

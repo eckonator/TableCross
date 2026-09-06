@@ -13,6 +13,7 @@ mod mac;
 #[cfg(windows)]
 mod windows;
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub use dib::{dib_to_png, png_to_dib};
@@ -35,6 +36,8 @@ pub enum Read {
     Empty,
     /// Marked by a password manager: must not leave this computer.
     Concealed,
+    /// Files and folders that were copied.
+    Files(Vec<PathBuf>),
 }
 
 pub trait SystemClipboard: Send + Sync {
@@ -43,6 +46,8 @@ pub trait SystemClipboard: Send + Sync {
     fn read(&self) -> Result<Read, ClipError>;
     /// Replaces the content; returns the change count afterwards.
     fn write(&self, content: &ClipContent) -> Result<u64, ClipError>;
+    /// Puts files on the clipboard, ready to be pasted in the file manager.
+    fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError>;
 }
 
 /// The clipboard of this system, if supported.
@@ -95,6 +100,13 @@ impl SystemClipboard for MemoryClipboard {
         let mut state = self.state.lock().expect("clipboard lock");
         state.0 += 1;
         state.1 = Read::Content(content.clone());
+        Ok(state.0)
+    }
+
+    fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
+        let mut state = self.state.lock().expect("clipboard lock");
+        state.0 += 1;
+        state.1 = Read::Files(files.to_vec());
         Ok(state.0)
     }
 }

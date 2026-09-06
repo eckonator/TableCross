@@ -110,6 +110,17 @@ pub enum Message {
     ClipboardRequest {
         id: u64,
     },
+    /// Files and folders were copied on the sender: `names` of the top level (at most a few, for
+    /// display), `count` files in all, `size` bytes in all. They follow on a stream when asked for.
+    FilesOffer {
+        id: u64,
+        names: Vec<String>,
+        count: u64,
+        size: u64,
+    },
+    FilesRequest {
+        id: u64,
+    },
 }
 
 impl Message {
@@ -224,6 +235,13 @@ mod tests {
                 size: 1234,
             },
             Message::ClipboardRequest { id: 9 },
+            Message::FilesOffer {
+                id: 3,
+                names: vec!["Fotos".into()],
+                count: 1200,
+                size: 2_000_000_000,
+            },
+            Message::FilesRequest { id: 3 },
         ]
     }
 

@@ -1,5 +1,6 @@
 //! Windows: the clipboard with text, HTML, RTF and images (PNG, and a DIB for older programs).
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
@@ -9,10 +10,54 @@ use windows_sys::Win32::System::DataExchange::{
 };
 use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 
+use windows_sys::Win32::UI::Shell::{DragQueryFileW, HDROP};
+
 use crate::{ClipContent, ClipError, Read, SystemClipboard, cf_html, dib};
 
 const CF_UNICODETEXT: u32 = 13;
 const CF_DIB: u32 = 8;
+const CF_HDROP: u32 = 15;
+/// Size of DROPFILES: offset to the file list, point, "non-client" flag, "wide" flag.
+const DROPFILES_SIZE: u32 = 20;
+const DROPEFFECT_COPY: u32 = 1;
+
+/// Files on the clipboard (from Explorer).
+fn files() -> Option<Vec<PathBuf>> {
+    unsafe {
+        if IsClipboardFormatAvailable(CF_HDROP) == 0 {
+            return None;
+        }
+        let drop = GetClipboardData(CF_HDROP) as HDROP;
+        if drop.is_null() {
+            return None;
+        }
+        let count = DragQueryFileW(drop, u32::MAX, std::ptr::null_mut(), 0);
+        let mut out = Vec::new();
+        for i in 0..count {
+            let len = DragQueryFileW(drop, i, std::ptr::null_mut(), 0) as usize;
+            let mut buf = vec![0u16; len + 1];
+            DragQueryFileW(drop, i, buf.as_mut_ptr(), buf.len() as u32);
+            out.push(PathBuf::from(String::from_utf16_lossy(&buf[..len])));
+        }
+        Some(out)
+    }
+}
+
+/// DROPFILES followed by the paths, each ending with a zero, and one more zero.
+fn drop_list(files: &[PathBuf]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&DROPFILES_SIZE.to_le_bytes());
+    out.extend_from_slice(&[0; 8]); // point
+    out.extend_from_slice(&0u32.to_le_bytes()); // fNC
+    out.extend_from_slice(&1u32.to_le_bytes()); // fWide
+    for file in files {
+        for unit in file.to_string_lossy().encode_utf16().chain(Some(0)) {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+    }
+    out.extend_from_slice(&[0, 0]);
+    out
+}
 
 pub struct WinClipboard;
 
@@ -116,6 +161,9 @@ impl SystemClipboard for WinClipboard {
         if is_private() {
             return Ok(Read::Concealed);
         }
+        if let Some(files) = files().filter(|f| !f.is_empty()) {
+            return Ok(Read::Files(files));
+        }
         let trim_nul = |mut b: Vec<u8>| {
             while b.last() == Some(&0) {
                 b.pop();
@@ -159,6 +207,17 @@ impl SystemClipboard for WinClipboard {
                     set(CF_DIB, &dib);
                 }
             }
+        }
+        Ok(self.change_count())
+    }
+
+    fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
+        {
+            let _open = Open::new()?;
+            unsafe { EmptyClipboard() };
+            set(CF_HDROP, &drop_list(files));
+            // Pasting copies (and does not move) the files
+            set(format("Preferred DropEffect"), &DROPEFFECT_COPY.to_le_bytes());
         }
         Ok(self.change_count())
     }
