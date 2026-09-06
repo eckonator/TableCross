@@ -7,7 +7,7 @@ version = "0.0.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 authors = ["Markus Eckert <eckert_@gmx.de>"]
-repository = "https://github.com/eckonator/tablecross"
+repository = "https://github.com/eckonator/TableCross"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

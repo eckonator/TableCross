@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Installs the latest TableCross into /Applications (macOS).
 #
-#   curl -fsSL https://raw.githubusercontent.com/eckonator/tablecross/main/scripts/install-macos.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/eckonator/TableCross/main/scripts/install-macos.sh | bash
 #
 # What curl downloads carries no quarantine flag, so the app starts without a Gatekeeper prompt even
 # though it is not notarized; the flag is removed anyway to be sure.
 set -euo pipefail
 
-REPO="eckonator/tablecross"
+REPO="eckonator/TableCross"
 APP_NAME="TableCross.app"
 # TC_INSTALL_DIR: other target (testing), TC_NO_OPEN=1: do not start it afterwards
 DEST="${TC_INSTALL_DIR:-/Applications}"

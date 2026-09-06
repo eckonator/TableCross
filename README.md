@@ -5,14 +5,14 @@ Share one mouse, keyboard and clipboard between computers on your desk: macOS, W
 on the next computer.
 
 > **Status: early development.** Test builds are on the
-> [releases page](https://github.com/eckonator/tablecross/releases); expect rough edges.
+> [releases page](https://github.com/eckonator/TableCross/releases); expect rough edges.
 
 ## Installing
 
 **macOS 11 or newer** (Apple silicon and Intel): paste into Terminal
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/eckonator/tablecross/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eckonator/TableCross/main/scripts/install-macos.sh | bash
 ```
 
 or open the `.dmg` and drag TableCross to Applications. On first start macOS asks for the
