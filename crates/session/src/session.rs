@@ -590,6 +590,21 @@ async fn run(
     shared.node.shutdown().await;
 }
 
+/// Writes content from a peer into the local clipboard (on a blocking thread).
+fn clip_write(shared: &Arc<Shared>, peer: Fingerprint, action: Option<ClipAction>) {
+    if let (Some(ClipAction::Write { content, .. }), Some(clipboard)) = (action, &shared.clipboard) {
+        let system = clipboard.system.clone();
+        let internal = shared.internal.clone();
+        tokio::task::spawn_blocking(move || {
+            let count = system
+                .write(&content)
+                .map_err(|e| tracing::warn!("clipboard: {e}"))
+                .ok();
+            let _ = internal.send(Internal::ClipWritten(peer, count));
+        });
+    }
+}
+
 /// Looks whether the local clipboard changed and reads it if so.
 fn clip_poll(shared: &Arc<Shared>) {
     let Some(clipboard) = &shared.clipboard else { return };
@@ -656,10 +671,16 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             message: Message::ClipboardOffer { id, size, .. },
         } => {
             let active = !matches!(shared.engine.lock().expect("engine lock").role(), Role::Controlling(_));
-            let request = shared.clip.lock().expect("clip lock").offered(peer, id, size, active);
+            let mut sync = shared.clip.lock().expect("clip lock");
+            let request = sync.offered(peer, id, size, active);
+            let early = sync
+                .take_early(peer, id)
+                .and_then(|data| sync.received(peer, id, &data));
+            drop(sync);
             if let Some(request) = request {
                 shared.node.send(&peer, request);
             }
+            clip_write(shared, peer, early);
         }
         Event::Message {
             peer,
@@ -673,17 +694,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
         Event::Blob { peer, header, data } => {
             let action = clip::parse_header(&header)
                 .and_then(|id| shared.clip.lock().expect("clip lock").received(peer, id, &data));
-            if let (Some(ClipAction::Write { content, .. }), Some(clipboard)) = (action, &shared.clipboard) {
-                let system = clipboard.system.clone();
-                let internal = shared.internal.clone();
-                tokio::task::spawn_blocking(move || {
-                    let count = system
-                        .write(&content)
-                        .map_err(|e| tracing::warn!("clipboard: {e}"))
-                        .ok();
-                    let _ = internal.send(Internal::ClipWritten(peer, count));
-                });
-            }
+            clip_write(shared, peer, action);
         }
         Event::Message { peer, message } => {
             let actions = shared

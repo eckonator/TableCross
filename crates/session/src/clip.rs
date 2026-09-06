@@ -75,6 +75,8 @@ pub struct ClipSync {
     /// Content that came from a peer (by hash), never announced again.
     written_hash: Option<u64>,
     requested: Option<u64>,
+    /// Content that came before its announcement (they travel on different streams).
+    early: Option<(Fingerprint, u64, Vec<u8>)>,
     counter: u64,
 }
 
@@ -189,11 +191,22 @@ impl ClipSync {
         }
     }
 
+    /// Content that arrived before its announcement, now that the announcement is here.
+    pub fn take_early(&mut self, from: Fingerprint, id: u64) -> Option<Vec<u8>> {
+        match &self.early {
+            Some((peer, early, _)) if *peer == from && *early == id => self.early.take().map(|(_, _, data)| data),
+            _ => None,
+        }
+    }
+
     /// Content arrived. Returns it if it is the newest and should be written.
     pub fn received(&mut self, from: Fingerprint, id: u64, data: &[u8]) -> Option<ClipAction> {
         match self.remote {
             Some((peer, newest, _)) if peer == from && newest == id => {}
-            _ => return None,
+            _ => {
+                self.early = Some((from, id, data.to_vec()));
+                return None;
+            }
         }
         let content = ClipContent::decode(data)?;
         self.remote = None;
@@ -304,6 +317,23 @@ mod tests {
         sync.poll(2);
         assert_eq!(sync.read_done(text("too long"), 3), (None, Some(Skip::TooLarge(8))));
         assert!(sync.for_new_peer().is_none());
+    }
+
+    #[test]
+    fn content_before_its_announcement_is_kept() {
+        let mut sync = ClipSync::default();
+        let content = ClipContent {
+            text: Some("early".into()),
+            ..ClipContent::default()
+        };
+        assert_eq!(sync.received(PEER, 5, &content.encode()), None);
+        sync.offered(PEER, 5, 5, true);
+        let data = sync.take_early(PEER, 5).unwrap();
+        assert!(matches!(
+            sync.received(PEER, 5, &data),
+            Some(ClipAction::Write { id: 5, .. })
+        ));
+        assert_eq!(sync.take_early(PEER, 5), None);
     }
 
     #[test]
