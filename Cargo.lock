@@ -3607,6 +3607,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tablecross-service"
+version = "0.0.1"
+dependencies = [
+ "tc-input",
+ "tc-protocol",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "task-local"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

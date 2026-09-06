@@ -16,6 +16,8 @@ mod mac;
 mod mac_helper;
 mod virtual_input;
 #[cfg(windows)]
+pub mod win_send;
+#[cfg(windows)]
 mod windows;
 
 use std::sync::Arc;

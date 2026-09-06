@@ -79,6 +79,13 @@ tablecross-cli helper status    # then allow it under Privacy & Security → Inp
 
 If TableCross stops or crashes, the helper gives the keyboard back within a second.
 
+On Windows, the optional service lets TableCross operate the sign-in screen, UAC prompts and programs
+started as administrator (run once in an administrator prompt):
+
+```sh
+tablecross-service install
+```
+
 Without network discovery (`--no-discovery`) pass the address of the other computer with `--addr IP:PORT`.
 Traffic uses UDP port 24800; allow it in the firewall for private networks.
 

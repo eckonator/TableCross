@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use tc_core::{Captured, Point};
-use tc_protocol::{Message, MouseButton, PressedKeys, Screen};
+use tc_protocol::{Message, MouseButton, Screen};
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -19,16 +19,11 @@ use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetLastInputInfo, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    KEYEVENTF_SCANCODE, LASTINPUTINFO, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
-    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
-    SendInput, VK_NUMLOCK, VK_PAUSE, VK_SNAPSHOT,
+    GetLastInputInfo, LASTINPUTINFO, VK_NUMLOCK, VK_PAUSE, VK_SNAPSHOT,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CopyIcon, CreateCursor, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HC_ACTION,
-    HCURSOR, HHOOK, KBDLLHOOKSTRUCT, KillTimer, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_SETCURSORS, SetCursorPos,
+    CallNextHookEx, CopyIcon, CreateCursor, DispatchMessageW, GetCursorPos, GetMessageW, HC_ACTION, HCURSOR, HHOOK,
+    KBDLLHOOKSTRUCT, KillTimer, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SPI_SETCURSORS, SetCursorPos,
     SetSystemCursor, SetTimer, SetWindowsHookExW, SystemParametersInfoW, TranslateMessage, UnhookWindowsHookEx,
     WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER,
@@ -36,18 +31,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::keymap::windows as keymap;
+use crate::win_send::{Agent, Injector, NUM_LOCK, OWN_INPUT, PAUSE, WHEEL_DELTA};
 use crate::{Backend, Capture, Handler, Health, Inject, InputError, Problem};
 
-/// Marks input we send ourselves, so the hooks let it through untouched.
-const OWN_INPUT: usize = 0x7462_6C78; // "tblx"
 /// Ctrl that Windows adds in front of AltGr on layouts that have it; not a real key.
 const FAKE_ALTGR_CTRL: u32 = 0x21D;
-const WHEEL_DELTA: f64 = 120.0;
-/// Wheel units per logical point of precise scrolling (a detent is about 40 points).
-const WHEEL_PER_POINT: f64 = 3.0;
-/// Pseudo scan code of Pause in the table.
-const PAUSE: u16 = 0xE045;
-const NUM_LOCK: u16 = 0x45;
 const HOOK_CHECK_MS: u32 = 1000;
 /// Standard cursor ids that get the empty cursor while grabbed.
 const CURSOR_IDS: [u32; 13] = [
@@ -67,10 +55,9 @@ struct Shared {
 
 #[derive(Default)]
 struct InjectState {
-    keys: PressedKeys,
-    buttons: Vec<MouseButton>,
-    wheel_rest: (f64, f64),
+    injector: Injector,
     cursor_hidden: bool,
+    agent: Agent,
 }
 
 pub fn backend() -> Result<Backend, InputError> {
@@ -420,68 +407,6 @@ pub struct WinInject {
     shared: Arc<Shared>,
 }
 
-fn send(inputs: &[INPUT]) {
-    if inputs.is_empty() {
-        return;
-    }
-    let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
-    if sent as usize != inputs.len() {
-        // Usually UIPI: the window in front runs with higher rights
-        tracing::debug!("SendInput delivered {sent} of {} events", inputs.len());
-    }
-}
-
-fn mouse_input(dx: i32, dy: i32, data: i32, flags: u32) -> INPUT {
-    INPUT {
-        r#type: INPUT_MOUSE,
-        Anonymous: INPUT_0 {
-            mi: MOUSEINPUT {
-                dx,
-                dy,
-                mouseData: data as u32,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: OWN_INPUT,
-            },
-        },
-    }
-}
-
-fn key_input(vk: u16, scan: u16, flags: u32) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk,
-                wScan: scan,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: OWN_INPUT,
-            },
-        },
-    }
-}
-
-/// Absolute position in the 0..65535 range over the whole virtual desktop.
-fn move_input(p: Point) -> INPUT {
-    let (vx, vy, vw, vh) = unsafe {
-        (
-            GetSystemMetrics(SM_XVIRTUALSCREEN),
-            GetSystemMetrics(SM_YVIRTUALSCREEN),
-            GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1),
-            GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1),
-        )
-    };
-    let nx = ((p.x - f64::from(vx) + 0.5) * 65536.0 / f64::from(vw)) as i32;
-    let ny = ((p.y - f64::from(vy) + 0.5) * 65536.0 / f64::from(vh)) as i32;
-    mouse_input(
-        nx,
-        ny,
-        0,
-        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-    )
-}
-
 fn hide_cursor() {
     // Empty 32×32 cursor: AND mask all ones, XOR mask all zeros
     let and = [0xFFu8; 128];
@@ -505,72 +430,6 @@ fn hide_cursor() {
 
 fn show_cursor() {
     unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0) };
-}
-
-impl InjectState {
-    fn key(&mut self, usage: u16, down: bool) {
-        let Some(scan) = keymap::from_hid(usage) else {
-            return;
-        };
-        let changed = if down {
-            self.keys.press(usage)
-        } else {
-            self.keys.release(usage)
-        };
-        if !changed {
-            return;
-        }
-        let up = if down { 0 } else { KEYEVENTF_KEYUP };
-        let input = match scan {
-            PAUSE => key_input(VK_PAUSE, 0, up),
-            NUM_LOCK => key_input(VK_NUMLOCK, 0, up | KEYEVENTF_EXTENDEDKEY),
-            _ => {
-                let extended = if scan & 0xE000 != 0 { KEYEVENTF_EXTENDEDKEY } else { 0 };
-                key_input(0, scan & 0xFF, KEYEVENTF_SCANCODE | extended | up)
-            }
-        };
-        send(&[input]);
-    }
-
-    fn button(&mut self, button: MouseButton, down: bool) {
-        if down == self.buttons.contains(&button) {
-            return;
-        }
-        if down {
-            self.buttons.push(button);
-        } else {
-            self.buttons.retain(|b| *b != button);
-        }
-        let (flags, data) = match (button, down) {
-            (MouseButton::Left, true) => (MOUSEEVENTF_LEFTDOWN, 0),
-            (MouseButton::Left, false) => (MOUSEEVENTF_LEFTUP, 0),
-            (MouseButton::Right, true) => (MOUSEEVENTF_RIGHTDOWN, 0),
-            (MouseButton::Right, false) => (MOUSEEVENTF_RIGHTUP, 0),
-            (MouseButton::Middle, true) => (MOUSEEVENTF_MIDDLEDOWN, 0),
-            (MouseButton::Middle, false) => (MOUSEEVENTF_MIDDLEUP, 0),
-            (MouseButton::Back, true) => (MOUSEEVENTF_XDOWN, 1),
-            (MouseButton::Back, false) => (MOUSEEVENTF_XUP, 1),
-            (MouseButton::Forward, true) => (MOUSEEVENTF_XDOWN, 2),
-            (MouseButton::Forward, false) => (MOUSEEVENTF_XUP, 2),
-        };
-        send(&[mouse_input(0, 0, data, flags)]);
-    }
-
-    fn wheel(&mut self, dx: f64, dy: f64, precise: bool) {
-        let factor = if precise { WHEEL_PER_POINT } else { WHEEL_DELTA };
-        let (rx, ry) = self.wheel_rest;
-        let (tx, ty) = (rx + dx * factor, ry + dy * factor);
-        let (wx, wy) = (tx.trunc(), ty.trunc());
-        self.wheel_rest = (tx - wx, ty - wy);
-        let mut inputs = Vec::new();
-        if wy != 0.0 {
-            inputs.push(mouse_input(0, 0, wy as i32, MOUSEEVENTF_WHEEL));
-        }
-        if wx != 0.0 {
-            inputs.push(mouse_input(0, 0, wx as i32, MOUSEEVENTF_HWHEEL));
-        }
-        send(&inputs);
-    }
 }
 
 impl Inject for WinInject {
@@ -615,26 +474,17 @@ impl Inject for WinInject {
 
     fn inject(&self, message: &Message) -> Result<(), InputError> {
         let mut state = self.shared.inject.lock().expect("inject lock");
-        match *message {
-            Message::Enter { x, y } | Message::MouseMove { x, y, .. } => {
-                send(&[move_input(Point::new(f64::from(x), f64::from(y)))])
-            }
-            Message::MouseButton { button, down } => state.button(button, down),
-            Message::Key { usage, down } => state.key(usage, down),
-            Message::Wheel { dx, dy, precise } => state.wheel(f64::from(dx), f64::from(dy), precise),
-            _ => {}
+        // The service's agent injects with the highest rights and on the sign-in and UAC screens
+        if !state.agent.send(message) {
+            state.injector.apply(message);
         }
         Ok(())
     }
 
     fn release_all(&self) {
         let mut state = self.shared.inject.lock().expect("inject lock");
-        for usage in state.keys.clone().release_all() {
-            state.key(usage, false);
-        }
-        for button in state.buttons.clone() {
-            state.button(button, false);
-        }
+        state.agent.send(&Message::ReleaseAll);
+        state.injector.release_all();
         if state.cursor_hidden {
             show_cursor();
             state.cursor_hidden = false;

@@ -1,0 +1,27 @@
+[package]
+name = "tablecross-service"
+description = "TableCross Windows service: input on the sign-in and UAC screens and in elevated programs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tc-protocol = { path = "../../crates/protocol" }
+tc-input = { path = "../../crates/input" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Services",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Threading",
+] }
