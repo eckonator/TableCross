@@ -38,12 +38,11 @@ impl Tray {
         let template = cfg!(target_os = "macos");
         let size = if template { 36 } else { 32 };
         let icon = Icon::from_rgba(crate::icon::rgba(size, template), size, size).ok()?;
-        let builder = TrayIconBuilder::new();
-        let builder = if template {
-            builder.with_icon_templated(icon)
-        } else {
-            builder.with_icon(icon)
-        };
+        // macOS draws the menu bar icon from its shape only, in the menu bar's color
+        #[cfg(target_os = "macos")]
+        let builder = TrayIconBuilder::new().with_icon_templated(icon);
+        #[cfg(not(target_os = "macos"))]
+        let builder = TrayIconBuilder::new().with_icon(icon);
         let tray = builder.with_tooltip("TableCross").with_menu(Box::new(menu)).build();
         let tray = match tray {
             Ok(t) => t,
