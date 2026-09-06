@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TableCross
+Comment=Share mouse, keyboard and clipboard with the computers on your desk
+Comment[de]=Maus, Tastatur und Zwischenablage mit den Rechnern auf dem Schreibtisch teilen
+Exec=tablecross
+Icon=tablecross
+Categories=Utility;Network;
+StartupWMClass=tablecross

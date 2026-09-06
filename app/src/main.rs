@@ -21,6 +21,18 @@ use crate::devtools::DevTools;
 use crate::settings::{LangSetting, Settings};
 
 fn main() -> eframe::Result {
+    // For building packages: write the icon files and quit
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--write-icons") {
+        let dir = args
+            .get(2)
+            .map_or_else(|| std::path::PathBuf::from("assets"), std::path::PathBuf::from);
+        if let Err(e) = icon::write_all(&dir) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let dev = DevTools::from_env();
     let dir = tc_net::default_config_dir().unwrap_or_else(|| std::env::temp_dir().join("TableCross"));
     let log_file = if dev.isolated() {

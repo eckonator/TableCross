@@ -1,0 +1,163 @@
+# Builds TableCross for macOS, Windows and Linux and publishes a release under the version from
+# Cargo.toml (tag `v<version>`).
+#
+# - Every push to main replaces the release of this version with the new state.
+# - New version: raise `version` in Cargo.toml; the next push creates a new release, older ones stay.
+# - By hand under "Actions → Release → Run workflow": artifacts only, no release.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS
+          - os: windows-latest
+            name: Windows
+          # Older Ubuntu, so the program also runs on older distributions (glibc 2.35)
+          - os: ubuntu-22.04
+            name: Linux
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev pkg-config
+
+      - name: Tests
+        run: cargo test --workspace --release
+
+      - name: Licenses of the libraries
+        shell: bash
+        run: |
+          cargo install cargo-bundle-licenses --locked
+          cargo bundle-licenses --format yaml --output THIRD-PARTY-LICENSES.yml
+
+      - name: Version
+        id: version
+        shell: bash
+        run: echo "version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      # One universal app (Apple silicon and Intel), ad-hoc signed
+      - name: macOS
+        if: matrix.name == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target $t -p tablecross -p tablecross-helper -p tablecross-cli
+          done
+          mkdir -p target/release
+          for b in tablecross tablecross-helper tablecross-cli; do
+            lipo -create -output target/release/$b \
+              target/aarch64-apple-darwin/release/$b target/x86_64-apple-darwin/release/$b
+          done
+          TC_SKIP_BUILD=1 scripts/bundle-macos.sh
+          mkdir -p pkg
+          V="${{ steps.version.outputs.version }}"
+          cp README.md LICENSE THIRD-PARTY-LICENSES.yml dist/
+          ditto -c -k --keepParent dist/TableCross.app "pkg/TableCross-$V-macOS.zip"
+          (cd dist && zip -q "../pkg/TableCross-$V-macOS.zip" README.md LICENSE THIRD-PARTY-LICENSES.yml)
+          scripts/make-dmg.sh "pkg/TableCross-$V-macOS.dmg"
+
+      - name: Windows
+        if: matrix.name == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release -p tablecross -p tablecross-cli -p tablecross-service
+          cp THIRD-PARTY-LICENSES.yml target/release/
+          V="${{ steps.version.outputs.version }}"
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" -Q "-DVersion=$V" "-DSource=$PWD/target/release" \
+            "-O$PWD/pkg" packaging/windows/tablecross.iss
+          DIR="TableCross-$V-Windows-portable"
+          mkdir -p "pkg/$DIR"
+          cp target/release/tablecross.exe "pkg/$DIR/TableCross.exe"
+          cp target/release/tablecross-cli.exe target/release/tablecross-service.exe "pkg/$DIR/"
+          cp README.md LICENSE THIRD-PARTY-LICENSES.yml "pkg/$DIR/"
+          cd pkg && 7z a -tzip "$DIR.zip" "$DIR" > /dev/null && rm -r "$DIR"
+
+      - name: Linux
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release -p tablecross -p tablecross-cli
+          V="${{ steps.version.outputs.version }}"
+          DIR="TableCross-$V-Linux-${{ matrix.arch }}"
+          mkdir -p "pkg/$DIR"
+          cp target/release/tablecross target/release/tablecross-cli assets/tablecross.desktop \
+            README.md LICENSE THIRD-PARTY-LICENSES.yml "pkg/$DIR/"
+          cp assets/icon-256.png "pkg/$DIR/tablecross.png"
+          cp scripts/install-linux.sh "pkg/$DIR/install.sh"
+          cd pkg && tar czf "$DIR.tar.gz" "$DIR" && rm -r "$DIR"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TableCross-${{ matrix.name }}
+          path: pkg/*
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: version
+        run: echo "version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: pkg
+          merge-multiple: true
+      # Remove the release of this version with its tag, so the tag points at the new commit
+      - name: Remove the previous release of this version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "v${{ steps.version.outputs.version }}" --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: TableCross ${{ steps.version.outputs.version }}
+          prerelease: true
+          body: |
+            Early test build for macOS (Apple silicon and Intel, one universal app), Windows (64-bit) and Linux (x86_64).
+
+            **macOS, easiest way** (no Gatekeeper prompt): paste into Terminal
+            ```
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-macos.sh | bash
+            ```
+            Or open the `.dmg` and drag TableCross to Applications.
+
+            **Windows:** run `TableCross-…-Windows-Setup.exe`. **Linux:** unpack the `.tar.gz` and run `./install.sh`.
+
+            Built from commit ${{ github.sha }}. Installation notes are in the README.
+          files: pkg/*

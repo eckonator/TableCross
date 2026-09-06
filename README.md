@@ -4,7 +4,34 @@ Share one mouse, keyboard and clipboard between computers on your desk: macOS, W
 (Wayland on GNOME and KDE Plasma, and X11). Move the pointer over the edge of one screen and keep working
 on the next computer.
 
-> **Status: early development.** No installer yet; CI builds the app and tools for macOS, Windows and Linux.
+> **Status: early development.** Test builds are on the
+> [releases page](https://github.com/eckonator/tablecross/releases); expect rough edges.
+
+## Installing
+
+**macOS 11 or newer** (Apple silicon and Intel): paste into Terminal
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/eckonator/tablecross/main/scripts/install-macos.sh | bash
+```
+
+or open the `.dmg` and drag TableCross to Applications. On first start macOS asks for the
+**Accessibility** permission (needed to use mouse and keyboard) and possibly for access to the local
+network. The setup offers the optional system helper for password fields (see below).
+
+**Windows 10 and 11** (64-bit): run `TableCross-…-Windows-Setup.exe`. It installs the app, the optional
+service for the sign-in screen and elevated programs, and opens UDP port 24800 for private networks.
+There is also a portable `.zip`.
+
+**Linux** (X11, or Wayland on GNOME 45+ / KDE Plasma 6.1+): unpack the `.tar.gz` and run `./install.sh`
+(installs for the current user; `./install.sh --uninstall` removes it).
+
+### Antivirus warnings
+
+TableCross reads the keyboard and mouse to send them to the other computer. Programs that do this
+look like keyloggers to some antivirus software, so a warning is possible, especially on Windows.
+TableCross only sends input to computers you paired yourself, encrypted, on your local network; the
+source code is open for anyone to check.
 
 ## The app
 
