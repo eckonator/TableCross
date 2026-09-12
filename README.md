@@ -65,7 +65,8 @@ bar (macOS) or notification area (Windows). The interface is in English and Germ
 - **Clipboard and files.** Text, rich text and images first, then copying files.
 - **Windows sign-in screen.** An optional Windows service keeps control on the login and UAC screens.
 
-Local network only, no cloud, no account, no telemetry.
+Local network only, no cloud, no account, no telemetry. If you allow it, the app asks GitHub now and
+then whether a newer version exists.
 
 On Linux, X11 sessions work directly. Wayland sessions use the desktop portals (GNOME 45 or newer,
 KDE Plasma 6.1 or newer): the system asks once for permission to control this computer, and again

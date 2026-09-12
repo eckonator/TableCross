@@ -1,6 +1,25 @@
-//! On Windows the program icon and version information go into the .exe.
+//! The commit the program is built from (for the update check); on Windows also the program icon
+//! and version information in the .exe.
+
+fn git(args: &[&str]) -> String {
+    std::process::Command::new("git")
+        .args(args)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
 
 fn main() {
+    println!("cargo:rustc-env=TC_GIT_HASH={}", git(&["rev-parse", "HEAD"]));
+    println!(
+        "cargo:rustc-env=TC_GIT_TIME={}",
+        git(&["log", "-1", "--format=%ct", "HEAD"])
+    );
+    println!("cargo:rerun-if-changed=../.git/HEAD");
+    println!("cargo:rerun-if-changed=../.git/refs/heads");
+
     // Only when building on Windows for Windows (needs rc.exe there); checks from other systems skip it
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

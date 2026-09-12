@@ -14,6 +14,7 @@ mod pages;
 mod settings;
 mod texts;
 mod tray;
+mod update;
 
 use eframe::egui;
 

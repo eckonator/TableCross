@@ -232,8 +232,8 @@ fn de(en: &str) -> Option<&'static str> {
         "TableCross needs the Accessibility permission to use mouse and keyboard." => {
             "TableCross braucht die Berechtigung „Bedienungshilfen“, um Maus und Tastatur zu nutzen."
         }
-        "TableCross talks only to the computers you paired, encrypted, on your local network. No account, no cloud, no telemetry." => {
-            "TableCross spricht nur mit den Rechnern, die du gekoppelt hast, verschlüsselt und nur im lokalen Netz. Kein Konto, keine Cloud, keine Telemetrie."
+        "TableCross talks only to the computers you paired, encrypted, on your local network. No account, no cloud, no telemetry. If you allow it, it asks GitHub for new versions." => {
+            "TableCross spricht nur mit den Rechnern, die du gekoppelt hast, verschlüsselt und nur im lokalen Netz. Kein Konto, keine Cloud, keine Telemetrie. Wenn du es erlaubst, fragt es bei GitHub nach neuen Versionen."
         }
         "Takes effect after a restart of the connection." => "Wirkt nach einem Neustart der Verbindung.",
         "That did not work: {}" => "Das hat nicht geklappt: {}",
@@ -271,7 +271,7 @@ fn de(en: &str) -> Option<&'static str> {
         "UDP port" => "UDP-Port",
         "unknown" => "unbekannt",
         "valid for {} min" => "gültig für {} min",
-        "Version {}" => "Version {}",
+        "Version {} ({})" => "Version {} ({})",
         "While controlling this computer from here, ⌘ acts as Ctrl and the other way round" => {
             "Solange dieser Rechner von hier aus gesteuert wird, wirkt ⌘ wie Strg und umgekehrt"
         }
@@ -297,6 +297,16 @@ fn de(en: &str) -> Option<&'static str> {
         "failed: {}" => "fehlgeschlagen: {}",
         "{} files from {} are in {} and on the clipboard" => "{} Dateien von {} liegen in {} und in der Zwischenablage",
         "File transfer with {} failed: {}" => "Dateiübertragung mit {} fehlgeschlagen: {}",
+        "A new TableCross is available ({})." => "Eine neue Version von TableCross ist da ({}).",
+        "Download" => "Herunterladen",
+        "New versions" => "Neue Versionen",
+        "May TableCross look for new versions on GitHub now and then? Only the question for the newest release is sent, nothing about you or your computers." => {
+            "Darf TableCross ab und zu bei GitHub nach neuen Versionen schauen? Gesendet wird nur die Frage nach der neuesten Version, nichts über dich oder deine Rechner."
+        }
+        "Yes, look for new versions" => "Ja, nach neuen Versionen schauen",
+        "No" => "Nein",
+        "Updates" => "Updates",
+        "Look for new versions on GitHub" => "Bei GitHub nach neuen Versionen schauen",
         _ => return None,
     })
 }

@@ -44,6 +44,8 @@ pub struct Settings {
     pub clipboard: bool,
     /// Larger clipboard content stays on this computer.
     pub clipboard_max_mb: u32,
+    /// Look for new versions on GitHub (`None`: not asked yet).
+    pub update_check: Option<bool>,
 }
 
 impl Default for Settings {
@@ -58,6 +60,7 @@ impl Default for Settings {
             setup_done: false,
             clipboard: true,
             clipboard_max_mb: 50,
+            update_check: None,
         }
     }
 }
@@ -97,6 +100,7 @@ impl Settings {
             setup_done: field(&fields, "setup_done", d.setup_done),
             clipboard: field(&fields, "clipboard", d.clipboard),
             clipboard_max_mb: field(&fields, "clipboard_max_mb", d.clipboard_max_mb).clamp(1, 64),
+            update_check: field(&fields, "update_check", d.update_check),
         }
     }
 

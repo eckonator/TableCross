@@ -12,6 +12,7 @@ use crate::texts;
 impl App {
     pub fn status_page(&mut self, ui: &mut egui::Ui) {
         let status = self.status.clone();
+        self.update_notes(ui);
         self.problems(ui, &status);
         ui.add_space(8.0);
         card(ui, tr("This computer"), |ui| {
@@ -178,6 +179,46 @@ impl App {
                 }
             }
             ui.add_space(4.0);
+        }
+    }
+
+    /// The question whether to look for new versions, or the note that there is one.
+    fn update_notes(&mut self, ui: &mut egui::Ui) {
+        if let Some(new) = self.new_version.clone() {
+            egui::Frame::group(ui.style())
+                .inner_margin(10.0)
+                .corner_radius(8.0)
+                .stroke(egui::Stroke::new(1.5, ok_color(ui)))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(trf("A new TableCross is available ({}).", &[&new.version])).strong());
+                        ui.hyperlink_to(tr("Download"), &new.url);
+                    });
+                });
+            ui.add_space(8.0);
+        }
+        if self.settings.update_check.is_none() && self.demo.is_none() {
+            let mut answer = None;
+            card(ui, tr("New versions"), |ui| {
+                ui.label(tr(
+                    "May TableCross look for new versions on GitHub now and then? Only the question for the \
+                     newest release is sent, nothing about you or your computers.",
+                ));
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Yes, look for new versions")).clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button(tr("No")).clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if answer.is_some() {
+                self.settings.update_check = answer;
+                self.save_settings();
+            }
+            ui.add_space(8.0);
         }
     }
 

@@ -49,7 +49,14 @@ pub struct App {
     tray: Option<crate::tray::Tray>,
     dev: DevTools,
     background: bool,
+    /// A newer version found on GitHub.
+    pub new_version: Option<crate::update::NewVersion>,
+    update_job: Option<std::sync::mpsc::Receiver<Option<crate::update::NewVersion>>>,
+    update_checked: Option<Instant>,
 }
+
+/// How often to look for a new version while running.
+const UPDATE_EVERY: Duration = Duration::from_secs(12 * 3600);
 
 impl App {
     pub fn new(
@@ -86,6 +93,9 @@ impl App {
             tray: None,
             dev,
             background,
+            new_version: None,
+            update_job: None,
+            update_checked: None,
         };
         if app.demo.is_none() {
             app.start_session(&ctx);
@@ -308,6 +318,21 @@ impl App {
         });
     }
 
+    /// Starts the update check when allowed and due, and picks up its result.
+    fn update_check(&mut self, ctx: &egui::Context) {
+        if let Some(job) = &self.update_job
+            && let Ok(result) = job.try_recv()
+        {
+            self.new_version = result;
+            self.update_job = None;
+        }
+        let due = self.update_checked.is_none_or(|t| t.elapsed() >= UPDATE_EVERY);
+        if self.settings.update_check == Some(true) && self.demo.is_none() && self.update_job.is_none() && due {
+            self.update_checked = Some(Instant::now());
+            self.update_job = Some(crate::update::check_in_background(ctx.clone()));
+        }
+    }
+
     fn poll_job(&mut self) {
         let Some(job) = &self.job else { return };
         if let Ok(result) = job.try_recv() {
@@ -327,6 +352,7 @@ impl eframe::App for App {
         self.dev.frame(&ctx);
         self.apply_theme(&ctx);
         self.poll_job();
+        self.update_check(&ctx);
         self.status = self.current_status();
 
         // Closing the window keeps TableCross running in the menu bar / notification area

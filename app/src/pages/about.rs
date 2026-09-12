@@ -9,7 +9,8 @@ use crate::i18n::{tr, trf};
 impl App {
     pub fn about_page(&mut self, ui: &mut egui::Ui) {
         card(ui, "TableCross", |ui| {
-            ui.label(trf("Version {}", &[&env!("CARGO_PKG_VERSION")]));
+            let commit: String = env!("TC_GIT_HASH").chars().take(7).collect();
+            ui.label(trf("Version {} ({})", &[&env!("CARGO_PKG_VERSION"), &commit]));
             ui.add_space(4.0);
             ui.label(tr(
                 "Shares one mouse, keyboard and clipboard between the computers on your desk, \
@@ -30,7 +31,7 @@ impl App {
             ui.label(RichText::new(tr("Privacy")).strong());
             ui.label(tr(
                 "TableCross talks only to the computers you paired, encrypted, on your local network. \
-                 No account, no cloud, no telemetry.",
+                 No account, no cloud, no telemetry. If you allow it, it asks GitHub for new versions.",
             ));
         });
     }

@@ -58,6 +58,14 @@ impl App {
                         });
                     ui.end_row();
 
+                    ui.label(tr("Updates"));
+                    let mut check = self.settings.update_check == Some(true);
+                    if ui.checkbox(&mut check, tr("Look for new versions on GitHub")).changed() {
+                        self.settings.update_check = Some(check);
+                        changed = true;
+                    }
+                    ui.end_row();
+
                     ui.label(tr("Start"));
                     if ui
                         .checkbox(&mut self.settings.autostart, tr("Start TableCross with the system"))
