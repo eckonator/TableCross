@@ -15,7 +15,14 @@ on the next computer.
 curl -fsSL https://raw.githubusercontent.com/eckonator/TableCross/main/scripts/install-macos.sh | bash
 ```
 
-or open the `.dmg` and drag TableCross to Applications. On first start macOS asks for the
+or open the `.dmg` and drag TableCross to Applications. TableCross is not notarized by Apple, so a copy
+from the `.dmg` or `.zip` is blocked by Gatekeeper at first; allow it once in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/TableCross.app
+```
+
+On first start macOS asks for the
 **Accessibility** permission (needed to use mouse and keyboard) and possibly for access to the local
 network. The setup offers the optional system helper for password fields (see below).
 
