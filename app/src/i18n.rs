@@ -330,8 +330,9 @@ mod tests {
                         '\\' => match chars.next() {
                             Some('n') => key.push('\n'),
                             Some('t') => key.push('\t'),
-                            Some('\n') => {
-                                // Line continuation: leading spaces of the next line are dropped
+                            // Line continuation (also with Windows line endings): leading spaces of the
+                            // next line are dropped
+                            Some('\n' | '\r') => {
                                 let tail = chars.as_str().trim_start();
                                 chars = tail.chars();
                             }
@@ -388,6 +389,14 @@ mod tests {
             "missing German translations:\n{}",
             missing.join("\n")
         );
+    }
+
+    #[test]
+    fn scanner_reads_continued_lines_with_any_line_ending() {
+        for newline in ["\n", "\r\n"] {
+            let src = format!("tr(\"first \\{newline}         second\")");
+            assert_eq!(literal_keys(&src), ["first second"], "{newline:?}");
+        }
     }
 
     #[test]

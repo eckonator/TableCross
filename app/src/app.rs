@@ -216,6 +216,7 @@ impl App {
     }
 
     /// Runs `work` on a thread of its own (system dialogs block); the result shows up as info.
+    #[cfg(target_os = "macos")]
     pub fn run_job(&mut self, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
