@@ -30,8 +30,12 @@ network. The setup offers the optional system helper for password fields (see be
 service for the sign-in screen and elevated programs, and opens UDP port 24800 for private networks.
 There is also a portable `.zip`.
 
-**Linux** (X11, or Wayland on GNOME 45+ / KDE Plasma 6.1+): unpack the `.tar.gz` and run `./install.sh`
-(installs for the current user; `./install.sh --uninstall` removes it).
+**Linux** (X11, or Wayland on GNOME 45+ / KDE Plasma 6.1+), x86_64 or arm64: unpack the `.tar.gz` and
+run `./install.sh` (installs for the current user; `./install.sh --uninstall` removes it).
+
+**Raspberry Pi 4/5** (64-bit Raspberry Pi OS): use the `arm64` archive. The default desktop (labwc or
+Wayfire on Wayland) offers no way for programs to read or send input, so switch to X11 in
+`sudo raspi-config` → Advanced Options → Wayland → X11.
 
 ### Antivirus warnings
 

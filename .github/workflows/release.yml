@@ -36,6 +36,10 @@ jobs:
           - os: ubuntu-22.04
             name: Linux
             arch: x86_64
+          # ARM64, e.g. Raspberry Pi 4/5 with 64-bit Raspberry Pi OS (Bookworm has glibc 2.36)
+          - os: ubuntu-22.04-arm
+            name: Linux-arm64
+            arch: arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -149,7 +153,7 @@ jobs:
           name: TableCross ${{ steps.version.outputs.version }}
           prerelease: true
           body: |
-            Early test build for macOS (Apple silicon and Intel, one universal app), Windows (64-bit) and Linux (x86_64).
+            Early test build for macOS (Apple silicon and Intel, one universal app), Windows (64-bit) and Linux (x86_64 and arm64, e.g. Raspberry Pi 4/5 with 64-bit Raspberry Pi OS).
 
             **macOS, easiest way** (no Gatekeeper prompt): paste into Terminal
             ```
