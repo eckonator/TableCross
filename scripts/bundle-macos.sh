@@ -37,6 +37,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Menu bar app: no Dock icon, not in ⌘Tab -->
+  <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>TableCross connects to your other computers on the local network to share mouse, keyboard and clipboard.</string>
   <key>NSBonjourServices</key>

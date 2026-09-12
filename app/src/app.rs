@@ -104,6 +104,13 @@ impl App {
             .or((first_start && app.dev.page.is_none()).then_some(0));
         if !app.dev.quitting_after_screenshot() {
             app.tray = crate::tray::Tray::new(&ctx, app.session.clone(), app.quit_flag.clone());
+            // Only with a status icon: otherwise the window could not be found again
+            if app.tray.is_some() {
+                crate::tray::menu_bar_only();
+                if !background {
+                    crate::tray::bring_to_front();
+                }
+            }
         }
         if background && app.has_tray() {
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));

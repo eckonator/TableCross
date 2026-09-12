@@ -19,7 +19,26 @@ pub struct Tray {
     quit: MenuItem,
 }
 
+/// macOS: TableCross lives in the menu bar only, without a Dock icon or an entry in ⌘Tab.
+pub fn menu_bar_only() {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+        NSApplication::sharedApplication(mtm).setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    }
+}
+
+/// Without a Dock icon, macOS does not bring the window forward by itself.
+pub fn bring_to_front() {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        #[allow(deprecated)] // `activate()` needs macOS 14; this works from macOS 11 on
+        objc2_app_kit::NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+    }
+}
+
 fn show_window(ctx: &egui::Context) {
+    bring_to_front();
     ctx.send_viewport_cmd(ViewportCommand::Visible(true));
     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(ViewportCommand::Focus);
