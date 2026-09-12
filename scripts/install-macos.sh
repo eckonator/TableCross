@@ -26,10 +26,11 @@ main() {
 
   say "Looking up the latest release"
   local api url version
-  api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest") \
+  # The list (newest first) includes pre-releases, unlike releases/latest
+  api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1") \
     || fail "Could not reach GitHub. Download manually: https://github.com/$REPO/releases"
   url=$(printf '%s' "$api" | grep -o '"browser_download_url": *"[^"]*-macOS\.zip"' | head -n1 | sed 's/.*"\(https[^"]*\)"/\1/')
-  [ -n "$url" ] || fail "No macOS download found in the latest release: https://github.com/$REPO/releases"
+  [ -n "$url" ] || fail "No macOS download found in the newest release: https://github.com/$REPO/releases"
   version=$(printf '%s' "$api" | grep -o '"tag_name": *"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')
 
   tmp=$(mktemp -d)
