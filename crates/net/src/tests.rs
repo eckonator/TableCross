@@ -217,6 +217,7 @@ async fn pairing_connects_and_messages_flow() {
     assert!(link.rtt.is_some(), "{link:?}");
     assert!(link.probes_sent >= 2);
     assert_eq!(link.name, "Beta");
+    assert_eq!(link.app_version, env!("CARGO_PKG_VERSION"));
     assert!(!a.node.take_rtt_samples(&b.fp()).is_empty());
 
     // Exactly one link per peer, both sides agree and nothing flaps
@@ -654,6 +655,7 @@ async fn oversized_frame_ends_only_that_link() {
         version: PROTOCOL_VERSION,
         name: "Raw".into(),
         screens: vec![],
+        app: String::new(),
     };
     write_frame(&mut send, &tc_protocol::encode(&hello)).await.unwrap();
     Preamble::read(&mut recv).await.unwrap();

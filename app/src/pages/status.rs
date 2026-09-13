@@ -280,8 +280,9 @@ impl App {
             ));
             if let Some(link) = &peer.link {
                 out.push_str(&format!(
-                    "  link {} dialed {} rtt {:?} quic {:?} lost {}/{} screens {:?}\n",
+                    "  link {} app {} dialed {} rtt {:?} quic {:?} lost {}/{} screens {:?}\n",
                     link.address,
+                    link.app_version,
                     link.dialed,
                     link.rtt,
                     link.quic_rtt,
@@ -340,6 +341,21 @@ fn peer_row(ui: &mut egui::Ui, peer: &tc_session::PeerView) {
                     theme::chip(ui, tr("not connected"), p.muted, p.field);
                 }
                 theme::chip(ui, texts::side(peer.side), p.muted, p.field);
+                if let Some(link) = &peer.link
+                    && link.app_version != env!("CARGO_PKG_VERSION")
+                {
+                    let version = if link.app_version.is_empty() {
+                        "?"
+                    } else {
+                        &link.app_version
+                    };
+                    let text = trf("version {}", &[&version]);
+                    let response = ui.scope(|ui| theme::chip(ui, &text, p.warn, p.warn_soft)).response;
+                    response.on_hover_text(trf(
+                        "This computer runs version {}. Install the same version everywhere.",
+                        &[&env!("CARGO_PKG_VERSION")],
+                    ));
+                }
             });
             let details = match &peer.link {
                 Some(link) => {

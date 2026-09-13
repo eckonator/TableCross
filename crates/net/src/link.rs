@@ -110,9 +110,10 @@ pub struct LinkInfo {
     pub quic_rtt: Duration,
     pub probes_sent: u64,
     pub probes_lost: u64,
-    /// Name and screens from the peer's `Hello`.
+    /// Name, screens and program version from the peer's `Hello`.
     pub name: String,
     pub screens: Vec<Screen>,
+    pub app_version: String,
 }
 
 /// What `setup` learned about the other side.
@@ -122,6 +123,7 @@ pub(crate) struct Established {
     pub instance: u64,
     pub name: String,
     pub screens: Vec<Screen>,
+    pub app_version: String,
 }
 
 #[derive(Debug)]
@@ -195,7 +197,7 @@ pub(crate) async fn setup(
             .await
             .map_err(|e| setup_err(connection, e))?
             .ok_or(SetupError::Protocol("stream ended before hello"))?;
-        let Ok(Message::Hello { name, screens, .. }) = decode(&frame) else {
+        let Ok(Message::Hello { name, screens, app, .. }) = decode(&frame) else {
             CloseCode::ProtocolError.close(connection, "expected hello");
             return Err(SetupError::Protocol("expected hello"));
         };
@@ -205,6 +207,7 @@ pub(crate) async fn setup(
             instance: theirs.instance,
             name,
             screens,
+            app_version: app,
         };
         if !dialer {
             if !admit(&established) {
@@ -523,6 +526,7 @@ pub(crate) fn info(
     stats: &LinkStats,
     name: &str,
     screens: &[Screen],
+    app_version: &str,
 ) -> LinkInfo {
     LinkInfo {
         address: crate::canonical(connection.remote_address()),
@@ -534,6 +538,7 @@ pub(crate) fn info(
         probes_lost: stats.lost,
         name: name.to_string(),
         screens: screens.to_vec(),
+        app_version: app_version.to_string(),
     }
 }
 

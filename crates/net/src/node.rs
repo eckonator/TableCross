@@ -51,6 +51,8 @@ pub struct NodeConfig {
     /// Dial paired peers. Without it the node only accepts connections.
     pub dial: bool,
     pub screens: Vec<Screen>,
+    /// Program version shown to other computers.
+    pub app_version: String,
 }
 
 impl NodeConfig {
@@ -61,6 +63,7 @@ impl NodeConfig {
             discovery: true,
             dial: true,
             screens: Vec::new(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
         }
     }
 }
@@ -210,6 +213,7 @@ struct LinkEntry {
     since: Instant,
     name: String,
     screens: Vec<Screen>,
+    app_version: String,
     /// The blob being sent; a new one replaces it.
     blob: Option<JoinHandle<()>>,
 }
@@ -498,6 +502,7 @@ impl Node {
                         &e.stats.lock().expect("stats lock"),
                         &e.name,
                         &e.screens,
+                        &e.app_version,
                     )
                 }),
                 reconnects: state.reconnects.get(&peer.fingerprint).copied().unwrap_or(0),
@@ -588,6 +593,7 @@ impl Inner {
             version: PROTOCOL_VERSION,
             name: self.config.name.clone(),
             screens: self.config.screens.clone(),
+            app: self.config.app_version.clone(),
         }
     }
 
@@ -765,6 +771,7 @@ async fn run_link(inner: Arc<Inner>, connection: Connection, dialed: bool) -> bo
             since: Instant::now(),
             name: established.name.clone(),
             screens: established.screens.clone(),
+            app_version: established.app_version.clone(),
             blob: None,
         };
         registered = inner.register(peer, entry, address);

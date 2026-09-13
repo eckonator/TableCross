@@ -82,6 +82,8 @@ pub enum Message {
         version: u16,
         name: String,
         screens: Vec<Screen>,
+        /// Version of the program, e.g. "0.1.0", shown to the user.
+        app: String,
     },
     /// The pointer enters the receiver at `(x, y)` in the receiver's native units; from now on the
     /// sender controls it.
@@ -260,6 +262,7 @@ mod tests {
                     height: 982,
                     scale: 2.0,
                 }],
+                app: "0.1.0".into(),
             },
             Message::Enter { x: 10.0, y: 0.25 },
             Message::Leave,
@@ -369,6 +372,7 @@ mod tests {
                     height: 1,
                     scale: 0.0,
                 }],
+                app: String::new(),
             },
         ] {
             assert_eq!(decode(&encode(&m)), Err(DecodeError::NotFinite), "{m:?}");

@@ -42,6 +42,7 @@ pub fn status() -> Status {
                     probes_lost: 1,
                     name: "Office-PC".into(),
                     screens: vec![screen(2560, 1440, 1.5)],
+                    app_version: env!("CARGO_PKG_VERSION").into(),
                 }),
                 reconnects: 2,
                 refusal: None,

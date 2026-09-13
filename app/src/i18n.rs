@@ -173,6 +173,10 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "version {}" => "Version {}",
+        "This computer runs version {}. Install the same version everywhere." => {
+            "Dieser Rechner hat Version {}. Installiere überall dieselbe Version."
+        }
         "The arrangement is shared with all paired computers, so every keyboard reaches every screen." => {
             "Die Anordnung gilt für alle gekoppelten Rechner, so erreicht jede Tastatur jeden Bildschirm."
         }
