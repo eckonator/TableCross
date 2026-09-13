@@ -231,9 +231,8 @@ async fn wrong_code_is_reported() {
     assert!(a.session.status().peers.is_empty());
 }
 
-async fn paired_pair(a_name: &str, b_name: &str) -> (Machine, Machine) {
-    let a = machine(a_name).await;
-    let b = machine(b_name).await;
+/// Pairs `a` with `b` (`b` shows the code) and waits for the connection.
+async fn pair(a: &Machine, b: &Machine) {
     b.session.send(Command::StartPairing);
     until("code shown", || b.session.status().pairing.is_some()).await;
     let code = b.session.status().pairing.unwrap().0;
@@ -242,14 +241,92 @@ async fn paired_pair(a_name: &str, b_name: &str) -> (Machine, Machine) {
         code: code.digits().to_string(),
         target: PairTarget::Address(b_addr),
     });
-    until("connected", || {
-        a.session.status().peers.first().is_some_and(|p| p.link.is_some())
-            && b.session.status().peers.first().is_some_and(|p| p.link.is_some())
-    })
-    .await;
+    let linked = |m: &Machine, other: &Machine| {
+        m.session
+            .status()
+            .peers
+            .iter()
+            .any(|p| p.fingerprint == other.node.fingerprint() && p.link.is_some())
+    };
+    until("connected", || linked(a, b) && linked(b, a)).await;
+}
+
+async fn paired_pair(a_name: &str, b_name: &str) -> (Machine, Machine) {
+    let a = machine(a_name).await;
+    let b = machine(b_name).await;
+    pair(&a, &b).await;
     // Let both clipboard watchers take their first look
     tokio::time::sleep(Duration::from_millis(400)).await;
     (a, b)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn arrangement_is_shared_and_reaches_three_computers() {
+    let a = machine("row-a").await;
+    let b = machine("row-b").await;
+    let c = machine("row-c").await;
+    pair(&a, &b).await;
+    pair(&b, &c).await;
+    pair(&a, &c).await;
+    let (a_fp, b_fp, c_fp) = (a.node.fingerprint(), b.node.fingerprint(), c.node.fingerprint());
+
+    // Each computer places only its own right neighbor; everyone ends up with the whole row
+    a.session.send(Command::Place {
+        peer: b_fp,
+        side: Some(Side::Right),
+    });
+    until("Beta knows Alpha", || {
+        b.session
+            .status()
+            .peers
+            .iter()
+            .any(|p| p.fingerprint == a_fp && p.side == Some(Side::Left))
+    })
+    .await;
+    b.session.send(Command::Place {
+        peer: c_fp,
+        side: Some(Side::Right),
+    });
+    for m in [&a, &b, &c] {
+        until("whole row everywhere", || {
+            m.session.status().layout.neighbors.len() == 2
+        })
+        .await;
+    }
+    let row = a.session.status().layout;
+    assert_eq!(b.session.status().layout.revision, row.revision);
+    assert_eq!(c.session.status().layout.neighbors, row.neighbors);
+
+    // From Alpha's keyboard through Beta to Gamma
+    assert!(!a.device.send(Captured::Motion {
+        x: 999.0,
+        y: 400.0,
+        dx: 5.0,
+        dy: 0.0,
+    }));
+    until("Alpha controls Beta", || {
+        a.session.status().controlling.as_deref() == Some("row-b")
+    })
+    .await;
+    for _ in 0..250 {
+        a.device.send(Captured::Motion {
+            x: 999.0,
+            y: 400.0,
+            dx: 5.0,
+            dy: 0.0,
+        });
+    }
+    until("Alpha controls Gamma", || {
+        a.session.status().controlling.as_deref() == Some("row-c")
+    })
+    .await;
+    until("Gamma entered", || {
+        c.device.injected().iter().any(|m| matches!(m, Message::Enter { .. }))
+    })
+    .await;
+    for m in [a, b, c] {
+        m.session.send(Command::Shutdown);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

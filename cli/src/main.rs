@@ -286,6 +286,7 @@ fn place(
     let mut file = layout_file::load(dir)?;
     layout_file::place(&mut file, &identity.fingerprint(), &peer.fingerprint, Some(side));
     layout_file::set_swap(&mut file, &peer.fingerprint, swap_cmd_ctrl);
+    layout_file::bump(&mut file, &identity.fingerprint());
     layout_file::save(dir, &file)?;
     println!("{} is now {words} this computer.", peer.name);
     Ok(())

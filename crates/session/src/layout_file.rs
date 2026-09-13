@@ -2,12 +2,21 @@
 //!
 //! Machines are stored by the first 16 hex digits of their fingerprint, so renaming a computer does
 //! not break the layout; names and fingerprint prefixes are accepted when reading.
+//!
+//! The arrangement is shared: after every change it goes to all connected computers, and each one
+//! keeps the version with the highest `(revision, editor)`. Revisions are milliseconds of the wall
+//! clock but always above every revision seen, so a computer with a late clock still wins with
+//! a newer change.
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use tc_core::{LayoutFile, Neighbor, Side};
 use tc_net::Fingerprint;
+use tc_protocol::{MAX_PLACEMENTS, Message};
 
 pub const LAYOUT_FILE: &str = "layout.json";
 
@@ -75,6 +84,111 @@ pub fn side_of(
     })
 }
 
+/// Marks the arrangement as changed here, so other computers take it over.
+pub fn bump(file: &mut LayoutFile, me: &Fingerprint) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    file.revision = now.max(file.revision + 1);
+    file.editor = machine_id(me);
+}
+
+/// The arrangement for other computers. `resolve` turns a name from the file into a fingerprint
+/// (`None`: unknown, sent as written); `known` gives display names of fingerprints.
+pub fn message(
+    file: &LayoutFile,
+    resolve: impl Fn(&str) -> Option<Fingerprint>,
+    known: impl Fn(&Fingerprint) -> Option<String>,
+) -> Message {
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    let mut id = |entry: &str| match resolve(entry) {
+        Some(fp) => {
+            let id = machine_id(&fp);
+            if let Some(name) = known(&fp).or_else(|| file.names.get(&id).cloned()) {
+                names.insert(id.clone(), name);
+            }
+            id
+        }
+        None => {
+            if let Some(name) = file.names.get(entry) {
+                names.insert(entry.to_string(), name.clone());
+            }
+            entry.to_string()
+        }
+    };
+    let placements = file
+        .neighbors
+        .iter()
+        .take(MAX_PLACEMENTS)
+        .map(|n| Neighbor {
+            machine: id(&n.machine),
+            side: n.side,
+            of: id(&n.of),
+        })
+        .collect();
+    Message::Layout {
+        revision: file.revision,
+        editor: file.editor.clone(),
+        placements,
+        names: names.into_iter().take(MAX_PLACEMENTS).collect(),
+    }
+}
+
+/// Takes over an arrangement from another computer if it is newer than ours.
+pub fn adopt(
+    file: &mut LayoutFile,
+    revision: u64,
+    editor: String,
+    placements: Vec<Neighbor>,
+    names: Vec<(String, String)>,
+) -> bool {
+    if (revision, editor.as_str()) <= (file.revision, file.editor.as_str()) {
+        return false;
+    }
+    file.revision = revision;
+    file.editor = editor;
+    file.neighbors = placements;
+    file.names = names.into_iter().collect();
+    true
+}
+
+/// Where each machine stands on the desk: grid cells `(column, row)` around `me` at `(0, 0)`, found by
+/// following the placements outward. `canonical` maps an entry of the file to one id per machine.
+/// Machines that would land on a taken cell are left out.
+pub fn desk(file: &LayoutFile, me: &str, canonical: impl Fn(&str) -> String) -> Vec<(String, i32, i32)> {
+    let step = |side: Side| match side {
+        Side::Left => (-1, 0),
+        Side::Right => (1, 0),
+        Side::Top => (0, -1),
+        Side::Bottom => (0, 1),
+    };
+    let links: Vec<(String, Side, String)> = file
+        .neighbors
+        .iter()
+        .map(|n| (canonical(&n.machine), n.side, canonical(&n.of)))
+        .collect();
+    let mut placed = vec![(me.to_string(), 0, 0)];
+    let mut next = 0;
+    while next < placed.len() {
+        let (current, x, y) = placed[next].clone();
+        next += 1;
+        for (machine, side, of) in &links {
+            let (other, (dx, dy)) = if *of == current {
+                (machine, step(*side))
+            } else if *machine == current {
+                (of, step(side.opposite()))
+            } else {
+                continue;
+            };
+            let cell = (x + dx, y + dy);
+            if !placed.iter().any(|(m, cx, cy)| m == other || (*cx, *cy) == cell) {
+                placed.push((other.clone(), cell.0, cell.1));
+            }
+        }
+    }
+    placed
+}
+
 pub fn set_swap(file: &mut LayoutFile, peer: &Fingerprint, swap: bool) {
     file.swap_cmd_ctrl.retain(|m| !names(m, peer, ""));
     if swap {
@@ -128,6 +242,91 @@ mod tests {
         assert!(swaps(&file, &PC, "pc"));
         set_swap(&mut file, &PC, false);
         assert!(!swaps(&file, &PC, "pc"));
+    }
+
+    fn resolve(entry: &str) -> Option<Fingerprint> {
+        [ME, PC, TV].into_iter().find(|fp| names(entry, fp, ""))
+    }
+
+    fn known(fp: &Fingerprint) -> Option<String> {
+        (*fp == PC).then(|| "PC".to_string())
+    }
+
+    fn adopt_message(file: &mut LayoutFile, message: Message) -> bool {
+        let Message::Layout {
+            revision,
+            editor,
+            placements,
+            names,
+        } = message
+        else {
+            panic!("not a layout");
+        };
+        adopt(file, revision, editor, placements, names)
+    }
+
+    #[test]
+    fn newer_arrangements_are_taken_over() {
+        let mut mine = LayoutFile::default();
+        place(&mut mine, &ME, &PC, Some(Side::Right));
+        bump(&mut mine, &ME);
+        let mut theirs = LayoutFile::default();
+        // Ours is newer: the other computer takes it, we keep ours
+        assert!(adopt_message(&mut theirs, message(&mine, resolve, known)));
+        assert_eq!(theirs.neighbors, mine.neighbors);
+        assert_eq!(theirs.names.get(&machine_id(&PC)).map(String::as_str), Some("PC"));
+        assert!(!adopt_message(&mut mine, message(&theirs, resolve, known)));
+        // A change over there wins even with a clock far behind
+        place(&mut theirs, &PC, &TV, Some(Side::Top));
+        theirs.revision = mine.revision;
+        bump(&mut theirs, &PC);
+        assert!(theirs.revision > mine.revision);
+        assert!(adopt_message(&mut mine, message(&theirs, resolve, known)));
+        assert_eq!(side_of(&mine, &PC, "", &TV, ""), Some(Side::Top));
+        assert_eq!(side_of(&mine, &ME, "", &PC, ""), Some(Side::Right));
+    }
+
+    #[test]
+    fn same_revision_is_decided_by_the_editor() {
+        let a = LayoutFile {
+            revision: 5,
+            editor: "aaaa".into(),
+            ..LayoutFile::default()
+        };
+        let b = LayoutFile {
+            revision: 5,
+            editor: "bbbb".into(),
+            ..LayoutFile::default()
+        };
+        assert!(adopt_message(&mut a.clone(), message(&b, resolve, known)));
+        assert!(!adopt_message(&mut b.clone(), message(&a, resolve, known)));
+        // Two old files without revision leave each other alone
+        assert!(!adopt_message(
+            &mut LayoutFile::default(),
+            message(&LayoutFile::default(), resolve, known)
+        ));
+    }
+
+    #[test]
+    fn names_in_the_file_travel_as_machine_ids() {
+        let file: LayoutFile =
+            serde_json::from_str(r#"{"neighbors":[{"machine":"0202020202020202","side":"left","of":"somebody"}]}"#)
+                .unwrap();
+        let Message::Layout { placements, .. } = message(&file, resolve, known) else {
+            panic!("not a layout");
+        };
+        assert_eq!(placements[0].machine, machine_id(&PC));
+        assert_eq!(placements[0].of, "somebody");
+    }
+
+    #[test]
+    fn the_whole_desk_around_this_computer() {
+        let id = |fp: &Fingerprint| machine_id(fp);
+        let mut file = LayoutFile::default();
+        place(&mut file, &ME, &PC, Some(Side::Right));
+        place(&mut file, &PC, &TV, Some(Side::Top));
+        let desk = desk(&file, &id(&PC), |e| e.to_string());
+        assert_eq!(desk, vec![(id(&PC), 0, 0), (id(&ME), -1, 0), (id(&TV), 0, -1)]);
     }
 
     #[test]

@@ -10,18 +10,14 @@
 //! "Gaming-PC is on the right of MacBook" also means "MacBook is on the left of Gaming-PC".
 //! Machines are named by their name or the start of their fingerprint.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::geometry::Side;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Neighbor {
-    pub machine: String,
-    pub side: Side,
-    pub of: String,
-}
+/// One entry of the arrangement; the same type travels between computers.
+pub use tc_protocol::Placement as Neighbor;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayoutFile {
@@ -33,6 +29,15 @@ pub struct LayoutFile {
     /// No switching within this many logical points of a screen corner.
     #[serde(default = "default_corner")]
     pub corner: f64,
+    /// Version of `neighbors`, shared between computers: the highest `(revision, editor)` wins.
+    #[serde(default)]
+    pub revision: u64,
+    /// Machine id of the computer that made this version.
+    #[serde(default)]
+    pub editor: String,
+    /// Display names of the machines in `neighbors`, by machine id.
+    #[serde(default)]
+    pub names: BTreeMap<String, String>,
 }
 
 fn default_corner() -> f64 {
@@ -45,6 +50,9 @@ impl Default for LayoutFile {
             neighbors: Vec::new(),
             swap_cmd_ctrl: Vec::new(),
             corner: default_corner(),
+            revision: 0,
+            editor: String::new(),
+            names: BTreeMap::new(),
         }
     }
 }

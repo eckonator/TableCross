@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on every incompatible change; both sides compare it in `Message::Hello`.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Largest message in bytes. Larger payloads (clipboard, files) are sent in chunks.
 pub const MAX_MESSAGE_LEN: usize = 64 * 1024;
@@ -18,6 +18,43 @@ pub struct Screen {
     /// Movement is converted through logical points, so the pointer moves equally fast everywhere.
     pub scale: f32,
 }
+
+/// Side of a screen or computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Side {
+    pub fn opposite(self) -> Side {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+            Side::Top => Side::Bottom,
+            Side::Bottom => Side::Top,
+        }
+    }
+
+    pub fn is_horizontal(self) -> bool {
+        matches!(self, Side::Left | Side::Right)
+    }
+}
+
+/// "`machine` stands on `side` of `of`"; computers are named by the first 16 hex digits of their
+/// fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placement {
+    pub machine: String,
+    pub side: Side,
+    pub of: String,
+}
+
+/// Most placements and names in one `Message::Layout`.
+pub const MAX_PLACEMENTS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MouseButton {
@@ -121,6 +158,15 @@ pub enum Message {
     FilesRequest {
         id: u64,
     },
+    /// Where all computers stand, so every keyboard reaches every screen. Each computer keeps the
+    /// arrangement with the highest `(revision, editor)` and passes it on. `names` maps machine ids
+    /// to display names, for computers the receiver is not paired with.
+    Layout {
+        revision: u64,
+        editor: String,
+        placements: Vec<Placement>,
+        names: Vec<(String, String)>,
+    },
 }
 
 impl Message {
@@ -144,6 +190,15 @@ impl Message {
             _ => true,
         }
     }
+
+    fn lists_bounded(&self) -> bool {
+        match self {
+            Message::Layout { placements, names, .. } => {
+                placements.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS
+            }
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +206,7 @@ pub enum DecodeError {
     TooLong(usize),
     Malformed,
     NotFinite,
+    TooMany,
 }
 
 impl std::fmt::Display for DecodeError {
@@ -159,6 +215,7 @@ impl std::fmt::Display for DecodeError {
             DecodeError::TooLong(n) => write!(f, "message too long ({n} bytes)"),
             DecodeError::Malformed => write!(f, "malformed message"),
             DecodeError::NotFinite => write!(f, "message contains non-finite numbers"),
+            DecodeError::TooMany => write!(f, "message contains too many entries"),
         }
     }
 }
@@ -180,6 +237,9 @@ pub fn decode(bytes: &[u8]) -> Result<Message, DecodeError> {
     }
     if !message.values_finite() {
         return Err(DecodeError::NotFinite);
+    }
+    if !message.lists_bounded() {
+        return Err(DecodeError::TooMany);
     }
     Ok(message)
 }
@@ -242,6 +302,16 @@ mod tests {
                 size: 2_000_000_000,
             },
             Message::FilesRequest { id: 3 },
+            Message::Layout {
+                revision: 1_792_234_331_000,
+                editor: "0123456789abcdef".into(),
+                placements: vec![Placement {
+                    machine: "fedcba9876543210".into(),
+                    side: Side::Right,
+                    of: "0123456789abcdef".into(),
+                }],
+                names: vec![("fedcba9876543210".into(), "Office PC".into())],
+            },
         ]
     }
 
@@ -303,6 +373,22 @@ mod tests {
         ] {
             assert_eq!(decode(&encode(&m)), Err(DecodeError::NotFinite), "{m:?}");
         }
+    }
+
+    #[test]
+    fn long_layouts_are_rejected() {
+        let placement = Placement {
+            machine: "a".into(),
+            side: Side::Left,
+            of: "b".into(),
+        };
+        let m = Message::Layout {
+            revision: 1,
+            editor: String::new(),
+            placements: vec![placement; MAX_PLACEMENTS + 1],
+            names: Vec::new(),
+        };
+        assert_eq!(decode(&encode(&m)), Err(DecodeError::TooMany));
     }
 
     #[test]

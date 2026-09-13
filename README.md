@@ -59,6 +59,9 @@ computers by dragging) and a status page per computer (connection, round trip, p
 out, recent messages, “copy diagnostics”). Closing the window keeps TableCross running in the menu
 bar (macOS) or notification area (Windows). The interface is in English and German.
 
+Any number of computers can share one desk. The arrangement is shared between all paired computers,
+and the Computers page shows the whole desk.
+
 ## Goals
 
 - **Reliable first.** Automatic reconnect after sleep, network changes and restarts; no stuck keys
@@ -106,9 +109,12 @@ Sharing mouse and keyboard (both computers paired):
 
 ```sh
 tablecross-cli place office-pc right   # on the Mac: the PC stands right of it
-tablecross-cli place macbook left      # on the PC: the Mac stands left of it
 tablecross-cli run                     # on both
 ```
+
+The arrangement is shared between all paired computers, so placing a computer once is enough. With
+three or more computers, pair each one with every other one; then every keyboard reaches every
+screen, for example from the Linux computer through the Mac on to the Windows PC.
 
 Move the pointer over the edge to control the other computer; using a computer's own mouse or
 keyboard takes control back. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on

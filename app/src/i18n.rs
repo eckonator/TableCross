@@ -172,6 +172,14 @@ fn de(en: &str) -> Option<&'static str> {
         "not paired with this computer" => "nicht mit diesem Rechner gekoppelt",
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
+        "Whole desk" => "Ganzer Schreibtisch",
+        "The arrangement is shared with all paired computers, so every keyboard reaches every screen." => {
+            "Die Anordnung gilt für alle gekoppelten Rechner, so erreicht jede Tastatur jeden Bildschirm."
+        }
+        "not paired here" => "hier nicht gekoppelt",
+        "To control {} with this keyboard, pair it with this computer as well." => {
+            "Um {} mit dieser Tastatur zu steuern, kopple ihn auch mit diesem Rechner."
+        }
         "Nothing yet." => "Noch nichts.",
         "now" => "jetzt",
         "off" => "aus",

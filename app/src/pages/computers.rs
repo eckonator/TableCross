@@ -6,7 +6,7 @@ use std::time::Instant;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use tc_core::Side;
 use tc_net::{Fingerprint, PAIRING_WINDOW};
-use tc_session::{Command, Notice, PairTarget, Status};
+use tc_session::{Command, Notice, PairTarget, Status, layout_file};
 
 use super::{card, ok_color, warn_color};
 use crate::app::App;
@@ -111,6 +111,7 @@ impl App {
         if let Some((peer, side)) = dropped {
             self.place(peer, side);
         }
+        desk_view(ui, status);
     }
 
     fn place(&mut self, peer: Fingerprint, side: Option<Side>) {
@@ -308,6 +309,103 @@ impl App {
 }
 
 const SMALL_TILE: Vec2 = Vec2::new(120.0, 84.0);
+
+/// The arrangement shared by all computers, if it reaches beyond the direct neighbors of this one.
+fn desk_view(ui: &mut egui::Ui, status: &Status) {
+    let Some(me_fp) = status.fingerprint else { return };
+    let me = layout_file::machine_id(&me_fp);
+    let canonical = |entry: &str| {
+        let lower = entry.to_lowercase();
+        let matches = |fp: &Fingerprint, name: &str| {
+            name.to_lowercase() == lower || (lower.len() >= 8 && fp.to_string().starts_with(&lower))
+        };
+        if matches(&me_fp, &status.name) {
+            return me.clone();
+        }
+        status
+            .peers
+            .iter()
+            .find(|p| matches(&p.fingerprint, &p.name))
+            .map_or_else(|| entry.to_string(), |p| layout_file::machine_id(&p.fingerprint))
+    };
+    let desk = layout_file::desk(&status.layout, &me, canonical);
+    if desk.iter().all(|(_, x, y)| x.abs() + y.abs() <= 1) {
+        return;
+    }
+    let p = theme::colors(ui);
+    ui.add_space(16.0);
+    ui.label(RichText::new(tr("Whole desk")).font(egui::FontId::new(14.0, theme::semibold())));
+    ui.label(
+        RichText::new(tr(
+            "The arrangement is shared with all paired computers, so every keyboard reaches every screen.",
+        ))
+        .color(p.muted),
+    );
+    ui.add_space(8.0);
+    let (min_x, max_x) = desk.iter().fold((0, 0), |(a, b), (_, x, _)| (a.min(*x), b.max(*x)));
+    let (min_y, max_y) = desk.iter().fold((0, 0), |(a, b), (_, _, y)| (a.min(*y), b.max(*y)));
+    let (cols, rows) = ((max_x - min_x + 1) as f32, (max_y - min_y + 1) as f32);
+    let gap = 10.0;
+    let full = egui::vec2(
+        SMALL_TILE.x * cols + gap * (cols - 1.0),
+        SMALL_TILE.y * rows + gap * (rows - 1.0),
+    );
+    let fit = ((ui.available_width() - 24.0) / full.x).min(1.0);
+    let (tile, gap) = (SMALL_TILE * fit, gap * fit);
+    let mut unreachable = Vec::new();
+    egui::Frame::new()
+        .fill(p.window)
+        .corner_radius(12.0)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let (area, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), full.y * fit), egui::Sense::hover());
+            let origin = egui::pos2(area.center().x - full.x * fit / 2.0, area.min.y);
+            for (id, x, y) in &desk {
+                let rect = egui::Rect::from_min_size(
+                    origin + egui::vec2((x - min_x) as f32 * (tile.x + gap), (y - min_y) as f32 * (tile.y + gap)),
+                    tile,
+                );
+                let peer = status
+                    .peers
+                    .iter()
+                    .find(|peer| layout_file::machine_id(&peer.fingerprint) == *id);
+                let (name, caption, frame, screen) = if *id == me {
+                    (status.name.clone(), tr("this computer"), p.accent, p.accent_soft)
+                } else if let Some(peer) = peer {
+                    let connected = peer.link.is_some();
+                    // A blank caption keeps all monitors the same size
+                    let caption = if connected { " " } else { tr("not connected") };
+                    let frame = if connected { p.accent } else { p.muted };
+                    let screen = if connected { p.accent_soft } else { p.field };
+                    (peer.name.clone(), caption, frame, screen)
+                } else {
+                    let name = status
+                        .layout
+                        .names
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| id.chars().take(8).collect());
+                    unreachable.push(name.clone());
+                    (name, tr("not paired here"), p.border, p.field)
+                };
+                paint_machine(ui, rect, &name, caption, frame, screen);
+            }
+        });
+    for name in unreachable {
+        ui.add_space(6.0);
+        theme::banner(
+            ui,
+            theme::Tone::Info,
+            &trf(
+                "To control {} with this keyboard, pair it with this computer as well.",
+                &[&name],
+            ),
+            |_| {},
+        );
+    }
+}
 
 /// A computer as a little monitor with its name below.
 fn paint_machine(ui: &egui::Ui, rect: egui::Rect, name: &str, caption: &str, frame: Color32, screen: Color32) {

@@ -81,7 +81,22 @@ pub fn status() -> Status {
             (ago(12), Notice::Local),
         ]
         .into(),
-        layout: Default::default(),
+        layout: tc_core::LayoutFile {
+            neighbors: vec![
+                tc_core::Neighbor {
+                    machine: "1111111111111111".into(),
+                    side: Side::Right,
+                    of: "5a5a5a5a5a5a5a5a".into(),
+                },
+                tc_core::Neighbor {
+                    machine: "3333333333333333".into(),
+                    side: Side::Right,
+                    of: "1111111111111111".into(),
+                },
+            ],
+            names: [("3333333333333333".to_string(), "Studio-Mac".to_string())].into(),
+            ..Default::default()
+        },
         transfers: vec![
             tc_session::TransferView {
                 id: 1,

@@ -282,22 +282,29 @@ impl Shared {
         execute(actions, &self.node, self.inject.as_deref());
     }
 
+    /// Turns a name or fingerprint prefix from `layout.json` into this machine or a paired one.
+    fn resolver(&self) -> impl Fn(&str) -> Option<Fingerprint> + use<> {
+        let machines: Vec<_> = std::iter::once((self.node.name().to_lowercase(), self.node.fingerprint()))
+            .chain(
+                self.node
+                    .paired()
+                    .into_iter()
+                    .map(|p| (p.name.to_lowercase(), p.fingerprint)),
+            )
+            .collect();
+        move |name: &str| {
+            let name = name.to_lowercase();
+            machines
+                .iter()
+                .find(|(n, fp)| *n == name || (name.len() >= 8 && fp.to_string().starts_with(&name)))
+                .map(|(_, fp)| *fp)
+        }
+    }
+
     fn layout(&self) -> Result<Layout> {
         let file = layout_file::load(&self.dir)?;
-        let me = (self.node.name().to_lowercase(), self.node.fingerprint().to_string());
-        let peers: Vec<_> = self
-            .node
-            .paired()
-            .into_iter()
-            .map(|p| (p.name.to_lowercase(), p.fingerprint.to_string()))
-            .collect();
-        let layout = Layout::from_file(&file, |name: &str| {
-            let name = name.to_lowercase();
-            std::iter::once(&me)
-                .chain(peers.iter())
-                .find(|(n, fp)| *n == name || (name.len() >= 8 && fp.starts_with(&name)))
-                .map(|(_, fp)| fp.clone())
-        })?;
+        let resolve = self.resolver();
+        let layout = Layout::from_file(&file, |name: &str| resolve(name).map(|fp| fp.to_string()))?;
         self.status.lock().expect("status lock").layout = file;
         Ok(layout)
     }
@@ -309,9 +316,12 @@ impl Shared {
         }
     }
 
+    /// Changes the arrangement here and passes it on to all connected computers.
     fn edit_layout(&self, edit: impl FnOnce(&mut LayoutFile)) {
+        let me = self.node.fingerprint();
         let result = layout_file::load(&self.dir).and_then(|mut file| {
             edit(&mut file);
+            layout_file::bump(&mut file, &me);
             layout_file::save(&self.dir, &file)
         });
         if let Err(e) = result {
@@ -319,6 +329,66 @@ impl Shared {
         }
         self.reload_layout();
         self.refresh();
+        self.share_layout(None);
+    }
+
+    /// Our arrangement for other computers.
+    fn layout_message(&self) -> Option<Message> {
+        let file = layout_file::load(&self.dir).ok()?;
+        let me = (self.node.fingerprint(), self.node.name().to_string());
+        let paired = self.node.paired();
+        Some(layout_file::message(&file, self.resolver(), |fp| {
+            if *fp == me.0 {
+                return Some(me.1.clone());
+            }
+            paired.iter().find(|p| p.fingerprint == *fp).map(|p| p.name.clone())
+        }))
+    }
+
+    /// Sends the arrangement to `to`, or to every connected computer except `except`.
+    fn share_layout_with(&self, to: &Fingerprint) {
+        if let Some(message) = self.layout_message() {
+            self.node.send(to, message);
+        }
+    }
+
+    fn share_layout(&self, except: Option<Fingerprint>) {
+        let Some(message) = self.layout_message() else { return };
+        for peer in self.node.status().into_iter().filter(|p| p.link.is_some()) {
+            if Some(peer.peer.fingerprint) != except {
+                self.node.send(&peer.peer.fingerprint, message.clone());
+            }
+        }
+    }
+
+    /// An arrangement from `from`: taken over if newer, then passed on.
+    fn layout_received(&self, from: Fingerprint, message: Message) {
+        let Message::Layout {
+            revision,
+            editor,
+            placements,
+            names,
+        } = message
+        else {
+            return;
+        };
+        let result = layout_file::load(&self.dir).and_then(|mut file| {
+            let newer = layout_file::adopt(&mut file, revision, editor, placements, names);
+            if newer {
+                layout_file::save(&self.dir, &file)?;
+            }
+            Ok(newer)
+        });
+        match result {
+            Ok(true) => {
+                tracing::info!("arrangement taken over from {}", self.name_of(&from.to_string()));
+                self.reload_layout();
+                self.refresh();
+                self.share_layout(Some(from));
+            }
+            Ok(false) => {}
+            Err(e) => tracing::warn!("layout: {e}"),
+        }
     }
 
     /// Rebuilds the status snapshot from node, engine and input.
@@ -890,6 +960,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .expect("engine lock")
                 .peer_online(&peer.to_string(), &screens);
             shared.reload_layout();
+            shared.share_layout_with(&peer);
             shared.notice(Notice::Connected(name));
         }
         Event::Disconnected { peer, reason } => {
@@ -963,6 +1034,10 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .and_then(|id| shared.clip.lock().expect("clip lock").received(peer, id, &data));
             clip_write(shared, peer, action);
         }
+        Event::Message {
+            peer,
+            message: message @ Message::Layout { .. },
+        } => shared.layout_received(peer, message),
         Event::Message { peer, message } => {
             let actions = shared
                 .engine

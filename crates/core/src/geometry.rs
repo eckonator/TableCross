@@ -1,7 +1,7 @@
 //! Points, rectangles and the screens of one machine, in that machine's native units.
 
-use serde::{Deserialize, Serialize};
 use tc_protocol::Screen;
+pub use tc_protocol::Side;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Point {
@@ -12,31 +12,6 @@ pub struct Point {
 impl Point {
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
-    }
-}
-
-/// Side of a screen or machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Side {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-impl Side {
-    pub fn opposite(self) -> Side {
-        match self {
-            Side::Left => Side::Right,
-            Side::Right => Side::Left,
-            Side::Top => Side::Bottom,
-            Side::Bottom => Side::Top,
-        }
-    }
-
-    pub fn is_horizontal(self) -> bool {
-        matches!(self, Side::Left | Side::Right)
     }
 }
 
