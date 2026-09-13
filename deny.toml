@@ -12,7 +12,13 @@ targets = [
 ]
 
 [advisories]
-ignore = []
+ignore = [
+    # zbus_names, zvariant and zvariant_derive are folded into zbus and no longer released on their
+    # own; they come in through zbus (desktop portals, accessibility on Linux), no security issue
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained only, no newer release of its users yet" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained only, no newer release of its users yet" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained only, no newer release of its users yet" },
+]
 
 [licenses]
 allow = [

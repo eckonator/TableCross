@@ -239,6 +239,9 @@ fn raw_delta(values: &[xinput::Fp3232]) -> (f64, f64) {
 
 fn key(detail: u32, down: bool) -> Option<Captured> {
     let code = u16::try_from(detail.checked_sub(KEYCODE_OFFSET)?).ok()?;
+    if let Some(key) = keymap::media(code) {
+        return Some(Captured::Media { key, down });
+    }
     Some(Captured::Key {
         usage: keymap::to_hid(code)?,
         down,
@@ -405,6 +408,12 @@ impl Inject for X11Inject {
             Message::Enter { x, y } | Message::MouseMove { x, y, .. } => state.move_to(f64::from(x), f64::from(y)),
             Message::MouseButton { button, down } => state.button(button, down),
             Message::Key { usage, down } => state.key(usage, down),
+            Message::Media { key } => {
+                let code = (u32::from(keymap::media_code(key)) + KEYCODE_OFFSET) as u8;
+                state.fake(xproto::KEY_PRESS_EVENT, code, 0, 0);
+                state.fake(xproto::KEY_RELEASE_EVENT, code, 0, 0);
+                state.flush();
+            }
             Message::Wheel { dx, dy, precise } => state.wheel(f64::from(dx), f64::from(dy), precise),
             _ => {}
         }

@@ -139,6 +139,26 @@ const TABLE: &[(u16, u16)] = &[
     (194, 0x73), // F24
 ];
 
+/// evdev codes of the media keys.
+pub const MEDIA: [(u16, tc_protocol::MediaKey); 8] = [
+    (115, tc_protocol::MediaKey::VolumeUp),
+    (114, tc_protocol::MediaKey::VolumeDown),
+    (113, tc_protocol::MediaKey::Mute),
+    (164, tc_protocol::MediaKey::PlayPause),
+    (163, tc_protocol::MediaKey::Next),
+    (165, tc_protocol::MediaKey::Previous),
+    (225, tc_protocol::MediaKey::BrightnessUp),
+    (224, tc_protocol::MediaKey::BrightnessDown),
+];
+
+pub fn media(code: u16) -> Option<tc_protocol::MediaKey> {
+    MEDIA.iter().find(|(c, _)| *c == code).map(|(_, k)| *k)
+}
+
+pub fn media_code(key: tc_protocol::MediaKey) -> u16 {
+    MEDIA.iter().find(|(_, k)| *k == key).map_or(0, |(c, _)| *c)
+}
+
 pub fn to_hid(code: u16) -> Option<u16> {
     TABLE
         .iter()

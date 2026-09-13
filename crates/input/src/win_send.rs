@@ -6,7 +6,7 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use tc_core::Point;
-use tc_protocol::{Message, MouseButton, PressedKeys};
+use tc_protocol::{MediaKey, Message, MouseButton, PressedKeys};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -21,6 +21,16 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::keymap::windows as keymap;
+
+/// Virtual keys of the media keys (Windows has none for screen brightness).
+pub(crate) const MEDIA_KEYS: [(u16, MediaKey); 6] = [
+    (0xAF, MediaKey::VolumeUp),
+    (0xAE, MediaKey::VolumeDown),
+    (0xAD, MediaKey::Mute),
+    (0xB3, MediaKey::PlayPause),
+    (0xB0, MediaKey::Next),
+    (0xB1, MediaKey::Previous),
+];
 
 /// Marks input we send ourselves, so the hooks let it through untouched.
 pub const OWN_INPUT: usize = 0x7462_6C78; // "tblx"
@@ -185,6 +195,15 @@ impl Injector {
             }
             Message::Wheel { dx, dy, precise } => {
                 self.wheel(f64::from(dx), f64::from(dy), precise);
+                true
+            }
+            Message::Media { key } => {
+                if let Some((vk, _)) = MEDIA_KEYS.iter().find(|(_, k)| *k == key) {
+                    send(&[
+                        key_input(*vk, 0, KEYEVENTF_EXTENDEDKEY),
+                        key_input(*vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP),
+                    ]);
+                }
                 true
             }
             Message::ReleaseAll => {

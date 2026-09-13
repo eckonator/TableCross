@@ -241,6 +241,17 @@ impl Sender {
                     self.frame(device);
                 }
             }
+            Message::Media { key } => {
+                if let Some(device) = self.device(DeviceCapability::Keyboard)
+                    && let Some(keyboard) = device.interface::<ei::Keyboard>()
+                {
+                    let code = u32::from(keymap::media_code(key));
+                    keyboard.key(code, ei::keyboard::KeyState::Press);
+                    self.frame(device);
+                    keyboard.key(code, ei::keyboard::KeyState::Released);
+                    self.frame(device);
+                }
+            }
             Message::MouseButton { button, down } => {
                 if down == self.buttons.contains(&button) {
                     return;
@@ -474,13 +485,13 @@ impl Receiver {
                 dy: -f64::from(e.dy),
                 precise: true,
             }),
-            EiEvent::KeyboardKey(e) => u16::try_from(e.key)
-                .ok()
-                .and_then(keymap::to_hid)
-                .map(|usage| Captured::Key {
-                    usage,
-                    down: e.state == ei::keyboard::KeyState::Press,
-                }),
+            EiEvent::KeyboardKey(e) => {
+                let down = e.state == ei::keyboard::KeyState::Press;
+                u16::try_from(e.key).ok().and_then(|code| match keymap::media(code) {
+                    Some(key) => Some(Captured::Media { key, down }),
+                    None => keymap::to_hid(code).map(|usage| Captured::Key { usage, down }),
+                })
+            }
             _ => None,
         };
         if let Some(captured) = captured {

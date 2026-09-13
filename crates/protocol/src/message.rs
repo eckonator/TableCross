@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on every incompatible change; both sides compare it in `Message::Hello`.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Largest message in bytes. Larger payloads (clipboard, files) are sent in chunks.
 pub const MAX_MESSAGE_LEN: usize = 64 * 1024;
@@ -42,6 +42,20 @@ impl Side {
     pub fn is_horizontal(self) -> bool {
         matches!(self, Side::Left | Side::Right)
     }
+}
+
+/// Keys for volume, playback and brightness. They travel apart from the other keys because systems
+/// report them apart (macOS as system events, not as key codes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MediaKey {
+    VolumeUp,
+    VolumeDown,
+    Mute,
+    PlayPause,
+    Next,
+    Previous,
+    BrightnessUp,
+    BrightnessDown,
 }
 
 /// "`machine` stands on `side` of `of`"; computers are named by the first 16 hex digits of their
@@ -119,6 +133,10 @@ pub enum Message {
     Key {
         usage: u16,
         down: bool,
+    },
+    /// A media key was pressed (once per press and per auto-repeat; there is no release).
+    Media {
+        key: MediaKey,
     },
     /// Release all keys and mouse buttons (safety net against stuck keys).
     ReleaseAll,
@@ -285,6 +303,9 @@ mod tests {
             Message::Key {
                 usage: 0x04,
                 down: true,
+            },
+            Message::Media {
+                key: MediaKey::VolumeUp,
             },
             Message::ReleaseAll,
             Message::Heartbeat { seq: u32::MAX },

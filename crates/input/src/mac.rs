@@ -119,6 +119,8 @@ const RIGHT_DRAGGED: u32 = 7;
 const KEY_DOWN: u32 = 10;
 const KEY_UP: u32 = 11;
 const FLAGS_CHANGED: u32 = 12;
+/// `NSEventTypeSystemDefined`; media keys arrive as these.
+const SYSTEM_DEFINED: u32 = 14;
 const SCROLL_WHEEL: u32 = 22;
 const OTHER_DOWN: u32 = 25;
 const OTHER_UP: u32 = 26;
@@ -342,6 +344,7 @@ impl Capture for MacCapture {
                     KEY_DOWN,
                     KEY_UP,
                     FLAGS_CHANGED,
+                    SYSTEM_DEFINED,
                     SCROLL_WHEEL,
                     OTHER_DOWN,
                     OTHER_UP,
@@ -495,6 +498,9 @@ fn translate(kind: u32, event: Ref, iso: bool) -> Vec<Captured> {
                 button: button_of(kind, event),
                 down: matches!(kind, LEFT_DOWN | RIGHT_DOWN | OTHER_DOWN),
             }],
+            SYSTEM_DEFINED => media::read(event)
+                .map(|(key, down)| vec![Captured::Media { key, down }])
+                .unwrap_or_default(),
             KEY_DOWN | KEY_UP => {
                 let code = CGEventGetIntegerValueField(event, KEYCODE) as u16;
                 match keymap::to_hid(code, iso) {
@@ -747,6 +753,13 @@ impl Inject for MacInject {
             Message::MouseButton { button, down } => state.button(button, down),
             Message::Key { usage, down } => state.key(usage, down),
             Message::Wheel { dx, dy, precise } => state.wheel(f64::from(dx), f64::from(dy), precise),
+            Message::Media { key } => {
+                for down in [true, false] {
+                    if let Some(event) = media::create(key, down) {
+                        state.post(event);
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -776,5 +789,81 @@ impl Inject for MacInject {
                 }
             })
             .collect()
+    }
+}
+
+/// Media keys: system events of subtype 8 ("aux control buttons"); `data1` holds the key type in
+/// the upper 16 bits and 0xA (down) or 0xB (up) in bits 8 to 15.
+mod media {
+    use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
+    use objc2_core_graphics::CGEvent;
+    use objc2_foundation::NSPoint;
+    use tc_protocol::MediaKey;
+
+    use super::Ref;
+
+    const AUX_CONTROL_BUTTONS: i16 = 8;
+    const KEYS: [(i64, MediaKey); 8] = [
+        (0, MediaKey::VolumeUp),
+        (1, MediaKey::VolumeDown),
+        (2, MediaKey::BrightnessUp),
+        (3, MediaKey::BrightnessDown),
+        (7, MediaKey::Mute),
+        (16, MediaKey::PlayPause),
+        (17, MediaKey::Next),
+        (18, MediaKey::Previous),
+    ];
+
+    pub fn read(event: Ref) -> Option<(MediaKey, bool)> {
+        objc2::rc::autoreleasepool(|_| {
+            // SAFETY: the tap hands over a valid CGEvent for the duration of the callback
+            let ns = NSEvent::eventWithCGEvent(unsafe { &*(event as *const CGEvent) })?;
+            if ns.r#type() != NSEventType::SystemDefined || ns.subtype().0 != AUX_CONTROL_BUTTONS {
+                return None;
+            }
+            let data = ns.data1() as i64;
+            let code = (data >> 16) & 0xFFFF;
+            let down = (data >> 8) & 0xFF == 0xA;
+            KEYS.iter().find(|(c, _)| *c == code).map(|(_, key)| (*key, down))
+        })
+    }
+
+    /// A new event (owned by the caller, like the other `CGEventCreate…` results).
+    pub fn create(key: MediaKey, down: bool) -> Option<Ref> {
+        let code = KEYS.iter().find(|(_, k)| *k == key)?.0;
+        let state: i64 = if down { 0xA } else { 0xB };
+        objc2::rc::autoreleasepool(|_| {
+            let ns =
+                NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+                    NSEventType::SystemDefined,
+                    NSPoint::new(0.0, 0.0),
+                    NSEventModifierFlags((state as usize) << 8),
+                    0.0,
+                    0,
+                    None,
+                    AUX_CONTROL_BUTTONS,
+                    ((code << 16) | (state << 8)) as isize,
+                    -1,
+                )?;
+            let cg = ns.CGEvent()?;
+            // Keep it beyond the pool, as the caller releases it
+            Some(objc2::rc::Retained::into_raw(cg).cast())
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn created_events_read_back() {
+            for (_, key) in KEYS {
+                for down in [true, false] {
+                    let event = create(key, down).expect("event");
+                    assert_eq!(read(event), Some((key, down)));
+                    unsafe { core_foundation_sys::base::CFRelease(event.cast()) };
+                }
+            }
+        }
     }
 }

@@ -173,6 +173,9 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Already switched on and still shown here (often after an update)? Select {} in the list, remove it with “–” and add it again with “+”." => {
+            "Schon eingeschaltet und trotzdem hier aufgeführt (oft nach einem Update)? {} in der Liste auswählen, mit „–“ entfernen und mit „+“ neu hinzufügen."
+        }
         "Update now" => "Jetzt aktualisieren",
         "Downloading …" => "Wird geladen …",
         "Installing, TableCross starts again by itself …" => {

@@ -33,6 +33,10 @@ on the next computer.
 This is needed only once. Later versions install from inside the app (**Update now** on the status
 page) and keep all permissions.
 
+If TableCross still asks for a permission that is already switched on (possible after updating from an
+older version), select TableCross in that list, remove it with **–** and add it again with **+**;
+switching it off and on is not enough.
+
 Using Terminal instead: this installs the newest version without the Gatekeeper step
 
 ```sh

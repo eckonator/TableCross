@@ -31,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::keymap::windows as keymap;
-use crate::win_send::{Agent, Injector, NUM_LOCK, OWN_INPUT, PAUSE, WHEEL_DELTA};
+use crate::win_send::{Agent, Injector, MEDIA_KEYS, NUM_LOCK, OWN_INPUT, PAUSE, WHEEL_DELTA};
 use crate::{Backend, Capture, Handler, Health, Inject, InputError, Problem};
 
 /// Ctrl that Windows adds in front of AltGr on layouts that have it; not a real key.
@@ -267,6 +267,16 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         if info.dwExtraInfo == OWN_INPUT || info.scanCode == FAKE_ALTGR_CTRL {
             return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam);
         }
+        let down = matches!(wparam as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
+        if let Some((_, key)) = MEDIA_KEYS.iter().find(|(vk, _)| u32::from(*vk) == info.vkCode) {
+            let event = Captured::Media { key: *key, down };
+            let pass = std::panic::catch_unwind(|| handle(&[event])).unwrap_or(true);
+            return if pass {
+                CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+            } else {
+                1
+            };
+        }
         let scan = match info.vkCode as u16 {
             VK_PAUSE => PAUSE,
             VK_NUMLOCK => NUM_LOCK,
@@ -279,7 +289,6 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         let Some(usage) = keymap::to_hid(scan) else {
             return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam);
         };
-        let down = matches!(wparam as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
         let pass = std::panic::catch_unwind(|| handle(&[Captured::Key { usage, down }])).unwrap_or(true);
         if pass {
             CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)

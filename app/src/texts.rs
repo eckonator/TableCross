@@ -84,11 +84,18 @@ pub fn pair_error(e: &PairError) -> String {
     }
 }
 
+/// macOS ties a permission to the exact program; after an update the old entry can stay switched on
+/// without counting. Switching it off and on is then not enough.
+const STALE_PERMISSION: &str = "Already switched on and still shown here (often after an update)? Select {} in \
+                                the list, remove it with “–” and add it again with “+”.";
+
 pub fn problem(p: &Problem) -> String {
     match p {
-        Problem::AccessibilityMissing => {
-            tr("TableCross needs the Accessibility permission to use mouse and keyboard.").into()
-        }
+        Problem::AccessibilityMissing => format!(
+            "{} {}",
+            tr("TableCross needs the Accessibility permission to use mouse and keyboard."),
+            trf(STALE_PERMISSION, &[&"TableCross"])
+        ),
         Problem::SecureInput => tr(
             "A program holds Secure Input (password field): typing does not reach other computers right now. \
              The system helper solves this.",
@@ -100,7 +107,11 @@ pub fn problem(p: &Problem) -> String {
              field is active on this Mac.",
         )
         .into(),
-        Problem::HelperNoAccess => tr("The system helper still needs the Input Monitoring permission.").into(),
+        Problem::HelperNoAccess => format!(
+            "{} {}",
+            tr("The system helper still needs the Input Monitoring permission."),
+            trf(STALE_PERMISSION, &[&"tablecross-helper"])
+        ),
         Problem::HelperOutdated => tr("The system helper is outdated; please install it again.").into(),
         Problem::HelperKeyboardsBusy(n) => trf(
             "The system helper could not take {} keyboard(s); their keys also reach this Mac.",

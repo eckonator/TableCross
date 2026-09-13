@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use tc_protocol::{Message, MouseButton, Screen};
+use tc_protocol::{MediaKey, Message, MouseButton, Screen};
 
 use crate::engine::{Action, Captured, Engine, Role};
 use crate::geometry::{Point, Screens, Side};
@@ -230,6 +230,7 @@ fn inject(os: &mut Os, message: Message) {
             native_button(os, button, down);
         }
         Message::Wheel { dx, dy, precise } => os.wheel.push((dx, dy, precise)),
+        Message::Media { key } => os.seen.push(format!("{key:?}")),
         other => panic!("unexpected injection {other:?}"),
     }
 }
@@ -546,6 +547,24 @@ fn wheel_goes_to_the_target() {
         },
     );
     assert_eq!(sim.os("pc").wheel, [(0.0, -1.0, false)]);
+}
+
+#[test]
+fn media_keys_go_to_the_target_once_per_press() {
+    let mut sim = Sim::mac_pc();
+    let press = |down| Captured::Media {
+        key: MediaKey::VolumeUp,
+        down,
+    };
+    // At home the system handles them itself
+    sim.feed("mac", press(true));
+    sim.feed("mac", press(false));
+    assert!(sim.os("pc").seen.is_empty());
+    cross_to_pc(&mut sim);
+    sim.feed("mac", press(true));
+    sim.feed("mac", press(true)); // auto-repeat
+    sim.feed("mac", press(false));
+    assert_eq!(sim.os("pc").seen, ["VolumeUp", "VolumeUp"]);
 }
 
 #[test]

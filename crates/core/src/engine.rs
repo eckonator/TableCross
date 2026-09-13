@@ -18,7 +18,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use tc_protocol::{Message, MouseButton, PressedKeys, Screen};
+use tc_protocol::{MediaKey, Message, MouseButton, PressedKeys, Screen};
 
 use crate::geometry::{Point, Screens, Side};
 use crate::layout::Layout;
@@ -46,6 +46,11 @@ pub enum Captured {
     /// USB HID usage (page 7).
     Key {
         usage: u16,
+        down: bool,
+    },
+    /// Volume, playback, brightness; only presses (and auto-repeats) go anywhere.
+    Media {
+        key: MediaKey,
         down: bool,
     },
     /// Same meaning as `Message::Wheel`.
@@ -249,6 +254,14 @@ impl Engine {
             Captured::Motion { x, y, dx, dy } => self.motion(Point::new(x, y), dx, dy, &mut actions),
             Captured::Key { usage, down } => self.key(usage, down, &mut actions),
             Captured::Button { button, down } => self.button(button, down, &mut actions),
+            Captured::Media { key, down } => {
+                if let (true, Mode::Remote { target, .. }) = (down, &self.mode) {
+                    actions.push(Action::Send {
+                        to: target.clone(),
+                        message: Message::Media { key },
+                    });
+                }
+            }
             Captured::Wheel { dx, dy, precise } => {
                 if let Mode::Remote { target, .. } = &self.mode {
                     actions.push(Action::Send {
@@ -316,7 +329,9 @@ impl Engine {
                     actions.push(Action::Inject(message));
                 }
             }
-            Message::Wheel { .. } if controlled_by_sender => actions.push(Action::Inject(message)),
+            Message::Wheel { .. } | Message::Media { .. } if controlled_by_sender => {
+                actions.push(Action::Inject(message))
+            }
             Message::ReleaseAll if controlled_by_sender => self.release_injected(&mut actions),
             Message::Leave if controlled_by_sender => {
                 self.release_injected(&mut actions);
