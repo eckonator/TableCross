@@ -30,6 +30,8 @@ struct Shared {
     grabbed: AtomicBool,
     park_x: AtomicI32,
     park_y: AtomicI32,
+    /// The pointer was put back at `park_x`/`park_y` on ungrab; motion is measured from there.
+    returned: AtomicBool,
     running: AtomicBool,
     /// Injection: its own connection, so the capture thread can block on events.
     inject: Mutex<InjectState>,
@@ -63,6 +65,7 @@ pub fn backend() -> Result<Backend, InputError> {
     let shared = Arc::new(Shared {
         grabbed: AtomicBool::new(false),
         park_x: AtomicI32::new(0),
+        returned: AtomicBool::new(false),
         park_y: AtomicI32::new(0),
         running: AtomicBool::new(false),
         inject: Mutex::new(InjectState {
@@ -178,6 +181,11 @@ impl Capture for X11Capture {
                                     dy: f64::from(delta.1),
                                 })
                             } else {
+                                if shared.returned.swap(false, Ordering::SeqCst) {
+                                    // Measured from the parking spot, the first motion would look like
+                                    // a jump across the screen and switch straight back
+                                    last = (shared.park_x.load(Ordering::SeqCst), shared.park_y.load(Ordering::SeqCst));
+                                }
                                 let delta = (pos.0 - last.0, pos.1 - last.1);
                                 last = pos;
                                 // At the edge the pointer does not move, but the push still counts
@@ -385,6 +393,9 @@ impl Inject for X11Inject {
             state.cursor_hidden = false;
         }
         state.flush();
+        self.shared.park_x.store(at.x.round() as i32, Ordering::SeqCst);
+        self.shared.park_y.store(at.y.round() as i32, Ordering::SeqCst);
+        self.shared.returned.store(true, Ordering::SeqCst);
         Ok(())
     }
 

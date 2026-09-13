@@ -46,6 +46,8 @@ struct Shared {
     grabbed: AtomicBool,
     park_x: AtomicI32,
     park_y: AtomicI32,
+    /// The pointer was put back at `park_x`/`park_y` on ungrab; motion is measured from there.
+    returned: AtomicBool,
     hook_thread: AtomicU32,
     /// `GetTickCount` of the last event the hooks saw.
     last_hook_event: AtomicU32,
@@ -71,6 +73,7 @@ pub fn backend() -> Result<Backend, InputError> {
         grabbed: AtomicBool::new(false),
         park_x: AtomicI32::new(0),
         park_y: AtomicI32::new(0),
+        returned: AtomicBool::new(false),
         hook_thread: AtomicU32::new(0),
         last_hook_event: AtomicU32::new(0),
         hooks_reinstalled: AtomicU32::new(0),
@@ -391,6 +394,14 @@ fn motion(pt: POINT) -> Captured {
                 dy: f64::from(pt.y - py),
             }
         } else {
+            if shared.returned.swap(false, Ordering::SeqCst) {
+                // Measured from the parking spot, the first motion would look like a jump across
+                // the screen and switch straight back to the other computer
+                context.last = POINT {
+                    x: shared.park_x.load(Ordering::SeqCst),
+                    y: shared.park_y.load(Ordering::SeqCst),
+                };
+            }
             let last = context.last;
             context.last = pt;
             Captured::Motion {
@@ -468,7 +479,11 @@ impl Inject for WinInject {
             show_cursor();
             state.cursor_hidden = false;
         }
-        unsafe { SetCursorPos(at.x.round() as i32, at.y.round() as i32) };
+        let (x, y) = (at.x.round() as i32, at.y.round() as i32);
+        unsafe { SetCursorPos(x, y) };
+        self.shared.park_x.store(x, Ordering::SeqCst);
+        self.shared.park_y.store(y, Ordering::SeqCst);
+        self.shared.returned.store(true, Ordering::SeqCst);
         Ok(())
     }
 
