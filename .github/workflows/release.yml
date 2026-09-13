@@ -72,12 +72,23 @@ jobs:
         shell: bash
         run: echo "version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
-      # One universal app (Apple silicon and Intel), ad-hoc signed
+      # One universal app (Apple silicon and Intel). Signed with the project's own certificate
+      # (secrets MACOS_SIGN_P12 as base64 and MACOS_SIGN_PASSWORD), so permissions survive updates;
+      # without the secrets ad-hoc.
       - name: macOS
         if: matrix.name == 'macOS'
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          TC_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
         run: |
+          if [ -n "$MACOS_SIGN_P12" ]; then
+            echo "$MACOS_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+            eval "$(scripts/signing-keychain.sh "$RUNNER_TEMP/sign.p12" "$RUNNER_TEMP/sign.keychain-db")"
+            rm "$RUNNER_TEMP/sign.p12"
+          else
+            echo "::warning::no signing certificate, the app is signed ad-hoc"
+          fi
           for t in aarch64-apple-darwin x86_64-apple-darwin; do
             cargo build --release --target $t -p tablecross -p tablecross-helper -p tablecross-cli
           done
@@ -155,13 +166,12 @@ jobs:
           body: |
             Early test build for macOS (Apple silicon and Intel, one universal app), Windows (64-bit) and Linux (x86_64 and arm64, e.g. Raspberry Pi 4/5 with 64-bit Raspberry Pi OS).
 
-            **macOS, easiest way** (no Gatekeeper prompt): paste into Terminal
+            **macOS:** open the `.dmg` and drag TableCross to Applications. On first start macOS refuses it once: click Done, then System Settings → Privacy & Security → **Open Anyway**. Or install from Terminal without that step:
             ```
             curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install-macos.sh | bash
             ```
-            Or open the `.dmg` and drag TableCross to Applications.
 
-            **Windows:** run `TableCross-…-Windows-Setup.exe`. **Linux:** unpack the `.tar.gz` and run `./install.sh`.
+            **Windows:** run `TableCross-…-Windows-Setup.exe` (on a SmartScreen warning: More info → Run anyway). **Linux:** unpack the `.tar.gz` and run `./install.sh`.
 
-            Built from commit ${{ github.sha }}. Installation notes are in the README.
+            Already installed? Use **Update now** in the app. Built from commit ${{ github.sha }}. Installation notes are in the README.
           files: pkg/*

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Builds dist/TableCross.app (app, system helper and command line tool inside).
+# TC_SIGN_IDENTITY / TC_SIGN_KEYCHAIN: certificate to sign with (default: ad-hoc).
 # Usage: scripts/bundle-macos.sh   (TC_SKIP_BUILD=1 uses binaries already in target/release)
 set -euo pipefail
 
@@ -47,8 +48,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature, so Apple silicon Macs start it without a developer account
-codesign --force --sign - "$APP/Contents/MacOS/tablecross-helper" >/dev/null 2>&1
-codesign --force --sign - "$APP/Contents/MacOS/tablecross-cli" >/dev/null 2>&1
-codesign --force --sign - --identifier de.eckonator.tablecross "$APP" >/dev/null 2>&1
+# Signed with the project's own certificate if there is one (see scripts/signing-keychain.sh), so
+# permissions survive updates; otherwise ad-hoc, so Apple silicon Macs start it at all
+SIGN=(--force --sign "${TC_SIGN_IDENTITY:--}")
+if [ -n "${TC_SIGN_KEYCHAIN:-}" ]; then
+  SIGN+=(--keychain "$TC_SIGN_KEYCHAIN")
+fi
+codesign "${SIGN[@]}" --identifier de.eckonator.tablecross.helper "$APP/Contents/MacOS/tablecross-helper"
+codesign "${SIGN[@]}" --identifier de.eckonator.tablecross.cli "$APP/Contents/MacOS/tablecross-cli"
+codesign "${SIGN[@]}" --identifier de.eckonator.tablecross "$APP"
+codesign --verify --deep "$APP"
 echo "Done: $APP"

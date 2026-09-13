@@ -135,10 +135,32 @@ impl App {
     /// The question whether to look for new versions, or the note that there is one.
     fn update_notes(&mut self, ui: &mut egui::Ui) {
         if let Some(new) = self.new_version.clone() {
+            use crate::self_update::Progress;
             let text = trf("A new TableCross is available ({}).", &[&new.version]);
-            theme::banner(ui, theme::Tone::Ok, &text, |ui| {
-                ui.hyperlink_to(tr("Download"), &new.url);
+            let progress = self.update_progress.clone();
+            let mut install = false;
+            theme::banner(ui, theme::Tone::Ok, &text, |ui| match &progress {
+                Some(Progress::Downloading) => {
+                    ui.spinner();
+                    ui.label(tr("Downloading …"));
+                }
+                Some(Progress::Installing | Progress::Restart) => {
+                    ui.spinner();
+                    ui.label(tr("Installing, TableCross starts again by itself …"));
+                }
+                _ => {
+                    if new.asset.is_some() {
+                        install = theme::primary_button(ui, tr("Update now")).clicked();
+                    }
+                    ui.hyperlink_to(tr("Download"), &new.url);
+                    if let Some(Progress::Failed(e)) = &progress {
+                        ui.label(RichText::new(trf("The update did not work: {}", &[e])).color(theme::colors(ui).bad));
+                    }
+                }
             });
+            if install {
+                self.install_update(ui.ctx());
+            }
             ui.add_space(10.0);
         }
         if self.settings.update_check.is_none() && self.demo.is_none() {

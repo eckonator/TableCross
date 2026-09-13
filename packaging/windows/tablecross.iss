@@ -62,6 +62,8 @@ Filename: "{app}\tablecross-service.exe"; Parameters: "install"; Flags: runhidde
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TableCross"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""TableCross"" dir=in action=allow protocol=UDP localport=24800 profile=private,domain program=""{app}\TableCross.exe"""; Flags: runhidden
 Filename: "{app}\TableCross.exe"; Description: "{cm:LaunchProgram,TableCross}"; Flags: nowait postinstall skipifsilent
+; Update from inside the app (silent): start the new version again, as the signed-in user
+Filename: "{app}\TableCross.exe"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{app}\tablecross-service.exe"; Parameters: "uninstall"; Flags: runhidden; RunOnceId: "RemoveService"

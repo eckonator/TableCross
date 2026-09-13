@@ -17,26 +17,38 @@ on the next computer.
 
 ## Installing
 
-**macOS 11 or newer** (Apple silicon and Intel): paste into Terminal
+**macOS 11 or newer** (Apple silicon and Intel):
+
+1. Download `TableCross-…-macOS.dmg` from the
+   [releases page](https://github.com/eckonator/TableCross/releases), open it and drag TableCross into
+   Applications.
+2. Open TableCross. TableCross does not come through Apple's paid developer program, so macOS refuses
+   it the first time (“Apple could not verify …”). Click **Done**.
+3. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to
+   TableCross, then confirm with your password. On macOS 11 to 14, a right-click on TableCross →
+   **Open** does the same.
+4. TableCross guides you through the rest: the **Accessibility** permission (needed to use mouse and
+   keyboard), possibly access to the local network, and the optional helper for password fields.
+
+This is needed only once. Later versions install from inside the app (**Update now** on the status
+page) and keep all permissions.
+
+Using Terminal instead: this installs the newest version without the Gatekeeper step
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/eckonator/TableCross/main/scripts/install-macos.sh | bash
 ```
 
-or open the `.dmg` and drag TableCross to Applications. TableCross is not notarized by Apple, so a copy
-from the `.dmg` or `.zip` is blocked by Gatekeeper at first; allow it once in Terminal:
+and this lets a copy from the `.dmg` or `.zip` start right away:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/TableCross.app
 ```
 
-On first start macOS asks for the
-**Accessibility** permission (needed to use mouse and keyboard) and possibly for access to the local
-network. The setup offers the optional system helper for password fields (see below).
-
 **Windows 10 and 11** (64-bit): run `TableCross-…-Windows-Setup.exe`. It installs the app, the optional
 service for the sign-in screen and elevated programs, and opens UDP port 24800 for private networks.
-There is also a portable `.zip`.
+Windows may warn about an unknown publisher (“Windows protected your PC”): click **More info → Run
+anyway**. Later versions install from inside the app (**Update now**). There is also a portable `.zip`.
 
 **Linux** (X11, or Wayland on GNOME 45+ / KDE Plasma 6.1+), x86_64 or arm64: unpack the `.tar.gz` and
 run `./install.sh` (installs for the current user; `./install.sh --uninstall` removes it).

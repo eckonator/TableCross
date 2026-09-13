@@ -11,6 +11,7 @@ mod i18n;
 mod icon;
 mod logging;
 mod pages;
+mod self_update;
 mod settings;
 mod texts;
 mod theme;

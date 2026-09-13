@@ -55,6 +55,9 @@ pub struct App {
     pub new_version: Option<crate::update::NewVersion>,
     update_job: Option<std::sync::mpsc::Receiver<Option<crate::update::NewVersion>>>,
     update_checked: Option<Instant>,
+    /// Installing a new version from inside the app, and how far it got.
+    self_update: Option<std::sync::mpsc::Receiver<crate::self_update::Progress>>,
+    pub update_progress: Option<crate::self_update::Progress>,
 }
 
 /// How often to look for a new version while running.
@@ -106,6 +109,8 @@ impl App {
             new_version: None,
             update_job: None,
             update_checked: None,
+            self_update: None,
+            update_progress: None,
         };
         if app.demo.is_none() {
             app.start_session(&ctx);
@@ -358,10 +363,27 @@ impl App {
             self.new_version = result;
             self.update_job = None;
         }
+        if let Some(job) = &self.self_update {
+            while let Ok(progress) = job.try_recv() {
+                if progress == crate::self_update::Progress::Restart {
+                    // The new version starts as soon as this one has ended
+                    self.quit_flag.store(true, Ordering::SeqCst);
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                self.update_progress = Some(progress);
+            }
+        }
         let due = self.update_checked.is_none_or(|t| t.elapsed() >= UPDATE_EVERY);
         if self.settings.update_check == Some(true) && self.demo.is_none() && self.update_job.is_none() && due {
             self.update_checked = Some(Instant::now());
             self.update_job = Some(crate::update::check_in_background(ctx.clone()));
+        }
+    }
+
+    pub fn install_update(&mut self, ctx: &egui::Context) {
+        if let Some(url) = self.new_version.as_ref().and_then(|n| n.asset.clone()) {
+            self.update_progress = Some(crate::self_update::Progress::Downloading);
+            self.self_update = Some(crate::self_update::start(url, ctx.clone()));
         }
     }
 

@@ -173,6 +173,12 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Update now" => "Jetzt aktualisieren",
+        "Downloading …" => "Wird geladen …",
+        "Installing, TableCross starts again by itself …" => {
+            "Wird installiert, TableCross startet danach von selbst …"
+        }
+        "The update did not work: {}" => "Die Aktualisierung hat nicht geklappt: {}",
         "version {}" => "Version {}",
         "This computer runs version {}. Install the same version everywhere." => {
             "Dieser Rechner hat Version {}. Installiere überall dieselbe Version."

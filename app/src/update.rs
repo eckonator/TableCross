@@ -19,6 +19,8 @@ pub struct NewVersion {
     pub version: String,
     /// Release page to download it from.
     pub url: String,
+    /// The file for this system, if the app can install it itself.
+    pub asset: Option<String>,
 }
 
 /// Starts the check in the background; the result comes through the receiver (`None`: nothing new).
@@ -69,17 +71,34 @@ fn check() -> Option<NewVersion> {
         env!("CARGO_PKG_VERSION"),
         env!("TC_GIT_HASH"),
         env!("TC_GIT_TIME"),
+        crate::self_update::asset_suffix(),
     )
 }
 
 /// Compares a release (GitHub API object) with this build.
-fn newer_release(release: &serde_json::Value, version: &str, commit: &str, commit_time: &str) -> Option<NewVersion> {
+fn newer_release(
+    release: &serde_json::Value,
+    version: &str,
+    commit: &str,
+    commit_time: &str,
+    suffix: Option<&str>,
+) -> Option<NewVersion> {
     let tag = release.get("tag_name")?.as_str()?;
     let page = release.get("html_url")?.as_str()?.to_string();
     let latest = tag.trim_start_matches('v');
+    let asset = suffix.and_then(|suffix| {
+        release
+            .get("assets")?
+            .as_array()?
+            .iter()
+            .filter_map(|a| a.get("browser_download_url")?.as_str())
+            .find(|u| u.ends_with(suffix))
+            .map(str::to_string)
+    });
     let found = NewVersion {
         version: latest.to_string(),
         url: page,
+        asset,
     };
     if newer(latest, version) {
         return Some(found);
@@ -154,13 +173,33 @@ mod tests {
         let noon = unix_time("2026-10-17T12:00:00Z").unwrap();
         let earlier = (noon - 3600).to_string();
         let later = (noon + 3600).to_string();
-        assert!(newer_release(&release, "0.0.1", "1111111", &earlier).is_some());
+        assert!(newer_release(&release, "0.0.1", "1111111", &earlier, None).is_some());
         // Our own build, or a local build from a younger commit: nothing new
-        assert!(newer_release(&release, "0.0.1", "abcdef1", &earlier).is_none());
-        assert!(newer_release(&release, "0.0.1", "1111111", &later).is_none());
+        assert!(newer_release(&release, "0.0.1", "abcdef1", &earlier, None).is_none());
+        assert!(newer_release(&release, "0.0.1", "1111111", &later, None).is_none());
         // Without build information only the version counts
-        assert!(newer_release(&release, "0.0.1", "", "").is_none());
-        assert!(newer_release(&release, "0.0.0", "", "").is_some());
-        assert!(newer_release(&release, "0.0.2", "1111111", &earlier).is_none());
+        assert!(newer_release(&release, "0.0.1", "", "", None).is_none());
+        assert!(newer_release(&release, "0.0.0", "", "", None).is_some());
+        assert!(newer_release(&release, "0.0.2", "1111111", &earlier, None).is_none());
+    }
+
+    #[test]
+    fn picks_the_file_for_this_system() {
+        let release = serde_json::json!({
+            "tag_name": "v0.2.0",
+            "html_url": "https://example/releases/v0.2.0",
+            "assets": [
+                {"browser_download_url": "https://example/TableCross-0.2.0-macOS.dmg"},
+                {"browser_download_url": "https://example/TableCross-0.2.0-macOS.zip"},
+                {"browser_download_url": "https://example/TableCross-0.2.0-Windows-Setup.exe"},
+            ],
+        });
+        let found = newer_release(&release, "0.1.0", "", "", Some("-macOS.zip")).unwrap();
+        assert_eq!(
+            found.asset.as_deref(),
+            Some("https://example/TableCross-0.2.0-macOS.zip")
+        );
+        let found = newer_release(&release, "0.1.0", "", "", Some("-Linux.tar.gz")).unwrap();
+        assert_eq!(found.asset, None);
     }
 }
