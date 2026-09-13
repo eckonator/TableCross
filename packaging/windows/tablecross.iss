@@ -49,6 +49,7 @@ Source: "{#Source}\tablecross-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\tablecross-service.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\assets\fonts\*-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\THIRD-PARTY-LICENSES.yml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]

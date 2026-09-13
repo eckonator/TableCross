@@ -14,7 +14,7 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 ditto "$APP" "$STAGE/TableCross.app"
 ln -s /Applications "$STAGE/Applications"
-cp README.md LICENSE "$STAGE/"
+cp README.md LICENSE assets/fonts/*-LICENSE.txt "$STAGE/"
 rm -f "$OUT"
 hdiutil create -quiet -volname "TableCross $VERSION" -srcfolder "$STAGE" -format UDZO "$OUT"
 echo "Done: $OUT"

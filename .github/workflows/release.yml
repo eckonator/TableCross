@@ -89,9 +89,9 @@ jobs:
           TC_SKIP_BUILD=1 scripts/bundle-macos.sh
           mkdir -p pkg
           V="${{ steps.version.outputs.version }}"
-          cp README.md LICENSE THIRD-PARTY-LICENSES.yml dist/
+          cp README.md LICENSE THIRD-PARTY-LICENSES.yml assets/fonts/*-LICENSE.txt dist/
           ditto -c -k --keepParent dist/TableCross.app "pkg/TableCross-$V-macOS.zip"
-          (cd dist && zip -q "../pkg/TableCross-$V-macOS.zip" README.md LICENSE THIRD-PARTY-LICENSES.yml)
+          (cd dist && zip -q "../pkg/TableCross-$V-macOS.zip" README.md LICENSE THIRD-PARTY-LICENSES.yml *-LICENSE.txt)
           scripts/make-dmg.sh "pkg/TableCross-$V-macOS.dmg"
 
       - name: Windows
@@ -107,7 +107,7 @@ jobs:
           mkdir -p "pkg/$DIR"
           cp target/release/tablecross.exe "pkg/$DIR/TableCross.exe"
           cp target/release/tablecross-cli.exe target/release/tablecross-service.exe "pkg/$DIR/"
-          cp README.md LICENSE THIRD-PARTY-LICENSES.yml "pkg/$DIR/"
+          cp README.md LICENSE THIRD-PARTY-LICENSES.yml assets/fonts/*-LICENSE.txt "pkg/$DIR/"
           cd pkg && 7z a -tzip "$DIR.zip" "$DIR" > /dev/null && rm -r "$DIR"
 
       - name: Linux
@@ -118,7 +118,7 @@ jobs:
           DIR="TableCross-$V-Linux-${{ matrix.arch }}"
           mkdir -p "pkg/$DIR"
           cp target/release/tablecross target/release/tablecross-cli assets/tablecross.desktop \
-            README.md LICENSE THIRD-PARTY-LICENSES.yml "pkg/$DIR/"
+            README.md LICENSE THIRD-PARTY-LICENSES.yml assets/fonts/*-LICENSE.txt "pkg/$DIR/"
           cp assets/icon-256.png "pkg/$DIR/tablecross.png"
           cp scripts/install-linux.sh "pkg/$DIR/install.sh"
           cd pkg && tar czf "$DIR.tar.gz" "$DIR" && rm -r "$DIR"

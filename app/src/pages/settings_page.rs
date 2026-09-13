@@ -9,6 +9,7 @@ use crate::settings::{LangSetting, ThemeSetting, host_name};
 
 impl App {
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
+        self.page_header(ui, tr("Settings"), tr("How TableCross behaves on this computer."));
         let mut changed = false;
         card(ui, tr("General"), |ui| {
             egui::Grid::new("general")
@@ -81,7 +82,7 @@ impl App {
                     ui.end_row();
                 });
         });
-        ui.add_space(8.0);
+        ui.add_space(14.0);
         card(ui, tr("Network"), |ui| {
             egui::Grid::new("network")
                 .num_columns(2)
@@ -117,7 +118,7 @@ impl App {
                 });
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(14.0);
         card(ui, tr("Clipboard"), |ui| {
             changed |= ui
                 .checkbox(
@@ -150,7 +151,7 @@ impl App {
                 });
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(14.0);
         card(ui, tr("Keyboard shortcuts"), |ui| {
             for (keys, what) in [
                 (
@@ -167,7 +168,7 @@ impl App {
                 ui.add_space(4.0);
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(14.0);
         card(ui, tr("Files"), |ui| {
             ui.horizontal(|ui| {
                 if ui.button(tr("Open settings folder")).clicked() {

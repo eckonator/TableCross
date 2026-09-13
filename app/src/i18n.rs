@@ -307,6 +307,25 @@ fn de(en: &str) -> Option<&'static str> {
         "No" => "Nein",
         "Updates" => "Updates",
         "Look for new versions on GitHub" => "Bei GitHub nach neuen Versionen schauen",
+        "About TableCross" => "Über TableCross",
+        "Arrange the computers on your desk and pair new ones." => {
+            "Ordne die Rechner auf deinem Schreibtisch an und kopple neue."
+        }
+        "How TableCross behaves on this computer." => "Wie sich TableCross auf diesem Rechner verhält.",
+        "ID {}" => "ID {}",
+        "Setup" => "Einrichtung",
+        "This computer, its connections and what happened recently." => {
+            "Dieser Rechner, seine Verbindungen und was zuletzt passiert ist."
+        }
+        "Three short steps, then TableCross is ready." => "Drei kurze Schritte, dann ist TableCross bereit.",
+        "Working on this computer" => "Arbeitet an diesem Rechner",
+        "connected" => "verbunden",
+        "mouse and keyboard captured" => "Maus und Tastatur erfasst",
+        "mouse and keyboard not available" => "Maus und Tastatur nicht verfügbar",
+        "mouse and keyboard off" => "Maus und Tastatur aus",
+        "not connected" => "nicht verbunden",
+        "this computer" => "dieser Rechner",
+        "{} screen(s)" => "{} Bildschirm(e)",
         _ => return None,
     })
 }

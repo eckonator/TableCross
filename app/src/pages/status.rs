@@ -4,115 +4,59 @@ use eframe::egui::{self, RichText};
 use tc_input::Problem;
 use tc_session::{Command, InputState, Status, TransferState};
 
-use super::{card, ok_color, warn_color};
+use super::{card, ok_color};
 use crate::app::App;
 use crate::i18n::{tr, trf};
 use crate::texts;
+use crate::theme;
 
 impl App {
     pub fn status_page(&mut self, ui: &mut egui::Ui) {
+        self.page_header(
+            ui,
+            tr("Status"),
+            tr("This computer, its connections and what happened recently."),
+        );
         let status = self.status.clone();
         self.update_notes(ui);
         self.problems(ui, &status);
-        ui.add_space(8.0);
-        card(ui, tr("This computer"), |ui| {
-            egui::Grid::new("me")
-                .num_columns(2)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label(tr("Name"));
-                    ui.label(RichText::new(&status.name).strong());
-                    ui.end_row();
-                    ui.label(tr("Fingerprint"));
-                    ui.label(RichText::new(status.fingerprint.map(|f| f.short()).unwrap_or_default()).monospace());
-                    ui.end_row();
-                    ui.label(tr("Port"));
-                    ui.label(format!("UDP {}", status.port));
-                    ui.end_row();
-                    ui.label(tr("Screens"));
-                    let screens: Vec<String> = status
-                        .screens
-                        .iter()
-                        .map(|s| format!("{}×{}", s.width, s.height))
-                        .collect();
-                    ui.label(if screens.is_empty() {
-                        tr("unknown").to_string()
-                    } else {
-                        screens.join(", ")
-                    });
-                    ui.end_row();
-                    ui.label(tr("Mouse and keyboard"));
-                    match &status.input {
-                        InputState::Running => ui.colored_label(ok_color(ui), tr("captured")),
-                        InputState::Off => ui.label(tr("off")),
-                        InputState::Failed(e) => ui.colored_label(warn_color(ui), trf("not available: {}", &[e])),
-                    };
-                    ui.end_row();
-                });
-        });
-        ui.add_space(8.0);
+        ui.add_space(14.0);
+        card(ui, "", |ui| self.this_computer(ui, &status));
+        ui.add_space(14.0);
         card(ui, tr("Paired computers"), |ui| {
             if status.peers.is_empty() {
-                ui.label(tr("None yet. Pair a computer on the page “Computers”."));
+                ui.label(RichText::new(tr("None yet. Pair a computer on the page “Computers”.")).weak());
             }
-            for peer in &status.peers {
-                ui.horizontal(|ui| {
-                    let connected = peer.link.is_some();
-                    let color = if connected {
-                        ok_color(ui)
-                    } else {
-                        ui.visuals().weak_text_color()
-                    };
-                    super::dot(ui, color, connected);
-                    ui.label(RichText::new(&peer.name).strong());
-                    ui.label(RichText::new(texts::side(peer.side)).weak());
-                });
-                ui.indent(peer.fingerprint.short(), |ui| match &peer.link {
-                    Some(link) => {
-                        let rtt = link
-                            .rtt
-                            .map_or_else(|| "–".to_string(), |r| format!("{:.1} ms", r.as_secs_f64() * 1000.0));
-                        ui.label(trf(
-                            "Connected at {} · round trip {} · lost {} of {} · reconnects {}",
-                            &[
-                                &link.address,
-                                &rtt,
-                                &link.probes_lost,
-                                &link.probes_sent,
-                                &peer.reconnects,
-                            ],
-                        ));
-                    }
-                    None => {
-                        let text = match &peer.refusal {
-                            Some(r) => trf("Not connected: {}", &[&texts::refusal(r)]),
-                            None => tr("Not connected (searching …)").to_string(),
-                        };
-                        ui.label(RichText::new(text).weak());
-                    }
-                });
-                ui.add_space(4.0);
+            for (i, peer) in status.peers.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                }
+                peer_row(ui, peer);
             }
         });
         if !status.transfers.is_empty() || status.files_waiting.is_some() {
-            ui.add_space(8.0);
+            ui.add_space(14.0);
             card(ui, tr("Files"), |ui| self.transfers(ui, &status));
         }
-        ui.add_space(8.0);
+        ui.add_space(14.0);
         card(ui, tr("Recent messages"), |ui| {
             if status.notices.is_empty() {
                 ui.label(RichText::new(tr("Nothing yet.")).weak());
             }
-            egui::Grid::new("notices")
-                .num_columns(2)
-                .spacing([12.0, 4.0])
-                .show(ui, |ui| {
-                    for (at, notice) in status.notices.iter().rev().take(12) {
-                        ui.label(RichText::new(texts::ago(*at)).weak());
-                        ui.label(texts::notice(notice));
-                        ui.end_row();
-                    }
+            let p = theme::colors(ui);
+            for (at, notice) in status.notices.iter().rev().take(12) {
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 18.0), egui::Sense::hover());
+                    ui.painter().circle_filled(rect.center(), 3.0, notice_color(&p, notice));
+                    ui.add_sized(
+                        [86.0, 18.0],
+                        egui::Label::new(RichText::new(texts::ago(*at)).small().color(p.muted)),
+                    );
+                    ui.label(texts::notice(notice));
                 });
+            }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.button(tr("Copy diagnostics")).clicked() {
@@ -130,11 +74,12 @@ impl App {
 
     fn transfers(&mut self, ui: &mut egui::Ui, status: &Status) {
         if let Some(waiting) = &status.files_waiting {
-            ui.label(trf(
+            let text = trf(
                 "Copied on another computer: {}. They come over when the pointer arrives here.",
                 &[waiting],
-            ));
-            ui.add_space(4.0);
+            );
+            theme::banner(ui, theme::Tone::Info, &text, |_| {});
+            ui.add_space(8.0);
         }
         for t in status.transfers.iter().rev() {
             let direction = if t.incoming {
@@ -155,7 +100,12 @@ impl App {
             match &t.state {
                 TransferState::Running => {
                     ui.horizontal(|ui| {
-                        ui.add(egui::ProgressBar::new(fraction).desired_width(260.0).text(size));
+                        ui.add(
+                            egui::ProgressBar::new(fraction)
+                                .desired_width(280.0)
+                                .fill(theme::colors(ui).accent)
+                                .text(RichText::new(size).color(theme::colors(ui).on_accent)),
+                        );
                         if ui.button(tr("Cancel")).clicked() {
                             self.send(Command::CancelTransfer(t.id));
                         }
@@ -175,7 +125,7 @@ impl App {
                     ui.label(RichText::new(tr("cancelled")).weak());
                 }
                 TransferState::Failed(e) => {
-                    ui.colored_label(warn_color(ui), trf("failed: {}", &[e]));
+                    ui.colored_label(theme::colors(ui).bad, trf("failed: {}", &[e]));
                 }
             }
             ui.add_space(4.0);
@@ -185,18 +135,11 @@ impl App {
     /// The question whether to look for new versions, or the note that there is one.
     fn update_notes(&mut self, ui: &mut egui::Ui) {
         if let Some(new) = self.new_version.clone() {
-            egui::Frame::group(ui.style())
-                .inner_margin(10.0)
-                .corner_radius(8.0)
-                .stroke(egui::Stroke::new(1.5, ok_color(ui)))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(trf("A new TableCross is available ({}).", &[&new.version])).strong());
-                        ui.hyperlink_to(tr("Download"), &new.url);
-                    });
-                });
-            ui.add_space(8.0);
+            let text = trf("A new TableCross is available ({}).", &[&new.version]);
+            theme::banner(ui, theme::Tone::Ok, &text, |ui| {
+                ui.hyperlink_to(tr("Download"), &new.url);
+            });
+            ui.add_space(10.0);
         }
         if self.settings.update_check.is_none() && self.demo.is_none() {
             let mut answer = None;
@@ -218,24 +161,57 @@ impl App {
                 self.settings.update_check = answer;
                 self.save_settings();
             }
-            ui.add_space(8.0);
+            ui.add_space(14.0);
         }
     }
 
     /// Problems at the top, each with what can be done.
     fn problems(&mut self, ui: &mut egui::Ui, status: &Status) {
         for problem in &status.problems {
-            egui::Frame::group(ui.style())
-                .inner_margin(10.0)
-                .corner_radius(8.0)
-                .stroke(egui::Stroke::new(1.5, warn_color(ui)))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(RichText::new(texts::problem(problem)).color(warn_color(ui)));
-                    ui.horizontal(|ui| self.problem_actions(ui, problem));
-                });
-            ui.add_space(4.0);
+            theme::banner(ui, theme::Tone::Warn, &texts::problem(problem), |ui| {
+                self.problem_actions(ui, problem)
+            });
+            ui.add_space(10.0);
         }
+    }
+
+    /// Name, state and the facts of this computer, next to a little monitor.
+    fn this_computer(&self, ui: &mut egui::Ui, status: &Status) {
+        let p = theme::colors(ui);
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(84.0, 64.0), egui::Sense::hover());
+            let inner = theme::monitor(ui.painter(), rect, p.accent, p.accent_soft);
+            ui.painter().text(
+                inner.center(),
+                egui::Align2::CENTER_CENTER,
+                "✔",
+                egui::FontId::proportional(18.0),
+                p.accent,
+            );
+            ui.add_space(12.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(tr("This computer")).small().color(p.muted));
+                ui.label(RichText::new(&status.name).font(egui::FontId::new(20.0, theme::semibold())));
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    match &status.input {
+                        InputState::Running => theme::chip(ui, tr("mouse and keyboard captured"), p.ok, p.ok_soft),
+                        InputState::Off => theme::chip(ui, tr("mouse and keyboard off"), p.muted, p.field),
+                        InputState::Failed(_) => {
+                            theme::chip(ui, tr("mouse and keyboard not available"), p.warn, p.warn_soft)
+                        }
+                    }
+                    let screens = status.screens.len();
+                    theme::chip(ui, &trf("{} screen(s)", &[&screens]), p.muted, p.field);
+                    theme::chip(ui, &format!("UDP {}", status.port), p.muted, p.field);
+                    let fingerprint = status.fingerprint.map(|f| f.short()).unwrap_or_default();
+                    theme::chip(ui, &trf("ID {}", &[&fingerprint]), p.muted, p.field);
+                });
+                if let InputState::Failed(e) = &status.input {
+                    ui.label(RichText::new(e).small().color(p.warn));
+                }
+            });
+        });
     }
 
     pub fn problem_actions(&mut self, ui: &mut egui::Ui, problem: &Problem) {
@@ -330,4 +306,63 @@ impl App {
         }
         out
     }
+}
+
+fn notice_color(p: &theme::Palette, notice: &tc_session::Notice) -> egui::Color32 {
+    use tc_session::Notice::*;
+    match notice {
+        Connected(_) | Paired(_) | FilesReceived(..) | ClipboardReceived(_) => p.ok,
+        Disconnected(..) | Refused(..) | PairError(_) | PairingFailed(_) | Problem(_) | InputFailed(_)
+        | TransferFailed(..) | ClipboardSkipped(_) => p.warn,
+        _ => p.accent,
+    }
+}
+
+/// One paired computer: name, where it stands, connection details.
+fn peer_row(ui: &mut egui::Ui, peer: &tc_session::PeerView) {
+    let p = theme::colors(ui);
+    let connected = peer.link.is_some();
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(46.0, 36.0), egui::Sense::hover());
+        let (frame, screen) = if connected {
+            (p.accent, p.accent_soft)
+        } else {
+            (p.border, p.field)
+        };
+        theme::monitor(ui.painter(), rect, frame, screen);
+        ui.add_space(8.0);
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&peer.name).font(egui::FontId::new(15.0, theme::semibold())));
+                if connected {
+                    theme::chip(ui, tr("connected"), p.ok, p.ok_soft);
+                } else {
+                    theme::chip(ui, tr("not connected"), p.muted, p.field);
+                }
+                theme::chip(ui, texts::side(peer.side), p.muted, p.field);
+            });
+            let details = match &peer.link {
+                Some(link) => {
+                    let rtt = link
+                        .rtt
+                        .map_or_else(|| "–".to_string(), |r| format!("{:.1} ms", r.as_secs_f64() * 1000.0));
+                    trf(
+                        "Connected at {} · round trip {} · lost {} of {} · reconnects {}",
+                        &[
+                            &link.address,
+                            &rtt,
+                            &link.probes_lost,
+                            &link.probes_sent,
+                            &peer.reconnects,
+                        ],
+                    )
+                }
+                None => match &peer.refusal {
+                    Some(r) => trf("Not connected: {}", &[&texts::refusal(r)]),
+                    None => tr("Not connected (searching …)").to_string(),
+                },
+            };
+            ui.label(RichText::new(details).small().color(p.muted));
+        });
+    });
 }

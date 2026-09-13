@@ -12,6 +12,7 @@ use tc_session::{Command, SessionConfig, SessionHandle, Status};
 use crate::devtools::DevTools;
 use crate::i18n::{self, tr};
 use crate::settings::{Settings, ThemeSetting};
+use crate::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
@@ -49,6 +50,7 @@ pub struct App {
     tray: Option<crate::tray::Tray>,
     dev: DevTools,
     background: bool,
+    logo: Option<egui::TextureHandle>,
     /// A newer version found on GitHub.
     pub new_version: Option<crate::update::NewVersion>,
     update_job: Option<std::sync::mpsc::Receiver<Option<crate::update::NewVersion>>>,
@@ -68,6 +70,13 @@ impl App {
         log_file: Option<PathBuf>,
     ) -> Self {
         let ctx = cc.egui_ctx.clone();
+        theme::install_fonts(&ctx);
+        theme::apply(&ctx);
+        let logo = Some(ctx.load_texture(
+            "logo",
+            egui::ColorImage::from_rgba_unmultiplied([128, 128], &crate::icon::rgba(128, false)),
+            egui::TextureOptions::LINEAR,
+        ));
         let isolated = dev.isolated();
         let demo = dev.demo.then(crate::demo::status);
         let mut app = Self {
@@ -93,6 +102,7 @@ impl App {
             tray: None,
             dev,
             background,
+            logo,
             new_version: None,
             update_job: None,
             update_checked: None,
@@ -262,60 +272,82 @@ impl App {
         }
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_centered(|ui| {
-            ui.heading(RichText::new("TableCross").strong());
-            ui.add_space(12.0);
-            let (text, color) = match (&self.status.controlling, &self.status.controlled_by) {
-                (Some(name), _) => (
-                    i18n::trf("Controlling {}", &[name]),
-                    egui::Color32::from_rgb(0x2B, 0x6C, 0xD9),
-                ),
-                (_, Some(name)) => (
-                    i18n::trf("Controlled by {}", &[name]),
-                    egui::Color32::from_rgb(0xD9, 0x7A, 0x2B),
-                ),
-                _ => (tr("This computer").to_string(), ui.visuals().weak_text_color()),
-            };
-            crate::pages::dot(ui, color, true);
-            ui.label(RichText::new(text).color(color));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(tr("Release everything"))
-                    .on_hover_text(tr(
-                        "All keys up, mouse and keyboard back to this computer (Ctrl+Shift+Alt+Esc)",
-                    ))
-                    .clicked()
-                {
-                    self.send(Command::ReleaseAll);
-                }
-            });
+    /// Left column: logo, state, pages, emergency button.
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        let p = theme::colors(ui);
+        ui.add_space(18.0);
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            if let Some(logo) = &self.logo {
+                ui.add(egui::Image::new(logo).fit_to_exact_size(egui::vec2(34.0, 34.0)));
+            }
+            ui.label(
+                RichText::new("TableCross")
+                    .font(egui::FontId::new(19.0, theme::semibold()))
+                    .color(p.text),
+            );
         });
-    }
-
-    fn navigation(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
-        for (page, label) in [
-            (Page::Status, tr("Status")),
-            (Page::Computers, tr("Computers")),
-            (Page::Settings, tr("Settings")),
-            (Page::About, tr("About")),
+        ui.add_space(14.0);
+        let (text, fg, bg) = match (&self.status.controlling, &self.status.controlled_by) {
+            (Some(name), _) => (i18n::trf("Controlling {}", &[name]), p.on_accent, p.accent),
+            (_, Some(name)) => (i18n::trf("Controlled by {}", &[name]), p.text, p.warn_soft),
+            _ => (tr("Working on this computer").to_string(), p.muted, p.window),
+        };
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            theme::chip(ui, &text, fg, bg);
+        });
+        ui.add_space(18.0);
+        for (page, symbol, label) in [
+            (Page::Status, "◉", tr("Status")),
+            (Page::Computers, "▣", tr("Computers")),
+            (Page::Settings, "⚙", tr("Settings")),
+            (Page::About, "ℹ", tr("About")),
         ] {
             let selected = self.page == page && self.setup_step.is_none();
-            if ui
-                .add_sized([ui.available_width(), 30.0], egui::Button::selectable(selected, label))
-                .clicked()
-            {
+            if nav_item(ui, symbol, label, selected).clicked() {
                 self.page = page;
                 self.setup_step = None;
             }
         }
+        ui.add_space(6.0);
+        if nav_item(ui, "✦", tr("Setup"), self.setup_step.is_some()).clicked() {
+            self.setup_step = Some(0);
+        }
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            ui.add_space(8.0);
-            if ui.small_button(tr("Setup …")).clicked() {
-                self.setup_step = Some(0);
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                        .small()
+                        .color(p.muted),
+                );
+            });
+            ui.add_space(6.0);
+            let release = ui
+                .add_sized(
+                    [ui.available_width() - 12.0, 34.0],
+                    egui::Button::new(RichText::new(tr("Release everything")).color(p.text)),
+                )
+                .on_hover_text(tr(
+                    "All keys up, mouse and keyboard back to this computer (Ctrl+Shift+Alt+Esc)",
+                ));
+            if release.clicked() {
+                self.send(Command::ReleaseAll);
             }
         });
+    }
+
+    /// Title and one line below it at the top of a page.
+    pub fn page_header(&self, ui: &mut egui::Ui, title: &str, subtitle: &str) {
+        let p = theme::colors(ui);
+        ui.add_space(6.0);
+        ui.label(RichText::new(title).heading().color(p.text));
+        if !subtitle.is_empty() {
+            ui.label(RichText::new(subtitle).color(p.muted));
+        }
+        ui.add_space(14.0);
     }
 
     /// Starts the update check when allowed and due, and picks up its result.
@@ -346,6 +378,42 @@ impl App {
     }
 }
 
+/// One entry of the page list.
+fn nav_item(ui: &mut egui::Ui, symbol: &str, label: &str, selected: bool) -> egui::Response {
+    let p = theme::colors(ui);
+    let width = ui.available_width() - 12.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
+    let rect = rect.translate(egui::vec2(6.0, 0.0));
+    let (fill, fg) = if selected {
+        (p.accent_soft, p.accent)
+    } else if response.hovered() {
+        (p.window, p.text)
+    } else {
+        (egui::Color32::TRANSPARENT, p.text)
+    };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    let font = if selected {
+        egui::FontId::new(14.0, theme::semibold())
+    } else {
+        egui::FontId::proportional(14.0)
+    };
+    ui.painter().text(
+        rect.left_center() + egui::vec2(14.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        symbol,
+        egui::FontId::proportional(15.0),
+        if selected { p.accent } else { p.muted },
+    );
+    ui.painter().text(
+        rect.left_center() + egui::vec2(40.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        fg,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -368,35 +436,54 @@ impl eframe::App for App {
             self.background = false;
         }
 
-        egui::Panel::top("top").exact_size(48.0).show(ui, |ui| self.top_bar(ui));
+        let p = theme::palette(&ctx);
+        egui::Panel::left("nav")
+            .exact_size(212.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(p.sidebar)
+                    .inner_margin(egui::Margin::symmetric(8, 0)),
+            )
+            .show(ui, |ui| self.sidebar(ui));
         if let Some((text, since)) = &self.info
             && since.elapsed() < Duration::from_secs(8)
         {
             let text = text.clone();
-            egui::Panel::bottom("info").exact_size(28.0).show(ui, |ui| {
-                ui.horizontal_centered(|ui| ui.label(text));
-            });
+            egui::Panel::bottom("info")
+                .exact_size(36.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(p.accent_soft)
+                        .inner_margin(egui::Margin::symmetric(24, 0)),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal_centered(|ui| ui.label(RichText::new(text).color(p.text)));
+                });
             ctx.request_repaint_after(Duration::from_secs(1));
         }
-        egui::Panel::left("nav")
-            .exact_size(150.0)
-            .resizable(false)
-            .show(ui, |ui| self.navigation(ui));
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                ui.add_space(6.0);
-                if let Some(step) = self.setup_step {
-                    self.setup(ui, step);
-                } else {
-                    match self.page {
-                        Page::Status => self.status_page(ui),
-                        Page::Computers => self.computers_page(ui),
-                        Page::Settings => self.settings_page(ui),
-                        Page::About => self.about_page(ui),
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(p.window).inner_margin(egui::Margin {
+                left: 28,
+                right: 20,
+                top: 18,
+                bottom: 0,
+            }))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    ui.set_max_width(ui.available_width() - 8.0);
+                    if let Some(step) = self.setup_step {
+                        self.setup(ui, step);
+                    } else {
+                        match self.page {
+                            Page::Status => self.status_page(ui),
+                            Page::Computers => self.computers_page(ui),
+                            Page::Settings => self.settings_page(ui),
+                            Page::About => self.about_page(ui),
+                        }
                     }
-                }
+                });
             });
-        });
         // Numbers like the round trip change without events
         ctx.request_repaint_after(Duration::from_millis(500));
     }

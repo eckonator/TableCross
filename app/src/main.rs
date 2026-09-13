@@ -13,6 +13,7 @@ mod logging;
 mod pages;
 mod settings;
 mod texts;
+mod theme;
 mod tray;
 mod update;
 
@@ -43,7 +44,17 @@ fn main() -> eframe::Result {
         logging::init(&dir)
     };
     tracing::info!("TableCross {} starting", env!("CARGO_PKG_VERSION"));
-    let mut settings = Settings::load(&dir);
+    // The demo shows made-up values, not this computer's settings
+    let mut settings = if dev.demo {
+        Settings {
+            name: "MacBook".into(),
+            update_check: Some(true),
+            setup_done: true,
+            ..Settings::default()
+        }
+    } else {
+        Settings::load(&dir)
+    };
     if let Some(lang) = &dev.lang {
         settings.language = if lang == "de" { LangSetting::De } else { LangSetting::En };
     }

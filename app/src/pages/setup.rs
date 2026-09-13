@@ -1,6 +1,6 @@
 //! Setup in three steps: permissions, pairing, arrangement.
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use tc_input::Problem;
 
 use super::{card, ok_color};
@@ -11,20 +11,8 @@ impl App {
     pub fn setup(&mut self, ui: &mut egui::Ui, step: usize) {
         let status = self.status.clone();
         let titles = [tr("Permissions"), tr("Pair"), tr("Arrange")];
-        ui.horizontal(|ui| {
-            for (i, title) in titles.iter().enumerate() {
-                let text = format!("{}  {}", i + 1, title);
-                let text = if i == step {
-                    RichText::new(text).strong().size(16.0)
-                } else {
-                    RichText::new(text).weak()
-                };
-                ui.label(text);
-                if i + 1 < titles.len() {
-                    ui.label(RichText::new("›").weak());
-                }
-            }
-        });
+        self.page_header(ui, tr("Setup"), tr("Three short steps, then TableCross is ready."));
+        stepper(ui, &titles, step);
         ui.add_space(10.0);
         match step {
             0 => card(ui, tr("Permissions"), |ui| {
@@ -69,7 +57,7 @@ impl App {
             }
             let last = step + 1 == titles.len();
             let next = if last { tr("Done") } else { tr("Next") };
-            if ui.button(RichText::new(next).strong()).clicked() {
+            if crate::theme::primary_button(ui, next).clicked() {
                 if last {
                     self.finish_setup();
                 } else {
@@ -88,4 +76,56 @@ impl App {
         self.save_settings();
         self.page = crate::app::Page::Status;
     }
+}
+
+/// Numbered circles joined by a line; the current step is highlighted.
+fn stepper(ui: &mut egui::Ui, titles: &[&str], current: usize) {
+    let p = crate::theme::colors(ui);
+    let width = ui.available_width().min(620.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 58.0), egui::Sense::hover());
+    let step_w = width / titles.len() as f32;
+    let y = rect.min.y + 16.0;
+    let center = |i: usize| egui::pos2(rect.min.x + step_w * (i as f32 + 0.5), y);
+    for i in 0..titles.len() - 1 {
+        let color = if i < current { p.accent } else { p.border };
+        ui.painter().line_segment(
+            [center(i) + egui::vec2(16.0, 0.0), center(i + 1) - egui::vec2(16.0, 0.0)],
+            egui::Stroke::new(2.0, color),
+        );
+    }
+    for (i, title) in titles.iter().enumerate() {
+        let c = center(i);
+        let done = i < current;
+        let active = i == current;
+        let (fill, fg) = if active || done {
+            (p.accent, p.on_accent)
+        } else {
+            (p.field, p.muted)
+        };
+        ui.painter().circle_filled(c, 14.0, fill);
+        if !active && !done {
+            ui.painter().circle_stroke(c, 14.0, egui::Stroke::new(1.0, p.border));
+        }
+        let label = if done { "✔".to_string() } else { (i + 1).to_string() };
+        ui.painter().text(
+            c,
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::new(13.0, crate::theme::semibold()),
+            fg,
+        );
+        let font = if active {
+            egui::FontId::new(13.0, crate::theme::semibold())
+        } else {
+            egui::FontId::proportional(13.0)
+        };
+        ui.painter().text(
+            c + egui::vec2(0.0, 22.0),
+            egui::Align2::CENTER_TOP,
+            title,
+            font,
+            if active { p.text } else { p.muted },
+        );
+    }
+    ui.add_space(8.0);
 }
