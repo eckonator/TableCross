@@ -6,7 +6,7 @@ on the next computer.
 
 ![TableCross status page: this computer, the paired computers, file transfers](docs/screenshot-status.png)
 
-![Arranging the computers on the desk by dragging (dark mode)](docs/screenshot-computers.png)
+![Arranging the computers on a grid by dragging (dark mode)](docs/screenshot-computers.png)
 
 ![Setup in three steps: permissions, pairing with a code, arrangement](docs/screenshot-setup.png)
 
