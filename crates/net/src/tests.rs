@@ -666,3 +666,25 @@ async fn oversized_frame_ends_only_that_link() {
     let reason = a.disconnected(peer, SHORT).await;
     assert!(matches!(reason, Disconnect::ProtocolError(_)), "{reason:?}");
 }
+
+#[tokio::test]
+async fn a_port_still_held_for_a_moment_is_waited_for() {
+    // Something holds the port (like a node still shutting down) and lets go shortly after
+    let holder = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    let port = holder.local_addr().unwrap().port();
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        drop(holder);
+    });
+    let mut config = NodeConfig::new("patient");
+    config.bind = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
+    config.discovery = false;
+    let started = Instant::now();
+    let (node, _events) = Node::start(config, Identity::generate().unwrap(), PeerStore::in_memory())
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= Duration::from_millis(300));
+    assert_eq!(node.local_addr().port(), port);
+    release.await.unwrap();
+    node.shutdown().await;
+}

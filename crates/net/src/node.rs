@@ -280,7 +280,7 @@ impl Node {
         identity: Identity,
         store: PeerStore,
     ) -> Result<(Node, mpsc::UnboundedReceiver<Event>), NodeError> {
-        let socket = bind(config.bind).map_err(|source| NodeError::Bind {
+        let socket = bind_patiently(config.bind).await.map_err(|source| NodeError::Bind {
             port: config.bind.port(),
             source,
         })?;
@@ -1175,6 +1175,38 @@ fn woke_up(inner: &Arc<Inner>, slept: Duration) {
     let _ = inner.events.send(Event::Woke { slept });
     inner.woke.send_modify(|n| *n += 1);
     inner.changed.send_replace(());
+}
+
+/// How long a port still held by a node that is shutting down (restart after a settings change)
+/// is waited for.
+const BIND_PATIENCE: Duration = Duration::from_secs(5);
+
+/// Like `bind`, but tries again for a while if the port is in use.
+async fn bind_patiently(address: SocketAddr) -> io::Result<std::net::UdpSocket> {
+    let started = Instant::now();
+    loop {
+        match bind(address) {
+            Err(e) if e.kind() == io::ErrorKind::AddrInUse && started.elapsed() < BIND_PATIENCE => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
+                return Err(io::Error::new(
+                    e.kind(),
+                    format!("port {} is used by another program", address.port()),
+                ));
+            }
+            other => {
+                if other.is_ok() && started.elapsed() > Duration::from_millis(150) {
+                    tracing::info!(
+                        "port {} free after {} ms",
+                        address.port(),
+                        started.elapsed().as_millis()
+                    );
+                }
+                return other;
+            }
+        }
+    }
 }
 
 /// Binds the UDP socket; `[::]` accepts IPv4 as well. Falls back to IPv4 only without IPv6.
