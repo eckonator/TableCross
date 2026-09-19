@@ -16,7 +16,7 @@ use core_foundation_sys::runloop::{CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopR
 use core_foundation_sys::set::{CFSetGetCount, CFSetGetValues, CFSetRef};
 use core_foundation_sys::string::{CFStringCreateWithCString, CFStringRef, kCFStringEncodingUTF8};
 use tc_input::helper_protocol::{
-    DeadManSwitch, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
+    CONSUMER_KEYS, DeadManSwitch, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
 };
 
 type Ref = *mut c_void;
@@ -64,6 +64,7 @@ const LISTEN_EVENT: u32 = 1;
 const ACCESS_GRANTED: u32 = 0;
 const SEIZE_DEVICE: u32 = 1;
 const PAGE_KEYBOARD: u32 = 0x07;
+const PAGE_CONSUMER: u32 = 0x0C;
 /// Without the permission the helper restarts now and then: the system grants it only to a fresh
 /// process (measured), and launchd starts the helper again by itself.
 const RESTART_WITHOUT_ACCESS: Duration = Duration::from_secs(30);
@@ -118,12 +119,19 @@ extern "C" fn key_callback(_context: *mut c_void, _result: i32, _sender: *mut c_
         let element = IOHIDValueGetElement(value);
         let page = IOHIDElementGetUsagePage(element);
         let usage = IOHIDElementGetUsage(element);
+        let down = IOHIDValueGetIntegerValue(value) != 0;
+        if page == PAGE_CONSUMER {
+            if let Some((_, key)) = CONSUMER_KEYS.iter().find(|(u, _)| *u == usage) {
+                send(&FromHelper::Media { key: *key, down });
+            }
+            return;
+        }
         if page != PAGE_KEYBOARD || !(0x04..=0xE7).contains(&usage) {
             return;
         }
         send(&FromHelper::Key {
             usage: usage as u16,
-            down: IOHIDValueGetIntegerValue(value) != 0,
+            down,
         });
     }
 }

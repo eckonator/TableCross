@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tc_core::Captured;
+
 use crate::helper_protocol::{
     ALIVE_INTERVAL, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
 };
@@ -33,8 +35,8 @@ pub struct HelperClient {
 }
 
 impl HelperClient {
-    /// Starts connecting in the background; `on_key` gets the helper's keys.
-    pub fn start(on_key: impl Fn(u16, bool) + Send + Sync + 'static) -> Arc<Self> {
+    /// Starts connecting in the background; `on_key` gets the helper's keys and media keys.
+    pub fn start(on_key: impl Fn(Captured) + Send + Sync + 'static) -> Arc<Self> {
         let client = Arc::new(Self {
             writer: Mutex::new(None),
             want_seize: AtomicBool::new(false),
@@ -70,7 +72,7 @@ impl HelperClient {
         client
     }
 
-    fn serve(&self, stream: UnixStream, on_key: Arc<impl Fn(u16, bool)>) {
+    fn serve(&self, stream: UnixStream, on_key: Arc<impl Fn(Captured)>) {
         let Ok(reader) = stream.try_clone() else { return };
         let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
         *self.writer.lock().expect("helper writer") = Some(BufWriter::new(stream));
@@ -97,7 +99,8 @@ impl HelperClient {
                     // Restore what we want after a reconnect
                     self.send(&ToHelper::Seize(self.want_seize.load(Ordering::SeqCst)));
                 }
-                FromHelper::Key { usage, down } => on_key(usage, down),
+                FromHelper::Key { usage, down } => on_key(Captured::Key { usage, down }),
+                FromHelper::Media { key, down } => on_key(Captured::Media { key, down }),
                 FromHelper::Status {
                     seized,
                     devices,

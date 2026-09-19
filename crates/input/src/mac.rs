@@ -317,9 +317,9 @@ impl Capture for MacCapture {
         let handler = Arc::new(Mutex::new(handler));
         {
             let handler = handler.clone();
-            let helper = HelperClient::start(move |usage, down| {
+            let helper = HelperClient::start(move |event| {
                 if let Ok(mut handler) = handler.lock() {
-                    handler(Captured::Key { usage, down });
+                    handler(event);
                 }
             });
             *self.shared.helper.lock().expect("helper lock") = Some(helper);

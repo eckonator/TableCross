@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 /// Changed on incompatible changes; app and helper must match.
-pub const HELPER_VERSION: u16 = 1;
+pub const HELPER_VERSION: u16 = 2;
 pub const SOCKET_PATH: &str = "/var/run/de.eckonator.tablecross.helper.sock";
 
 /// `TC_HELPER_SOCKET` overrides the path (tests).
@@ -24,6 +24,18 @@ pub const ALIVE_INTERVAL: Duration = Duration::from_millis(250);
 /// Without `Alive` for this long the helper gives the keyboards back.
 pub const DEADLINE: Duration = Duration::from_secs(1);
 const MAX_FRAME: usize = 4096;
+
+/// Media keys on the HID consumer page (0x0C).
+pub const CONSUMER_KEYS: [(u32, tc_protocol::MediaKey); 8] = [
+    (0xE9, tc_protocol::MediaKey::VolumeUp),
+    (0xEA, tc_protocol::MediaKey::VolumeDown),
+    (0xE2, tc_protocol::MediaKey::Mute),
+    (0xCD, tc_protocol::MediaKey::PlayPause),
+    (0xB5, tc_protocol::MediaKey::Next),
+    (0xB6, tc_protocol::MediaKey::Previous),
+    (0x6F, tc_protocol::MediaKey::BrightnessUp),
+    (0x70, tc_protocol::MediaKey::BrightnessDown),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToHelper {
@@ -44,6 +56,8 @@ pub enum FromHelper {
     },
     /// A key of a taken keyboard, as USB HID usage (page 7).
     Key { usage: u16, down: bool },
+    /// A media key of a taken keyboard (consumer page).
+    Media { key: tc_protocol::MediaKey, down: bool },
     /// Current state after every change.
     Status {
         seized: bool,
