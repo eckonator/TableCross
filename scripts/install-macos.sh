@@ -10,7 +10,8 @@ set -euo pipefail
 
 REPO="eckonator/TableCross"
 APP_NAME="TableCross.app"
-# TC_INSTALL_DIR: other target (testing), TC_NO_OPEN=1: do not start it afterwards
+# TC_INSTALL_DIR: other target (testing), TC_NO_OPEN=1: do not start it afterwards,
+# TC_TEST=1: the test build of the newest state instead of the newest release
 DEST="${TC_INSTALL_DIR:-/Applications}"
 
 # Everything in a function, so an interrupted download (curl | bash) runs nothing half-way
@@ -26,9 +27,14 @@ main() {
 
   say "Looking up the latest release"
   local api url version
-  # The list (newest first) includes pre-releases, unlike releases/latest
-  api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1") \
-    || fail "Could not reach GitHub. Download manually: https://github.com/$REPO/releases"
+  # The newest release; TC_TEST=1: the newest of all, including the test build
+  if [ -n "${TC_TEST:-}" ]; then
+    api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1") \
+      || fail "Could not reach GitHub. Download manually: https://github.com/$REPO/releases"
+  else
+    api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest") \
+      || fail "Could not reach GitHub. Download manually: https://github.com/$REPO/releases"
+  fi
   url=$(printf '%s' "$api" | grep -o '"browser_download_url": *"[^"]*-macOS\.zip"' | head -n1 | sed 's/.*"\(https[^"]*\)"/\1/')
   [ -n "$url" ] || fail "No macOS download found in the newest release: https://github.com/$REPO/releases"
   version=$(printf '%s' "$api" | grep -o '"tag_name": *"[^"]*"' | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')

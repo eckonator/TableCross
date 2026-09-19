@@ -11,7 +11,12 @@ impl App {
         self.page_header(ui, tr("About TableCross"), "");
         card(ui, "TableCross", |ui| {
             let commit: String = env!("TC_GIT_HASH").chars().take(7).collect();
-            ui.label(trf("Version {} ({})", &[&env!("CARGO_PKG_VERSION"), &commit]));
+            let version = if crate::update::is_release() {
+                trf("Version {} ({})", &[&env!("CARGO_PKG_VERSION"), &commit])
+            } else {
+                trf("Test build {} ({})", &[&env!("CARGO_PKG_VERSION"), &commit])
+            };
+            ui.label(version);
             ui.add_space(4.0);
             ui.label(tr(
                 "Shares one mouse, keyboard and clipboard between the computers on your desk, \

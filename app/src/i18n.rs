@@ -173,6 +173,7 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Test build {} ({})" => "Testversion {} ({})",
         "Update system helper …" => "Systemhelfer aktualisieren …",
         "Drag the computers to where they stand on your desk. Computers side by side share that edge." => {
             "Zieh die Rechner dorthin, wo sie auf deinem Schreibtisch stehen. Nebeneinanderliegende Rechner teilen sich diese Kante."

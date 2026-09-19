@@ -4,15 +4,22 @@
 //! (present on macOS, Windows 10+ and Linux), so the app needs no web client of its own. Errors
 //! (offline, no release) stay silent.
 //!
-//! While the version number stays the same, every push rebuilds the release. So a release is also
-//! new if it was built from another, younger commit than this program.
+//! Every push to main rebuilds the test build without changing the version number. So for test
+//! builds a release is also new if it was built from another, younger commit than this program.
 
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui;
 
-const RELEASES_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=1";
+/// Releases look only for releases; test builds also for newer test builds (the newest of both).
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases/latest";
+const NEWEST_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=1";
+
+/// Built from a release tag (not a test build from main).
+pub fn is_release() -> bool {
+    env!("TC_CHANNEL") == "release"
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewVersion {
@@ -45,7 +52,7 @@ fn check() -> Option<NewVersion> {
     let url = std::env::var("TC_UPDATE_URL")
         .ok()
         .filter(|_| cfg!(debug_assertions))
-        .unwrap_or_else(|| RELEASES_URL.into());
+        .unwrap_or_else(|| if is_release() { LATEST_RELEASE_URL } else { NEWEST_URL }.into());
     let mut cmd = Command::new("curl");
     cmd.args([
         "-fsSL",
@@ -69,7 +76,8 @@ fn check() -> Option<NewVersion> {
     newer_release(
         release,
         env!("CARGO_PKG_VERSION"),
-        env!("TC_GIT_HASH"),
+        // A release is new only with a higher version
+        if is_release() { "" } else { env!("TC_GIT_HASH") },
         env!("TC_GIT_TIME"),
         crate::self_update::asset_suffix(),
     )

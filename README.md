@@ -12,8 +12,10 @@ on the next computer.
 
 *The screenshots show made-up computers (`TC_DEMO=1`).*
 
-> **Status: early development.** Test builds are on the
-> [releases page](https://github.com/eckonator/TableCross/releases); expect rough edges.
+> **Status: first release.** Downloads are on the
+> [releases page](https://github.com/eckonator/TableCross/releases). So far it is tested most on macOS;
+> Windows and Linux may still have rough edges. The *test build* there is the newest state of
+> development, replaced with every change.
 
 ## Installing
 
