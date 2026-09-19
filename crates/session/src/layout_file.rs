@@ -189,6 +189,38 @@ pub fn desk(file: &LayoutFile, me: &str, canonical: impl Fn(&str) -> String) -> 
     placed
 }
 
+/// The neighbors of an arrangement drawn on a grid: computers in cells next to each other become
+/// neighbors. Only what is connected to `me` counts; computers on their own island are left out.
+pub fn from_grid(cells: &[(String, i32, i32)], me: &str) -> Vec<Neighbor> {
+    let at = |x: i32, y: i32| cells.iter().find(|(_, cx, cy)| (*cx, *cy) == (x, y));
+    let mut reached: Vec<&(String, i32, i32)> = cells.iter().filter(|(m, ..)| m == me).take(1).collect();
+    let mut next = 0;
+    while next < reached.len() {
+        let (_, x, y) = reached[next];
+        next += 1;
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            if let Some(cell) = at(x + dx, y + dy)
+                && !reached.iter().any(|r| r.0 == cell.0)
+            {
+                reached.push(cell);
+            }
+        }
+    }
+    let mut neighbors = Vec::new();
+    for (machine, x, y) in &reached {
+        for (dx, dy, side) in [(1, 0, Side::Right), (0, 1, Side::Bottom)] {
+            if let Some((other, ..)) = at(x + dx, y + dy) {
+                neighbors.push(Neighbor {
+                    machine: other.clone(),
+                    side,
+                    of: machine.clone(),
+                });
+            }
+        }
+    }
+    neighbors
+}
+
 pub fn set_swap(file: &mut LayoutFile, peer: &Fingerprint, swap: bool) {
     file.swap_cmd_ctrl.retain(|m| !names(m, peer, ""));
     if swap {
@@ -327,6 +359,29 @@ mod tests {
         place(&mut file, &PC, &TV, Some(Side::Top));
         let desk = desk(&file, &id(&PC), |e| e.to_string());
         assert_eq!(desk, vec![(id(&PC), 0, 0), (id(&ME), -1, 0), (id(&TV), 0, -1)]);
+    }
+
+    #[test]
+    fn grid_becomes_neighbors_and_back() {
+        let cell = |m: &str, x, y| (m.to_string(), x, y);
+        // Two computers in a row on the right, one above the first, one far away
+        let grid = vec![
+            cell("me", 0, 0),
+            cell("pc", 1, 0),
+            cell("tv", 2, 0),
+            cell("pi", 1, -1),
+            cell("far", 4, 4),
+        ];
+        let file = LayoutFile {
+            neighbors: from_grid(&grid, "me"),
+            ..LayoutFile::default()
+        };
+        assert_eq!(file.neighbors.len(), 3);
+        let mut back = desk(&file, "me", |e| e.to_string());
+        back.sort();
+        let mut expected = grid[..4].to_vec();
+        expected.sort();
+        assert_eq!(back, expected);
     }
 
     #[test]

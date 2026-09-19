@@ -4,7 +4,6 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use eframe::egui::{self, Color32, RichText, Vec2};
-use tc_core::Side;
 use tc_net::{Fingerprint, PAIRING_WINDOW};
 use tc_session::{Command, Notice, PairTarget, Status, layout_file};
 
@@ -17,8 +16,8 @@ use crate::theme;
 const TILE: Vec2 = Vec2::new(150.0, 112.0);
 
 /// What is dragged in the arrangement.
-#[derive(Clone, Copy)]
-struct Dragged(Fingerprint);
+#[derive(Clone)]
+struct Dragged(String);
 
 impl App {
     pub fn computers_page(&mut self, ui: &mut egui::Ui) {
@@ -37,54 +36,91 @@ impl App {
         }
     }
 
-    /// This computer in the middle, the four sides around it; computers are dragged onto a side.
+    /// The whole desk as a grid: computers are dragged onto any cell, those next to each other
+    /// become neighbors. The same arrangement holds on every paired computer.
     pub fn arrangement(&mut self, ui: &mut egui::Ui, status: &Status) {
         let p = theme::colors(ui);
-        ui.label(RichText::new(tr("Drag each computer to the side where it stands on your desk.")).color(p.muted));
+        ui.label(
+            RichText::new(tr(
+                "Drag the computers to where they stand on your desk. Computers side by side share that edge.",
+            ))
+            .color(p.muted),
+        );
         ui.add_space(12.0);
-        let mut dropped: Option<(Fingerprint, Option<Side>)> = None;
-        let me = status.name.clone();
-        let spacing = 14.0;
-        let grid_width = TILE.x * 3.0 + spacing * 2.0;
+        let Some(me_fp) = status.fingerprint else { return };
+        let me = layout_file::machine_id(&me_fp);
+        let cells = layout_file::desk(&status.layout, &me, |entry| canonical(status, &me_fp, entry));
+        let machines = |id: &str| machine_view(status, &me, id);
+
+        // At least five columns and three rows, always one free row and column around the desk
+        let (min_x, max_x) = cells
+            .iter()
+            .fold((-2, 2), |(a, b), (_, x, _)| (a.min(x - 1), b.max(x + 1)));
+        let (min_y, max_y) = cells
+            .iter()
+            .fold((-1, 1), |(a, b), (_, _, y)| (a.min(y - 1), b.max(y + 1)));
+        let cols = (max_x - min_x + 1) as f32;
+        let gap = 10.0;
+        let width = ((ui.available_width() - 24.0 - gap * (cols - 1.0)) / cols).clamp(70.0, TILE.x);
+        let tile = Vec2::new(width, width * 0.75);
+        let dragging = egui::DragAndDrop::has_any_payload(ui.ctx());
+        let mut dropped: Option<(String, Option<(i32, i32)>)> = None;
+        let mut unreachable = Vec::new();
         egui::Frame::new()
             .fill(p.window)
             .corner_radius(12.0)
-            .inner_margin(egui::Margin::symmetric(12, 18))
+            .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
+                    let grid_width = tile.x * cols + gap * (cols - 1.0);
                     ui.add_space(((ui.available_width() - grid_width) / 2.0).max(0.0));
-                    egui::Grid::new("arrangement")
-                        .spacing([spacing, spacing])
-                        .show(ui, |ui| {
-                            for row in [
-                                [None, Some(Some(Side::Top)), None],
-                                [Some(Some(Side::Left)), Some(None), Some(Some(Side::Right))],
-                                [None, Some(Some(Side::Bottom)), None],
-                            ] {
-                                for cell in row {
-                                    match cell {
-                                        None => {
-                                            ui.allocate_exact_size(TILE, egui::Sense::hover());
+                    egui::Grid::new("desk").spacing([gap, gap]).show(ui, |ui| {
+                        for y in min_y..=max_y {
+                            for x in min_x..=max_x {
+                                let occupant = cells.iter().find(|(_, cx, cy)| (*cx, *cy) == (x, y));
+                                if let Some((id, ..)) = occupant
+                                    && *id == me
+                                {
+                                    let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
+                                    paint_machine(ui, rect, &status.name, tr("this computer"), p.accent, p.accent_soft);
+                                    continue;
+                                }
+                                let frame = egui::Frame::new()
+                                    .corner_radius(8.0)
+                                    .stroke(egui::Stroke::new(1.0, if dragging { p.accent } else { p.border }));
+                                let (_, payload) = ui.dnd_drop_zone::<Dragged, _>(frame, |ui| match occupant {
+                                    Some((id, ..)) => {
+                                        let view = machines(id);
+                                        if !view.paired {
+                                            unreachable.push(view.name.clone());
                                         }
-                                        Some(None) => {
-                                            let (rect, _) = ui.allocate_exact_size(TILE, egui::Sense::hover());
-                                            paint_machine(ui, rect, &me, tr("this computer"), p.accent, p.accent_soft);
-                                        }
-                                        Some(Some(side)) => {
-                                            if let Some(fp) = self.side_zone(ui, status, side) {
-                                                dropped = Some((fp, Some(side)));
-                                            }
+                                        machine_tile(ui, id, &view, tile);
+                                    }
+                                    None => {
+                                        let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
+                                        if dragging {
+                                            ui.painter().text(
+                                                rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                tr("drop here"),
+                                                egui::FontId::proportional(12.0),
+                                                p.muted,
+                                            );
                                         }
                                     }
+                                });
+                                if let Some(payload) = payload {
+                                    dropped = Some((payload.0.clone(), Some((x, y))));
                                 }
-                                ui.end_row();
                             }
-                        });
+                            ui.end_row();
+                        }
+                    });
                 });
             });
         ui.add_space(12.0);
-        // Computers without a place
+        // Paired computers that are not on the desk
         let (_, payload) = ui.dnd_drop_zone::<Dragged, _>(
             egui::Frame::new()
                 .fill(p.field)
@@ -95,57 +131,48 @@ impl App {
                 ui.label(RichText::new(tr("Not placed:")).small().color(p.muted));
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
-                    let unplaced: Vec<_> = status.peers.iter().filter(|p| p.side.is_none()).collect();
+                    let unplaced: Vec<_> = status
+                        .peers
+                        .iter()
+                        .map(|peer| layout_file::machine_id(&peer.fingerprint))
+                        .filter(|id| !cells.iter().any(|(c, ..)| c == id))
+                        .collect();
                     if unplaced.is_empty() {
                         ui.label(RichText::new(tr("none")).color(p.muted));
                     }
-                    for peer in unplaced {
-                        machine_tile(ui, peer.fingerprint, &peer.name, peer.link.is_some(), SMALL_TILE);
+                    for id in unplaced {
+                        machine_tile(ui, &id, &machines(&id), SMALL_TILE);
                     }
                 });
             },
         );
         if let Some(payload) = payload {
-            dropped = Some((payload.0, None));
+            dropped = Some((payload.0.clone(), None));
         }
-        if let Some((peer, side)) = dropped {
-            self.place(peer, side);
+        for name in unreachable {
+            ui.add_space(6.0);
+            theme::banner(
+                ui,
+                theme::Tone::Info,
+                &trf(
+                    "To control {} with this keyboard, pair it with this computer as well.",
+                    &[&name],
+                ),
+                |_| {},
+            );
         }
-        desk_view(ui, status);
+        if let Some((id, cell)) = dropped {
+            self.arrange(rearranged(&cells, &me, &id, cell));
+        }
     }
 
-    fn place(&mut self, peer: Fingerprint, side: Option<Side>) {
-        if let Some(demo) = &mut self.demo {
-            for p in &mut demo.peers {
-                if p.side == side && side.is_some() {
-                    p.side = None;
-                }
-                if p.fingerprint == peer {
-                    p.side = side;
-                }
-            }
+    fn arrange(&mut self, cells: Vec<(String, i32, i32)>) {
+        if let Some(demo) = &mut self.demo
+            && let Some(fp) = demo.fingerprint
+        {
+            demo.layout.neighbors = layout_file::from_grid(&cells, &layout_file::machine_id(&fp));
         }
-        self.send(Command::Place { peer, side });
-    }
-
-    /// One side around this computer; returns a computer dropped onto it.
-    fn side_zone(&mut self, ui: &mut egui::Ui, status: &Status, side: Side) -> Option<Fingerprint> {
-        let p = theme::colors(ui);
-        let occupant = status.peers.iter().find(|peer| peer.side == Some(side));
-        let (_, payload) = ui.dnd_drop_zone::<Dragged, _>(egui::Frame::new(), |ui| match occupant {
-            Some(peer) => machine_tile(ui, peer.fingerprint, &peer.name, peer.link.is_some(), TILE),
-            None => {
-                let (rect, _) = ui.allocate_exact_size(TILE, egui::Sense::hover());
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    tr("drop here"),
-                    egui::FontId::proportional(13.0),
-                    p.muted,
-                );
-            }
-        });
-        payload.map(|p| p.0)
+        self.send(Command::Arrange(cells));
     }
 
     pub fn pairing(&mut self, ui: &mut egui::Ui, status: &Status) {
@@ -310,103 +337,6 @@ impl App {
 
 const SMALL_TILE: Vec2 = Vec2::new(120.0, 84.0);
 
-/// The arrangement shared by all computers, if it reaches beyond the direct neighbors of this one.
-fn desk_view(ui: &mut egui::Ui, status: &Status) {
-    let Some(me_fp) = status.fingerprint else { return };
-    let me = layout_file::machine_id(&me_fp);
-    let canonical = |entry: &str| {
-        let lower = entry.to_lowercase();
-        let matches = |fp: &Fingerprint, name: &str| {
-            name.to_lowercase() == lower || (lower.len() >= 8 && fp.to_string().starts_with(&lower))
-        };
-        if matches(&me_fp, &status.name) {
-            return me.clone();
-        }
-        status
-            .peers
-            .iter()
-            .find(|p| matches(&p.fingerprint, &p.name))
-            .map_or_else(|| entry.to_string(), |p| layout_file::machine_id(&p.fingerprint))
-    };
-    let desk = layout_file::desk(&status.layout, &me, canonical);
-    if desk.iter().all(|(_, x, y)| x.abs() + y.abs() <= 1) {
-        return;
-    }
-    let p = theme::colors(ui);
-    ui.add_space(16.0);
-    ui.label(RichText::new(tr("Whole desk")).font(egui::FontId::new(14.0, theme::semibold())));
-    ui.label(
-        RichText::new(tr(
-            "The arrangement is shared with all paired computers, so every keyboard reaches every screen.",
-        ))
-        .color(p.muted),
-    );
-    ui.add_space(8.0);
-    let (min_x, max_x) = desk.iter().fold((0, 0), |(a, b), (_, x, _)| (a.min(*x), b.max(*x)));
-    let (min_y, max_y) = desk.iter().fold((0, 0), |(a, b), (_, _, y)| (a.min(*y), b.max(*y)));
-    let (cols, rows) = ((max_x - min_x + 1) as f32, (max_y - min_y + 1) as f32);
-    let gap = 10.0;
-    let full = egui::vec2(
-        SMALL_TILE.x * cols + gap * (cols - 1.0),
-        SMALL_TILE.y * rows + gap * (rows - 1.0),
-    );
-    let fit = ((ui.available_width() - 24.0) / full.x).min(1.0);
-    let (tile, gap) = (SMALL_TILE * fit, gap * fit);
-    let mut unreachable = Vec::new();
-    egui::Frame::new()
-        .fill(p.window)
-        .corner_radius(12.0)
-        .inner_margin(egui::Margin::same(12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let (area, _) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), full.y * fit), egui::Sense::hover());
-            let origin = egui::pos2(area.center().x - full.x * fit / 2.0, area.min.y);
-            for (id, x, y) in &desk {
-                let rect = egui::Rect::from_min_size(
-                    origin + egui::vec2((x - min_x) as f32 * (tile.x + gap), (y - min_y) as f32 * (tile.y + gap)),
-                    tile,
-                );
-                let peer = status
-                    .peers
-                    .iter()
-                    .find(|peer| layout_file::machine_id(&peer.fingerprint) == *id);
-                let (name, caption, frame, screen) = if *id == me {
-                    (status.name.clone(), tr("this computer"), p.accent, p.accent_soft)
-                } else if let Some(peer) = peer {
-                    let connected = peer.link.is_some();
-                    // A blank caption keeps all monitors the same size
-                    let caption = if connected { " " } else { tr("not connected") };
-                    let frame = if connected { p.accent } else { p.muted };
-                    let screen = if connected { p.accent_soft } else { p.field };
-                    (peer.name.clone(), caption, frame, screen)
-                } else {
-                    let name = status
-                        .layout
-                        .names
-                        .get(id)
-                        .cloned()
-                        .unwrap_or_else(|| id.chars().take(8).collect());
-                    unreachable.push(name.clone());
-                    (name, tr("not paired here"), p.border, p.field)
-                };
-                paint_machine(ui, rect, &name, caption, frame, screen);
-            }
-        });
-    for name in unreachable {
-        ui.add_space(6.0);
-        theme::banner(
-            ui,
-            theme::Tone::Info,
-            &trf(
-                "To control {} with this keyboard, pair it with this computer as well.",
-                &[&name],
-            ),
-            |_| {},
-        );
-    }
-}
-
 /// A computer as a little monitor with its name below.
 fn paint_machine(ui: &egui::Ui, rect: egui::Rect, name: &str, caption: &str, frame: Color32, screen: Color32) {
     let p = theme::colors(ui);
@@ -435,20 +365,130 @@ fn paint_machine(ui: &egui::Ui, rect: egui::Rect, name: &str, caption: &str, fra
     }
 }
 
-/// A computer that can be dragged.
-fn machine_tile(ui: &mut egui::Ui, fp: Fingerprint, name: &str, connected: bool, size: Vec2) {
-    let id = egui::Id::new(("machine", fp));
-    let p = theme::colors(ui);
-    ui.dnd_drag_source(id, Dragged(fp), |ui| {
-        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        let (frame, screen) = if connected {
-            (p.accent, p.accent_soft)
-        } else {
-            (p.muted, p.field)
+/// How a computer on the desk is shown.
+struct MachineView {
+    name: String,
+    paired: bool,
+    connected: bool,
+}
+
+fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
+    if id == me {
+        return MachineView {
+            name: status.name.clone(),
+            paired: true,
+            connected: true,
         };
-        let caption = if connected { "" } else { tr("not connected") };
-        paint_machine(ui, rect, name, caption, frame, screen);
+    }
+    match status
+        .peers
+        .iter()
+        .find(|peer| layout_file::machine_id(&peer.fingerprint) == id)
+    {
+        Some(peer) => MachineView {
+            name: peer.name.clone(),
+            paired: true,
+            connected: peer.link.is_some(),
+        },
+        None => MachineView {
+            name: status
+                .layout
+                .names
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.chars().take(8).collect()),
+            paired: false,
+            connected: false,
+        },
+    }
+}
+
+/// One id per machine for an entry of the layout file (names and fingerprint prefixes allowed).
+fn canonical(status: &Status, me: &Fingerprint, entry: &str) -> String {
+    let lower = entry.to_lowercase();
+    let matches = |fp: &Fingerprint, name: &str| {
+        name.to_lowercase() == lower || (lower.len() >= 8 && fp.to_string().starts_with(&lower))
+    };
+    if matches(me, &status.name) {
+        return layout_file::machine_id(me);
+    }
+    status
+        .peers
+        .iter()
+        .find(|p| matches(&p.fingerprint, &p.name))
+        .map_or_else(|| entry.to_string(), |p| layout_file::machine_id(&p.fingerprint))
+}
+
+/// The desk after `id` was dropped on `cell` (`None`: taken off the desk). A computer already on
+/// that cell takes the old place of the dropped one, or leaves the desk.
+fn rearranged(cells: &[(String, i32, i32)], me: &str, id: &str, cell: Option<(i32, i32)>) -> Vec<(String, i32, i32)> {
+    let from = cells.iter().find(|(c, ..)| c == id).map(|(_, x, y)| (*x, *y));
+    let mut out = Vec::new();
+    for (c, x, y) in cells {
+        if c == id {
+            continue;
+        }
+        if Some((*x, *y)) == cell && c != me {
+            if let Some((fx, fy)) = from {
+                out.push((c.clone(), fx, fy));
+            }
+            continue;
+        }
+        out.push((c.clone(), *x, *y));
+    }
+    if let Some((x, y)) = cell
+        && !out.iter().any(|(_, cx, cy)| (*cx, *cy) == (x, y))
+    {
+        out.push((id.to_string(), x, y));
+    }
+    out
+}
+
+/// A computer that can be dragged.
+fn machine_tile(ui: &mut egui::Ui, machine: &str, view: &MachineView, size: Vec2) {
+    let id = egui::Id::new(("machine", machine));
+    let p = theme::colors(ui);
+    ui.dnd_drag_source(id, Dragged(machine.to_string()), |ui| {
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let (frame, screen, caption) = if !view.paired {
+            (p.border, p.field, tr("not paired here"))
+        } else if view.connected {
+            // A blank caption keeps all monitors the same size
+            (p.accent, p.accent_soft, " ")
+        } else {
+            (p.muted, p.field, tr("not connected"))
+        };
+        paint_machine(ui, rect, &view.name, caption, frame, screen);
     })
     .response
     .on_hover_cursor(egui::CursorIcon::Grab);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rearranged;
+
+    fn cell(m: &str, x: i32, y: i32) -> (String, i32, i32) {
+        (m.to_string(), x, y)
+    }
+
+    #[test]
+    fn dropping_moves_swaps_and_removes() {
+        let desk = vec![cell("me", 0, 0), cell("pc", 1, 0), cell("pi", -1, 0)];
+        // Onto a free cell
+        let moved = rearranged(&desk, "me", "pi", Some((2, 0)));
+        assert!(moved.contains(&cell("pi", 2, 0)) && moved.len() == 3);
+        // Onto another computer: they swap
+        let swapped = rearranged(&desk, "me", "pi", Some((1, 0)));
+        assert!(swapped.contains(&cell("pi", 1, 0)) && swapped.contains(&cell("pc", -1, 0)));
+        // Onto this computer: nothing moves away from it
+        let refused = rearranged(&desk, "me", "pi", Some((0, 0)));
+        assert!(refused.contains(&cell("me", 0, 0)) && !refused.iter().any(|(m, ..)| m == "pi"));
+        // From outside onto a taken cell: the one there leaves the desk
+        let new = rearranged(&desk, "me", "tv", Some((1, 0)));
+        assert!(new.contains(&cell("tv", 1, 0)) && !new.iter().any(|(m, ..)| m == "pc"));
+        // Off the desk
+        let off = rearranged(&desk, "me", "pc", None);
+        assert_eq!(off, vec![cell("me", 0, 0), cell("pi", -1, 0)]);
+    }
 }

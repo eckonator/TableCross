@@ -173,6 +173,9 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Drag the computers to where they stand on your desk. Computers side by side share that edge." => {
+            "Zieh die Rechner dorthin, wo sie auf deinem Schreibtisch stehen. Nebeneinanderliegende Rechner teilen sich diese Kante."
+        }
         "Already switched on and still shown here (often after an update)? Select {} in the list, remove it with “–” and add it again with “+”." => {
             "Schon eingeschaltet und trotzdem hier aufgeführt (oft nach einem Update)? {} in der Liste auswählen, mit „–“ entfernen und mit „+“ neu hinzufügen."
         }
@@ -189,7 +192,7 @@ fn de(en: &str) -> Option<&'static str> {
         "The arrangement is shared with all paired computers, so every keyboard reaches every screen." => {
             "Die Anordnung gilt für alle gekoppelten Rechner, so erreicht jede Tastatur jeden Bildschirm."
         }
-        "not paired here" => "hier nicht gekoppelt",
+        "not paired here" => "nicht gekoppelt",
         "To control {} with this keyboard, pair it with this computer as well." => {
             "Um {} mit dieser Tastatur zu steuern, kopple ihn auch mit diesem Rechner."
         }

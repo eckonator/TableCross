@@ -62,6 +62,9 @@ pub enum Command {
         target: PairTarget,
     },
     Unpair(Fingerprint),
+    /// The whole desk as grid cells `(machine id, column, row)`; computers in neighboring cells
+    /// become neighbors. Replaces the arrangement.
+    Arrange(Vec<(String, i32, i32)>),
     /// Put a peer next to this computer (`None`: nowhere).
     Place {
         peer: Fingerprint,
@@ -1112,6 +1115,10 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             }
         }
         Command::Place { peer, side } => shared.edit_layout(|file| layout_file::place(file, &me, &peer, side)),
+        Command::Arrange(cells) => {
+            let me = layout_file::machine_id(&me);
+            shared.edit_layout(|file| file.neighbors = layout_file::from_grid(&cells, &me));
+        }
         Command::SwapCmdCtrl { peer, swap } => shared.edit_layout(|file| layout_file::set_swap(file, &peer, swap)),
         Command::AddAddress { peer, address } => {
             if let Err(e) = shared.node.add_address(&peer, address) {
