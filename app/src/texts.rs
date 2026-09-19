@@ -112,7 +112,7 @@ pub fn problem(p: &Problem) -> String {
             tr("The system helper still needs the Input Monitoring permission."),
             trf(STALE_PERMISSION, &[&"tablecross-helper"])
         ),
-        Problem::HelperOutdated => tr("The system helper is outdated; please install it again.").into(),
+        Problem::HelperOutdated => tr("The system helper is older than the app; please update it.").into(),
         Problem::HelperKeyboardsBusy(n) => trf(
             "The system helper could not take {} keyboard(s); their keys also reach this Mac.",
             &[n],

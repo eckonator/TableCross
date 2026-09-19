@@ -3,7 +3,7 @@
 //! macOS: the zip of the release is fetched with `curl` (no quarantine flag, so no Gatekeeper
 //! prompt), checked to be signed by the same certificate as this app, and put in place of this app;
 //! a small shell waits for this process to end and opens the new one. If the folder is not writable,
-//! macOS asks for an administrator password.
+//! macOS asks for an administrator password. An installed system helper is replaced as well.
 //! Windows: the installer of the release runs without questions and starts the app again.
 //! Linux: not offered (the download link remains).
 
@@ -114,6 +114,15 @@ fn installed_with_setup() -> bool {
 fn run(url: &str, report: &impl Fn(Progress)) -> Result<(), String> {
     let bundle = bundle().ok_or("not running from an app bundle")?;
     install_app(url, &bundle, report)?;
+    // The system helper runs as root from its own place; it gets the new build as well (one more
+    // password prompt). If that is cancelled, the status page offers it later.
+    let helper = bundle.join("Contents/MacOS/tablecross-helper");
+    if tc_session::helper_install::installed()
+        && tc_session::helper_install::differs_from(&helper)
+        && let Err(e) = tc_session::helper_install::update_from(&helper)
+    {
+        tracing::warn!("system helper not updated: {e}");
+    }
     relaunch(&bundle)
 }
 

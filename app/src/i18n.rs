@@ -173,6 +173,7 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Update system helper …" => "Systemhelfer aktualisieren …",
         "Drag the computers to where they stand on your desk. Computers side by side share that edge." => {
             "Zieh die Rechner dorthin, wo sie auf deinem Schreibtisch stehen. Nebeneinanderliegende Rechner teilen sich diese Kante."
         }
@@ -283,8 +284,8 @@ fn de(en: &str) -> Option<&'static str> {
         "The system helper is not installed. Without it, typing on other computers stops while a password field is active on this Mac." => {
             "Der Systemhelfer ist nicht installiert. Ohne ihn kommen Tastatureingaben auf anderen Rechnern nicht an, solange an diesem Mac ein Passwortfeld aktiv ist."
         }
-        "The system helper is outdated; please install it again." => {
-            "Der Systemhelfer ist veraltet; bitte neu installieren."
+        "The system helper is older than the app; please update it." => {
+            "Der Systemhelfer ist älter als die App; bitte aktualisieren."
         }
         "The system helper still needs the Input Monitoring permission." => {
             "Der Systemhelfer braucht noch die Berechtigung „Eingabeüberwachung“."

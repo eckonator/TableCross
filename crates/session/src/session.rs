@@ -669,7 +669,13 @@ async fn run(
             _ = status_tick.tick() => {
                 shared.refresh();
                 if let Some(capture) = &capture {
-                    let health = capture.health();
+                    #[allow(unused_mut)]
+                    let mut health = capture.health();
+                    #[cfg(target_os = "macos")]
+                    if crate::helper_install::outdated() && !health.problems.contains(&Problem::HelperOutdated) {
+                        health.problems.retain(|p| !matches!(p, Problem::HelperMissing));
+                        health.problems.push(Problem::HelperOutdated);
+                    }
                     for problem in health.problems.iter().filter(|p| !problems.contains(p)) {
                         shared.notice(Notice::Problem(problem.clone()));
                     }

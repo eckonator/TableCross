@@ -248,7 +248,17 @@ impl App {
                 }
             }
             #[cfg(target_os = "macos")]
-            Problem::HelperMissing | Problem::HelperOutdated | Problem::SecureInput => {
+            Problem::HelperOutdated => {
+                let busy = self.job.is_some();
+                if ui
+                    .add_enabled(!busy, egui::Button::new(tr("Update system helper …")))
+                    .clicked()
+                {
+                    self.run_job(|| tc_session::helper_install::update().map_err(|e| e.to_string()));
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Problem::HelperMissing | Problem::SecureInput => {
                 let busy = self.job.is_some();
                 if ui
                     .add_enabled(!busy, egui::Button::new(tr("Install system helper …")))

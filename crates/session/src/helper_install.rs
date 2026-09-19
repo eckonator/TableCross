@@ -115,6 +115,61 @@ launchctl bootstrap system {PLIST}",
     Ok(())
 }
 
+/// Whether the installed helper is another build than the one next to this program (after an
+/// update of the app). Compared by content; cached while the installed file stays the same.
+pub fn outdated() -> bool {
+    static CACHE: std::sync::Mutex<Option<(std::time::SystemTime, bool)>> = std::sync::Mutex::new(None);
+    let Ok(modified) = std::fs::metadata(INSTALLED_BINARY).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let mut cache = CACHE.lock().expect("cache lock");
+    if let Some((when, result)) = *cache
+        && when == modified
+    {
+        return result;
+    }
+    let differs = match (built_helper().ok().map(std::fs::read), std::fs::read(INSTALLED_BINARY)) {
+        (Some(Ok(built)), Ok(installed)) => built != installed,
+        _ => false,
+    };
+    *cache = Some((modified, differs));
+    differs
+}
+
+/// Replaces the installed helper with `new` and restarts it; keeps its permission when both are
+/// signed by the same certificate. Asks for the administrator password.
+pub fn update_from(new: &Path) -> Result<()> {
+    if !Path::new(INSTALLED_BINARY).exists() {
+        return Ok(());
+    }
+    as_admin(&format!(
+        "set -e
+cp {new} {INSTALLED_BINARY}
+chown root:wheel {INSTALLED_BINARY}
+chmod 755 {INSTALLED_BINARY}
+launchctl kickstart -k system/{LABEL}",
+        new = quote(new),
+    ))
+}
+
+/// Replaces the installed helper with the one next to this program.
+pub fn update() -> Result<()> {
+    update_from(&built_helper()?)
+}
+
+/// Whether the helper is installed at all.
+pub fn installed() -> bool {
+    Path::new(INSTALLED_BINARY).exists()
+}
+
+/// Whether `new` differs from the installed helper.
+pub fn differs_from(new: &Path) -> bool {
+    match (std::fs::read(new), std::fs::read(INSTALLED_BINARY)) {
+        (Ok(a), Ok(b)) => a != b,
+        _ => false,
+    }
+}
+
 pub fn uninstall() -> Result<()> {
     as_admin(&format!(
         "launchctl bootout system/{LABEL} 2>/dev/null || true
