@@ -14,7 +14,7 @@ use tc_net::{
     Disconnect, Discovered, Event, Fingerprint, Identity, LinkInfo, Node, NodeConfig, PairError, PairingCode,
     PeerStore, Refusal,
 };
-use tc_protocol::{Message, Screen};
+use tc_protocol::{Message, MouseButton, Screen};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
@@ -233,6 +233,9 @@ enum Internal {
     ClipRead(Option<tc_clipboard::Read>),
     ClipWritten(Fingerprint, Option<u64>),
     FilesListed(Result<Listing, String>),
+    /// Files dragged over the edge, to be listed and sent.
+    Dropped(Vec<PathBuf>),
+    DropListed(Result<Listing, String>),
     LockAll,
 }
 
@@ -241,8 +244,8 @@ enum Internal {
 struct FileState {
     /// Our copied files, if they are the newest content anywhere.
     local: Option<(u64, Arc<Listing>)>,
-    /// Files waiting on a peer: peer, id, label, count, size.
-    remote: Option<(Fingerprint, u64, String, u64, u64)>,
+    /// Files waiting on a peer: peer, id, label, count, size, dragged over the edge.
+    remote: Option<(Fingerprint, u64, String, u64, u64, bool)>,
     requested: Option<u64>,
     /// What we put on the clipboard after a transfer (not announced again).
     written: Vec<PathBuf>,
@@ -485,7 +488,16 @@ fn execute(actions: Vec<Action>, node: &Node, inject: Option<&dyn Inject>) {
 /// The capture handler: keyboard shortcuts first, then the engine decides.
 fn handler(shared: Arc<Shared>) -> tc_input::Handler {
     let mut held = BTreeSet::new();
+    // State of the drag pasteboard when the left button went down
+    let mut drag_before: Option<u64> = None;
     Box::new(move |event: Captured| {
+        if let Captured::Button {
+            button: MouseButton::Left,
+            down: true,
+        } = event
+        {
+            drag_before = tc_clipboard::drag::change_count();
+        }
         if let Captured::Key { usage, down } = event {
             if down {
                 held.insert(usage);
@@ -524,11 +536,37 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
             }
         }
         let mut engine = shared.engine.lock().expect("engine lock");
-        let actions = engine.captured(event);
+        let mut actions = engine.captured(event);
         let grabbed = matches!(engine.role(), Role::Controlling(_));
+        drop(engine);
+        if let Some(before) = drag_before
+            && dragged_over_edge(&actions)
+        {
+            let files = tc_clipboard::drag::files_since(before);
+            if !files.is_empty() {
+                // Esc cancels the drag here, so nothing lands at the screen edge; the files go over
+                let esc = |down| Action::Inject(Message::Key { usage: ESCAPE, down });
+                actions.splice(0..0, [esc(true), esc(false)]);
+                let _ = shared.internal.send(Internal::Dropped(files));
+            }
+        }
         execute(actions, &shared.node, shared.inject.as_deref());
         !grabbed
     })
+}
+
+/// The pointer left this computer with the left button held (the button is let go at the edge).
+fn dragged_over_edge(actions: &[Action]) -> bool {
+    actions.iter().any(|a| matches!(a, Action::Grab { .. }))
+        && actions.iter().any(|a| {
+            matches!(
+                a,
+                Action::Inject(Message::MouseButton {
+                    button: MouseButton::Left,
+                    down: false
+                })
+            )
+        })
 }
 
 pub struct Session;
@@ -660,7 +698,15 @@ async fn run(
             Some(message) = internal.recv() => match message {
                 Internal::Notice(notice) => shared.notice(notice),
                 Internal::ClipRead(read) => clip_read(&shared, read),
-                Internal::FilesListed(listing) => files_listed(&shared, listing),
+                Internal::FilesListed(listing) => files_listed(&shared, listing, false),
+                Internal::Dropped(paths) => {
+                    let internal = shared.internal.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let listing = files::list(&paths).map_err(|e| e.to_string());
+                        let _ = internal.send(Internal::DropListed(listing));
+                    });
+                }
+                Internal::DropListed(listing) => files_listed(&shared, listing, true),
                 Internal::ClipWritten(from, count) => {
                     shared.clip.lock().expect("clip lock").write_done(count);
                     if count.is_some() {
@@ -751,17 +797,18 @@ async fn run(
     shared.node.shutdown().await;
 }
 
-fn files_offer(id: u64, listing: &Listing) -> Message {
+fn files_offer(id: u64, listing: &Listing, dropped: bool) -> Message {
     Message::FilesOffer {
         id,
         names: listing.shown_names(),
         count: listing.count(),
         size: listing.size(),
+        dropped,
     }
 }
 
-/// Files were copied here: announce them to everyone connected.
-fn files_listed(shared: &Arc<Shared>, listing: Result<Listing, String>) {
+/// Files were copied here (or dragged over the edge): announce them to everyone connected.
+fn files_listed(shared: &Arc<Shared>, listing: Result<Listing, String>, dropped: bool) {
     let listing = match listing {
         Ok(l) if !l.entries.is_empty() => l,
         Ok(_) => return,
@@ -777,7 +824,7 @@ fn files_listed(shared: &Arc<Shared>, listing: Result<Listing, String>) {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos() as u64)
             ^ state.counter.rotate_left(40);
-        let offer = files_offer(id, &listing);
+        let offer = files_offer(id, &listing, dropped);
         state.local = Some((id, Arc::new(listing)));
         state.remote = None;
         offer
@@ -860,13 +907,13 @@ fn send_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64) {
 }
 
 fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_net::InStream) {
-    let (label, count, total, cancel) = {
+    let (label, count, total, dropped, cancel) = {
         let mut state = shared.files.lock().expect("files lock");
         match &state.remote {
-            Some((from, newest, label, count, size)) if *from == peer && *newest == id => {
-                let (label, count, size) = (label.clone(), *count, *size);
+            Some((from, newest, label, count, size, dropped)) if *from == peer && *newest == id => {
+                let (label, count, size, dropped) = (label.clone(), *count, *size, *dropped);
                 state.remote = None;
-                (label, count, size, state.cancels.add(id))
+                (label, count, size, dropped, state.cancels.add(id))
             }
             _ => {
                 drop(state);
@@ -913,6 +960,9 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
                         .ok()
                         .flatten();
                     shared.clip.lock().expect("clip lock").write_done(count);
+                }
+                if dropped {
+                    tc_input::system::show_folder(&target);
                 }
                 shared.notice(Notice::FilesReceived(peer_name, count, target));
             }
@@ -1021,7 +1071,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .expect("files lock")
                 .local
                 .as_ref()
-                .map(|(id, l)| files_offer(*id, l));
+                .map(|(id, l)| files_offer(*id, l, false));
             if let Some(offer) = files_offer {
                 shared.node.send(&peer, offer);
             }
@@ -1065,14 +1115,21 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
         }
         Event::Message {
             peer,
-            message: Message::FilesOffer { id, names, count, size },
+            message:
+                Message::FilesOffer {
+                    id,
+                    names,
+                    count,
+                    size,
+                    dropped,
+                },
         } => {
             shared.clip.lock().expect("clip lock").clear_remote();
             let label = names.join(", ");
             {
                 let mut state = shared.files.lock().expect("files lock");
                 state.local = None;
-                state.remote = Some((peer, id, label.clone(), count, size));
+                state.remote = Some((peer, id, label.clone(), count, size, dropped));
                 state.requested = None;
             }
             shared.status.lock().expect("status lock").files_waiting = Some(label);

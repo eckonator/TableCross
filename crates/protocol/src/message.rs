@@ -176,6 +176,8 @@ pub enum Message {
         names: Vec<String>,
         count: u64,
         size: u64,
+        /// Dragged over the edge (not copied): the receiver shows them when they arrived.
+        dropped: bool,
     },
     FilesRequest {
         id: u64,
@@ -327,6 +329,7 @@ mod tests {
                 names: vec!["Fotos".into()],
                 count: 1200,
                 size: 2_000_000_000,
+                dropped: false,
             },
             Message::FilesRequest { id: 3 },
             Message::Layout {

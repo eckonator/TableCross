@@ -168,6 +168,20 @@ impl Drop for KeepAwake {
     }
 }
 
+/// Opens a folder in the file manager.
+pub fn show_folder(path: &std::path::Path) {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(program).arg(path).spawn() {
+        tracing::warn!("cannot open {}: {e}", path.display());
+    }
+}
+
 /// Locks the screen of this computer.
 pub fn lock_screen() -> Result<(), String> {
     #[cfg(target_os = "macos")]

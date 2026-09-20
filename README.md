@@ -91,7 +91,9 @@ and the Computers page shows the whole desk.
   behave like a real keyboard plugged into the other computer.
 - **Simple setup.** Computers find each other on the local network and pair with a short code.
   Traffic is always encrypted.
-- **Clipboard and files.** Text, rich text and images first, then copying files.
+- **Clipboard and files.** Text, rich text and images; copied files arrive when the pointer does.
+  Files dragged over the edge of a Mac land in `Downloads/TableCross` on the other computer, which
+  opens that folder.
 - **Windows sign-in screen.** An optional Windows service keeps control on the login and UAC screens.
 
 Local network only, no cloud, no account, no telemetry. If you allow it, the app asks GitHub now and

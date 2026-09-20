@@ -6,9 +6,9 @@ use std::path::PathBuf;
 
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardItem, NSPasteboardTypeFileURL,
-    NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeTIFF,
-    NSPasteboardWriting,
+    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardItem, NSPasteboardNameDrag,
+    NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString,
+    NSPasteboardTypeTIFF, NSPasteboardWriting,
 };
 use objc2_foundation::{NSArray, NSData, NSDictionary, NSString, NSURL};
 
@@ -30,6 +30,36 @@ impl MacClipboard {
             None => NSPasteboard::generalPasteboard(),
         }
     }
+}
+
+/// The files on a pasteboard.
+fn files_of(board: &NSPasteboard) -> Vec<PathBuf> {
+    board
+        .pasteboardItems()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| unsafe { item.stringForType(NSPasteboardTypeFileURL) })
+                .filter_map(|url| NSURL::URLWithString(&url))
+                .filter_map(|url| url.path())
+                .map(|path| PathBuf::from(path.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn drag_board() -> objc2::rc::Retained<NSPasteboard> {
+    NSPasteboard::pasteboardWithName(unsafe { NSPasteboardNameDrag })
+}
+
+/// Changes whenever a drag starts somewhere.
+pub fn drag_change_count() -> u64 {
+    autoreleasepool(|_| drag_board().changeCount() as u64)
+}
+
+/// The files of the drag going on (or of the last one).
+pub fn drag_files() -> Vec<PathBuf> {
+    autoreleasepool(|_| files_of(&drag_board()))
 }
 
 /// TIFF (what many Mac programs put there for images) to PNG.
@@ -56,18 +86,7 @@ impl SystemClipboard for MacClipboard {
                 return Ok(Read::Concealed);
             }
             if types.iter().any(|t| t == "public.file-url") {
-                let files: Vec<PathBuf> = board
-                    .pasteboardItems()
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(|item| unsafe { item.stringForType(NSPasteboardTypeFileURL) })
-                            .filter_map(|url| NSURL::URLWithString(&url))
-                            .filter_map(|url| url.path())
-                            .map(|path| PathBuf::from(path.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let files = files_of(&board);
                 if !files.is_empty() {
                     return Ok(Read::Files(files));
                 }
@@ -174,6 +193,22 @@ mod tests {
         let files = vec![PathBuf::from("/tmp/notes.txt"), PathBuf::from("/tmp/a folder")];
         clip.write_files(&files).unwrap();
         assert_eq!(clip.read().unwrap(), Read::Files(files));
+    }
+
+    #[test]
+    fn files_being_dragged_are_found() {
+        let before = drag_change_count();
+        assert!(crate::drag::files_since(before).is_empty());
+        let file = std::env::temp_dir().join(format!("tablecross-drag-{}.txt", std::process::id()));
+        std::fs::write(&file, "x").unwrap();
+        let drag = MacClipboard {
+            name: Some(unsafe { NSPasteboardNameDrag }.to_string()),
+        };
+        drag.write_files(std::slice::from_ref(&file)).unwrap();
+        let found = crate::drag::files_since(before);
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].ends_with(file.file_name().unwrap()));
     }
 
     fn tiny_png() -> Vec<u8> {

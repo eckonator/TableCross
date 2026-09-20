@@ -50,6 +50,30 @@ pub trait SystemClipboard: Send + Sync {
     fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError>;
 }
 
+/// Files being dragged with the mouse. Only macOS tells other programs about a drag (through the
+/// drag pasteboard); elsewhere nothing is found.
+pub mod drag {
+    use std::path::PathBuf;
+
+    /// A number that changes whenever a drag starts.
+    pub fn change_count() -> Option<u64> {
+        #[cfg(target_os = "macos")]
+        return Some(crate::mac::drag_change_count());
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// The files dragged since `change_count` returned `before`.
+    pub fn files_since(before: u64) -> Vec<PathBuf> {
+        #[cfg(target_os = "macos")]
+        if crate::mac::drag_change_count() != before {
+            return crate::mac::drag_files();
+        }
+        let _ = before;
+        Vec::new()
+    }
+}
+
 /// The clipboard of this system, if supported.
 pub fn platform() -> Option<Box<dyn SystemClipboard>> {
     #[cfg(target_os = "macos")]
