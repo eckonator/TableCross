@@ -146,6 +146,7 @@ barrier and takes it away from the Mac only while the pointer is on the other co
 ```sh
 tablecross-cli helper install   # asks for the administrator password
 tablecross-cli helper status    # then allow it under Privacy & Security → Input Monitoring
+tablecross-cli helper update    # after an update of TableCross (the app does this by itself)
 ```
 
 If TableCross stops or crashes, the helper gives the keyboard back within a second.

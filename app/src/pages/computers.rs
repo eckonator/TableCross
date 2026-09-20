@@ -151,14 +151,13 @@ impl App {
         }
         for name in unreachable {
             ui.add_space(6.0);
-            theme::banner(
+            theme::note(
                 ui,
                 theme::Tone::Info,
                 &trf(
                     "To control {} with this keyboard, pair it with this computer as well.",
                     &[&name],
                 ),
-                |_| {},
             );
         }
         if let Some((id, cell)) = dropped {
@@ -253,7 +252,8 @@ impl App {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.address_input)
                         .desired_width(180.0)
-                        .hint_text("192.168.1.20:24800"),
+                        .hint_text("192.168.1.20:24800")
+                        .margin(egui::Margin::symmetric(8, 6)),
                 );
             });
             let code_ok = tc_net::PairingCode::parse(&self.code_input).is_some();

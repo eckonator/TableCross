@@ -90,7 +90,11 @@ impl App {
                 .show(ui, |ui| {
                     ui.label(tr("Name of this computer"));
                     changed |= ui
-                        .add(egui::TextEdit::singleline(&mut self.settings.name).hint_text(host_name()))
+                        .add(
+                            egui::TextEdit::singleline(&mut self.settings.name)
+                                .hint_text(host_name())
+                                .margin(egui::Margin::symmetric(8, 6)),
+                        )
                         .changed();
                     ui.end_row();
                     ui.label(tr("UDP port"));

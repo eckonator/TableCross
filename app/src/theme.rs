@@ -236,6 +236,15 @@ pub enum Tone {
 
 /// A note with a colored edge; `add` puts buttons below the text.
 pub fn banner(ui: &mut egui::Ui, tone: Tone, text: &str, add: impl FnOnce(&mut egui::Ui)) {
+    banner_with(ui, tone, text, Some(add));
+}
+
+/// A note with a colored edge and nothing below the text.
+pub fn note(ui: &mut egui::Ui, tone: Tone, text: &str) {
+    banner_with(ui, tone, text, None::<fn(&mut egui::Ui)>);
+}
+
+fn banner_with(ui: &mut egui::Ui, tone: Tone, text: &str, add: Option<impl FnOnce(&mut egui::Ui)>) {
     let p = colors(ui);
     let (edge, fill, symbol) = match tone {
         Tone::Info => (p.accent, p.accent_soft, "ℹ"),
@@ -257,7 +266,9 @@ pub fn banner(ui: &mut egui::Ui, tone: Tone, text: &str, add: impl FnOnce(&mut e
                 ui.label(RichText::new(symbol).size(16.0).color(edge));
                 ui.vertical(|ui| {
                     ui.label(RichText::new(text).color(p.text));
-                    ui.horizontal_wrapped(add);
+                    if let Some(add) = add {
+                        ui.horizontal_wrapped(add);
+                    }
                 });
             });
         })

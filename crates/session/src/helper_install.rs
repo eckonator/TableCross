@@ -103,9 +103,6 @@ launchctl bootstrap system {PLIST}",
     as_admin(&script)?;
     let _ = std::fs::remove_file(&plist_file);
     show_permission_place();
-    println!("Installed. The helper now asks for the Input Monitoring permission:");
-    println!("System Settings → Privacy & Security → Input Monitoring → enable “de.eckonator.tablecross.helper”.");
-    println!("It picks the permission up by itself within half a minute; check with `tablecross-cli helper status`.");
     Ok(())
 }
 

@@ -16,6 +16,16 @@ mod helper {
         Ok(())
     }
 
+    pub fn update() -> Result<()> {
+        if !helper_install::installed() {
+            anyhow::bail!("not installed; install with `tablecross-cli helper install`");
+        }
+        helper_install::update()?;
+        println!("Updated and restarted. If it lost the Input Monitoring permission, switch it on again:");
+        println!("System Settings → Privacy & Security → Input Monitoring → “de.eckonator.tablecross.helper”.");
+        Ok(())
+    }
+
     pub fn uninstall() -> Result<()> {
         helper_install::uninstall()?;
         println!("Removed.");
@@ -38,6 +48,9 @@ mod helper {
                     " (outdated, install again)"
                 };
                 println!("Running, version {version}{outdated}.");
+                if helper_install::outdated() {
+                    println!("Another build than this program: update with `tablecross-cli helper update`.");
+                }
                 if access {
                     println!("Input Monitoring: granted.");
                 } else {
@@ -139,6 +152,8 @@ enum Command {
 enum HelperAction {
     /// Install or update (asks for the administrator password)
     Install,
+    /// Replace it with the build next to this program, keeping its permission
+    Update,
     /// Remove (asks for the administrator password)
     Uninstall,
     /// Restart, e.g. after granting a permission
@@ -202,6 +217,7 @@ async fn main() -> Result<()> {
             #[cfg(target_os = "macos")]
             return match action {
                 HelperAction::Install => helper::install(),
+                HelperAction::Update => helper::update(),
                 HelperAction::Uninstall => helper::uninstall(),
                 HelperAction::Restart => helper::restart(),
                 HelperAction::Status => helper::status(),

@@ -78,7 +78,7 @@ impl App {
                 "Copied on another computer: {}. They come over when the pointer arrives here.",
                 &[waiting],
             );
-            theme::banner(ui, theme::Tone::Info, &text, |_| {});
+            theme::note(ui, theme::Tone::Info, &text);
             ui.add_space(8.0);
         }
         for t in status.transfers.iter().rev() {

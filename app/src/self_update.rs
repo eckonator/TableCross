@@ -5,9 +5,8 @@
 //! a small shell waits for this process to end and opens the new one. If the folder is not writable,
 //! macOS asks for an administrator password. An installed system helper is replaced as well.
 //! Windows: the installer of the release runs without questions and starts the app again.
-//! Linux: not offered (the download link remains).
-
-#![cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+//! Linux: if installed with the `install.sh` of the archive (programs in `~/.local/bin`), the new
+//! archive is unpacked and its `install.sh` run; then the app starts again. No password needed.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -33,6 +32,13 @@ pub fn asset_suffix() -> Option<&'static str> {
         bundle().map(|_| "-macOS.zip")
     } else if cfg!(windows) {
         installed_with_setup().then_some("-Windows-Setup.exe")
+    } else if cfg!(target_os = "linux") {
+        let arch = if cfg!(target_arch = "aarch64") {
+            "-Linux-arm64.tar.gz"
+        } else {
+            "-Linux-x86_64.tar.gz"
+        };
+        installed_for_user().map(|_| arch)
     } else {
         None
     }
@@ -227,7 +233,48 @@ fn run(url: &str, report: &impl Fn(Progress)) -> Result<(), String> {
         .map_err(|e| format!("installer: {e}"))
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+/// Where `install.sh` put the programs (`~/.local/bin` or `$XDG_BIN_HOME`), if this program runs
+/// from there.
+fn installed_for_user() -> Option<PathBuf> {
+    let bin = std::env::var_os("XDG_BIN_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/bin")))?;
+    let exe = std::env::current_exe().ok()?;
+    (exe.parent()? == bin && exe.file_name()? == "tablecross").then_some(exe)
+}
+
+#[cfg(target_os = "linux")]
+fn run(url: &str, report: &impl Fn(Progress)) -> Result<(), String> {
+    let exe = installed_for_user().ok_or("not installed with install.sh")?;
+    let dir = work_dir()?;
+    report(Progress::Downloading);
+    let archive = dir.join("update.tar.gz");
+    download(url, &archive)?;
+    report(Progress::Installing);
+    checked(command("tar").arg("-xzf").arg(&archive).arg("-C").arg(&dir), "unpack")?;
+    let unpacked = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.join("install.sh").is_file())
+        .ok_or("the download contains no install.sh")?;
+    checked(command("bash").arg(unpacked.join("install.sh")), "install")?;
+    let _ = std::fs::remove_dir_all(&dir);
+    // Start the new program as soon as this one has ended
+    command("/bin/sh")
+        .args([
+            "-c",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec \"$0\" \"$2\" >/dev/null 2>&1",
+        ])
+        .arg(&exe)
+        .arg(std::process::id().to_string())
+        .arg(AFTER_UPDATE_FLAG)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 fn run(_url: &str, _report: &impl Fn(Progress)) -> Result<(), String> {
     Err("not supported on this system".into())
 }

@@ -402,6 +402,16 @@ fn motion(pt: POINT) -> Captured {
                 dx: f64::from(pt.x - px),
                 dy: f64::from(pt.y - py),
             }
+        } else if pointer_confined() {
+            // A game or other program holds the pointer in its window: no switching over the edge
+            // (the keyboard shortcut still works)
+            context.last = pt;
+            Captured::Motion {
+                x: f64::from(pt.x),
+                y: f64::from(pt.y),
+                dx: 0.0,
+                dy: 0.0,
+            }
         } else {
             if shared.returned.swap(false, Ordering::SeqCst) {
                 // Measured from the parking spot, the first motion would look like a jump across
@@ -421,6 +431,30 @@ fn motion(pt: POINT) -> Captured {
             }
         }
     })
+}
+
+/// Some program confined the pointer to a part of the screens (`ClipCursor`), as games do.
+fn pointer_confined() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetClipCursor, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    };
+    let mut clip = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        if GetClipCursor(&mut clip) == 0 {
+            return false;
+        }
+        let (x, y) = (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
+        let (w, h) = (
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        );
+        clip.left > x || clip.top > y || clip.right < x + w || clip.bottom < y + h
+    }
 }
 
 pub struct WinInject {
