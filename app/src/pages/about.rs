@@ -32,7 +32,7 @@ impl App {
             ui.label(RichText::new(tr("Author")).font(egui::FontId::new(14.0, crate::theme::semibold())));
             ui.label("Markus Eckert");
             ui.add_space(14.0);
-            ui.hyperlink_to(tr("Source code"), env!("CARGO_PKG_REPOSITORY"));
+            super::link(ui, tr("Source code"), env!("CARGO_PKG_REPOSITORY"));
             ui.add_space(14.0);
             ui.label(RichText::new(tr("Privacy")).font(egui::FontId::new(14.0, crate::theme::semibold())));
             ui.label(tr(

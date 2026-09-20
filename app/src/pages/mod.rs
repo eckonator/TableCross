@@ -18,6 +18,13 @@ pub fn warn_color(ui: &egui::Ui) -> egui::Color32 {
     crate::theme::colors(ui).warn
 }
 
+/// A link that opens in the browser (egui's own links need a feature that is not built in).
+pub fn link(ui: &mut egui::Ui, text: &str, url: &str) {
+    if ui.link(text).on_hover_text(url).clicked() {
+        open(url);
+    }
+}
+
 /// Opens a URL or file with the system.
 pub fn open(target: &str) {
     let result = if cfg!(target_os = "macos") {

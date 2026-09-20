@@ -152,7 +152,7 @@ impl App {
                     if new.asset.is_some() {
                         install = theme::primary_button(ui, tr("Update now")).clicked();
                     }
-                    ui.hyperlink_to(tr("Download"), &new.url);
+                    super::link(ui, tr("Download"), &new.url);
                     if let Some(Progress::Failed(e)) = &progress {
                         ui.label(RichText::new(trf("The update did not work: {}", &[e])).color(theme::colors(ui).bad));
                     }
