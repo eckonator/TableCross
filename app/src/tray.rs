@@ -16,6 +16,7 @@ pub struct Tray {
     _icon: TrayIcon,
     show: MenuItem,
     release: MenuItem,
+    lock: MenuItem,
     quit: MenuItem,
 }
 
@@ -50,9 +51,10 @@ impl Tray {
     pub fn new(ctx: &egui::Context, session: Option<SessionHandle>, quit_flag: Arc<AtomicBool>) -> Option<Self> {
         let show = MenuItem::new(tr("Show TableCross"), true, None);
         let release = MenuItem::new(tr("Release everything"), true, None);
+        let lock = MenuItem::new(tr("Lock all screens"), true, None);
         let quit = MenuItem::new(tr("Quit TableCross"), true, None);
         let menu = Menu::new();
-        menu.append_items(&[&show, &release, &PredefinedMenuItem::separator(), &quit])
+        menu.append_items(&[&show, &release, &lock, &PredefinedMenuItem::separator(), &quit])
             .ok()?;
         let template = cfg!(target_os = "macos");
         let size = if template { 36 } else { 32 };
@@ -71,6 +73,7 @@ impl Tray {
             }
         };
         let (show_id, release_id, quit_id) = (show.id().clone(), release.id().clone(), quit.id().clone());
+        let lock_id = lock.id().clone();
         let menu_ctx = ctx.clone();
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             if event.id == show_id {
@@ -78,6 +81,10 @@ impl Tray {
             } else if event.id == release_id {
                 if let Some(session) = &session {
                     session.send(Command::ReleaseAll);
+                }
+            } else if event.id == lock_id {
+                if let Some(session) = &session {
+                    session.send(Command::LockAll);
                 }
             } else if event.id == quit_id {
                 quit_flag.store(true, Ordering::SeqCst);
@@ -104,6 +111,7 @@ impl Tray {
             _icon: tray,
             show,
             release,
+            lock,
             quit,
         })
     }
@@ -112,6 +120,7 @@ impl Tray {
     pub fn retranslate(&self) {
         self.show.set_text(tr("Show TableCross"));
         self.release.set_text(tr("Release everything"));
+        self.lock.set_text(tr("Lock all screens"));
         self.quit.set_text(tr("Quit TableCross"));
     }
 }

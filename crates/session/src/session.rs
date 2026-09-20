@@ -24,6 +24,7 @@ use crate::layout_file;
 use crate::transfer::{self, Cancels, Progress, TransferState, TransferView};
 
 const ESCAPE: u16 = 0x29;
+const KEY_L: u16 = 0x0F;
 const ARROWS: [(u16, Side); 4] = [
     (0x4F, Side::Right),
     (0x50, Side::Left),
@@ -65,6 +66,8 @@ pub enum Command {
     /// The whole desk as grid cells `(machine id, column, row)`; computers in neighboring cells
     /// become neighbors. Replaces the arrangement.
     Arrange(Vec<(String, i32, i32)>),
+    /// Lock the screens of all connected computers and of this one.
+    LockAll,
     /// Put a peer next to this computer (`None`: nowhere).
     Place {
         peer: Fingerprint,
@@ -114,6 +117,8 @@ pub enum Notice {
     /// Files from this peer arrived in the folder; they are on the clipboard as well.
     FilesReceived(String, u64, PathBuf),
     TransferFailed(String, String),
+    /// All screens were locked from here.
+    LockedAll,
 }
 
 impl std::fmt::Display for Notice {
@@ -147,6 +152,7 @@ impl std::fmt::Display for Notice {
                 write!(f, "{count} file(s) from {n} in {}", dir.display())
             }
             Notice::TransferFailed(n, e) => write!(f, "file transfer with {n} failed: {e}"),
+            Notice::LockedAll => write!(f, "all screens locked"),
         }
     }
 }
@@ -225,6 +231,7 @@ enum Internal {
     ClipRead(Option<tc_clipboard::Read>),
     ClipWritten(Fingerprint, Option<u64>),
     FilesListed(Result<Listing, String>),
+    LockAll,
 }
 
 /// Copied files and running transfers.
@@ -481,6 +488,12 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 let _ = shared.internal.send(Internal::Notice(Notice::EmergencyRelease));
                 return true;
             }
+            if prefix && usage == KEY_L {
+                if down {
+                    let _ = shared.internal.send(Internal::LockAll);
+                }
+                return false;
+            }
             if prefix && let Some((_, side)) = ARROWS.iter().find(|(u, _)| *u == usage) {
                 if down {
                     let actions = shared.engine.lock().expect("engine lock").switch_side(*side);
@@ -596,6 +609,8 @@ async fn run(
 ) {
     start_capture(&shared, &mut capture);
     let mut role = Role::Idle;
+    // Both computers stay awake while one controls the other
+    let mut awake: Option<tc_input::system::KeepAwake> = None;
     let mut problems: Vec<Problem> = Vec::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
@@ -631,6 +646,7 @@ async fn run(
                         shared.notice(Notice::ClipboardReceived(shared.name_of(&from.to_string())));
                     }
                 }
+                Internal::LockAll => lock_all(&shared),
                 Internal::PairDone(result) => {
                     shared.status.lock().expect("status lock").pairing_busy = false;
                     match result {
@@ -661,6 +677,11 @@ async fn run(
                         Role::Controlling(id) => Notice::Controlling(shared.name_of(id)),
                         Role::ControlledBy(id) => Notice::ControlledBy(shared.name_of(id)),
                     };
+                    if now == Role::Idle {
+                        awake = None;
+                    } else if awake.is_none() {
+                        awake = tc_input::system::KeepAwake::new();
+                    }
                     role = now;
                     shared.refresh();
                     shared.notice(notice);
@@ -944,6 +965,26 @@ fn clip_read(shared: &Arc<Shared>, read: Option<tc_clipboard::Read>) {
     }
 }
 
+/// Locks this screen without blocking the loop.
+fn lock_here() {
+    std::thread::spawn(|| {
+        if let Err(e) = tc_input::system::lock_screen() {
+            tracing::warn!("cannot lock the screen: {e}");
+        }
+    });
+}
+
+/// Mouse and keyboard back home, then every connected computer and this one lock their screens.
+fn lock_all(shared: &Arc<Shared>) {
+    let actions = shared.engine.lock().expect("engine lock").release_everything();
+    shared.execute(actions);
+    for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
+        shared.node.send(&peer.peer.fingerprint, Message::LockScreen);
+    }
+    shared.notice(Notice::LockedAll);
+    lock_here();
+}
+
 fn handle_event(shared: &Arc<Shared>, event: Event) {
     match event {
         Event::Connected {
@@ -1047,6 +1088,13 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             peer,
             message: message @ Message::Layout { .. },
         } => shared.layout_received(peer, message),
+        Event::Message {
+            peer,
+            message: Message::LockScreen,
+        } => {
+            tracing::info!("{} locks all screens", shared.name_of(&peer.to_string()));
+            lock_here();
+        }
         Event::Message { peer, message } => {
             let actions = shared
                 .engine
@@ -1136,6 +1184,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             let actions = shared.engine.lock().expect("engine lock").switch_to(&target);
             shared.execute(actions);
         }
+        Command::LockAll => lock_all(shared),
         Command::ReleaseAll => {
             let actions = shared.engine.lock().expect("engine lock").release_everything();
             shared.execute(actions);

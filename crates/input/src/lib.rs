@@ -14,6 +14,7 @@ pub mod helper_protocol;
 mod mac;
 #[cfg(target_os = "macos")]
 mod mac_helper;
+pub mod system;
 mod virtual_input;
 #[cfg(windows)]
 pub mod win_send;

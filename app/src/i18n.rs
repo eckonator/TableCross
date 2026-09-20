@@ -173,6 +173,10 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "All screens were locked" => "Alle Bildschirme wurden gesperrt",
+        "Lock all screens" => "Alle Bildschirme sperren",
+        "Ctrl + Shift + Alt + L" => "Strg + Umschalt + Alt + L",
+        "Lock the screens of all computers" => "Die Bildschirme aller Rechner sperren",
         "The button opens the settings and a Finder window with the helper file: switch it on there, or drag the file into the list." => {
             "Der Knopf öffnet die Einstellungen und ein Finder-Fenster mit der Datei des Systemhelfers: dort einschalten oder die Datei in die Liste ziehen."
         }
