@@ -15,6 +15,9 @@ use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui;
 
+/// Passed to the new version when it starts after an update.
+pub const AFTER_UPDATE_FLAG: &str = "--after-update";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progress {
     Downloading,
@@ -199,10 +202,11 @@ fn relaunch(bundle: &Path) -> Result<(), String> {
     command("/bin/sh")
         .args([
             "-c",
-            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$0\"",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$0\" --args \"$2\"",
         ])
         .arg(bundle)
         .arg(std::process::id().to_string())
+        .arg(AFTER_UPDATE_FLAG)
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())

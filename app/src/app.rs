@@ -58,10 +58,15 @@ pub struct App {
     /// Installing a new version from inside the app, and how far it got.
     self_update: Option<std::sync::mpsc::Receiver<crate::self_update::Progress>>,
     pub update_progress: Option<crate::self_update::Progress>,
+    /// After the system helper was replaced: until then, show where to grant its permission as
+    /// soon as it reports that it lacks it (a replaced helper may lose it).
+    pub helper_prompt: Option<Instant>,
 }
 
 /// How often to look for a new version while running.
 const UPDATE_EVERY: Duration = Duration::from_secs(12 * 3600);
+/// How long after replacing the system helper its missing permission opens the settings by itself.
+pub const HELPER_PROMPT_FOR: Duration = Duration::from_secs(90);
 
 impl App {
     pub fn new(
@@ -110,6 +115,9 @@ impl App {
             update_job: None,
             update_checked: None,
             self_update: None,
+            helper_prompt: std::env::args()
+                .any(|a| a == crate::self_update::AFTER_UPDATE_FLAG)
+                .then(|| Instant::now() + HELPER_PROMPT_FOR),
             update_progress: None,
         };
         if app.demo.is_none() {
@@ -387,6 +395,19 @@ impl App {
         }
     }
 
+    /// Opens the Input Monitoring settings and the helper file once, if a just replaced helper lacks
+    /// the permission.
+    fn helper_prompt(&mut self) {
+        let Some(until) = self.helper_prompt else { return };
+        if Instant::now() > until {
+            self.helper_prompt = None;
+        } else if self.status.problems.contains(&tc_input::Problem::HelperNoAccess) {
+            self.helper_prompt = None;
+            #[cfg(target_os = "macos")]
+            tc_session::helper_install::show_permission_place();
+        }
+    }
+
     fn poll_job(&mut self) {
         let Some(job) = &self.job else { return };
         if let Ok(result) = job.try_recv() {
@@ -444,6 +465,7 @@ impl eframe::App for App {
         self.poll_job();
         self.update_check(&ctx);
         self.status = self.current_status();
+        self.helper_prompt();
 
         // Closing the window keeps TableCross running in the menu bar / notification area
         if ctx.input(|i| i.viewport().close_requested())

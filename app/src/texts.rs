@@ -108,9 +108,13 @@ pub fn problem(p: &Problem) -> String {
         )
         .into(),
         Problem::HelperNoAccess => format!(
-            "{} {}",
+            "{} {} {}",
             tr("The system helper still needs the Input Monitoring permission."),
-            trf(STALE_PERMISSION, &[&"tablecross-helper"])
+            tr(
+                "The button opens the settings and a Finder window with the helper file: switch it on there, or \
+                drag the file into the list."
+            ),
+            trf(STALE_PERMISSION, &[&"de.eckonator.tablecross.helper"])
         ),
         Problem::HelperOutdated => tr("The system helper is older than the app; please update it.").into(),
         Problem::HelperKeyboardsBusy(n) => trf(

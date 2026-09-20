@@ -255,6 +255,7 @@ impl App {
                     .clicked()
                 {
                     self.run_job(|| tc_session::helper_install::update().map_err(|e| e.to_string()));
+                    self.helper_prompt = Some(std::time::Instant::now() + crate::app::HELPER_PROMPT_FOR);
                 }
             }
             #[cfg(target_os = "macos")]
@@ -270,7 +271,7 @@ impl App {
             #[cfg(target_os = "macos")]
             Problem::HelperNoAccess => {
                 if ui.button(tr("Open Input Monitoring settings")).clicked() {
-                    super::open(tc_session::helper_install::INPUT_MONITORING_SETTINGS);
+                    tc_session::helper_install::show_permission_place();
                 }
             }
             Problem::CaptureStopped if ui.button(tr("Check again")).clicked() => {

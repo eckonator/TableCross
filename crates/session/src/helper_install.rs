@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tc_input::helper_protocol::{FromHelper, HELPER_VERSION, LABEL, ToHelper, read_frame, socket_path, write_frame};
 
-const INSTALLED_BINARY: &str = "/Library/PrivilegedHelperTools/de.eckonator.tablecross.helper";
+pub const INSTALLED_BINARY: &str = "/Library/PrivilegedHelperTools/de.eckonator.tablecross.helper";
 const PLIST: &str = "/Library/LaunchDaemons/de.eckonator.tablecross.helper.plist";
 const LOG: &str = "/Library/Logs/TableCross/helper.log";
 
@@ -102,13 +102,7 @@ launchctl bootstrap system {PLIST}",
     );
     as_admin(&script)?;
     let _ = std::fs::remove_file(&plist_file);
-    // The place to grant it, and the file in case it has to be added with "+"
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .status();
-    let _ = std::process::Command::new("open")
-        .args(["-R", INSTALLED_BINARY])
-        .status();
+    show_permission_place();
     println!("Installed. The helper now asks for the Input Monitoring permission:");
     println!("System Settings → Privacy & Security → Input Monitoring → enable “de.eckonator.tablecross.helper”.");
     println!("It picks the permission up by itself within half a minute; check with `tablecross-cli helper status`.");
@@ -168,6 +162,17 @@ pub fn differs_from(new: &Path) -> bool {
         (Ok(a), Ok(b)) => a != b,
         _ => false,
     }
+}
+
+/// Opens the Input Monitoring settings and a Finder window with the helper file selected, so it
+/// can be switched on there or dragged into the list.
+pub fn show_permission_place() {
+    let _ = std::process::Command::new("open")
+        .arg(INPUT_MONITORING_SETTINGS)
+        .status();
+    let _ = std::process::Command::new("open")
+        .args(["-R", INSTALLED_BINARY])
+        .status();
 }
 
 pub fn uninstall() -> Result<()> {

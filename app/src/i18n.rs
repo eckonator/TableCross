@@ -173,6 +173,9 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "The button opens the settings and a Finder window with the helper file: switch it on there, or drag the file into the list." => {
+            "Der Knopf öffnet die Einstellungen und ein Finder-Fenster mit der Datei des Systemhelfers: dort einschalten oder die Datei in die Liste ziehen."
+        }
         "Test build {} ({})" => "Testversion {} ({})",
         "Update system helper …" => "Systemhelfer aktualisieren …",
         "Drag the computers to where they stand on your desk. Computers side by side share that edge." => {
