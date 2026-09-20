@@ -51,6 +51,8 @@ impl App {
         let me = layout_file::machine_id(&me_fp);
         let cells = layout_file::desk(&status.layout, &me, |entry| canonical(status, &me_fp, entry));
         let machines = |id: &str| machine_view(status, &me, id);
+        let order = layout_file::reading_order(&cells);
+        let number = |id: &str| order.iter().position(|m| m == id).map(|i| i + 1).filter(|n| *n <= 9);
 
         // At least five columns and three rows, always one free row and column around the desk
         let (min_x, max_x) = cells
@@ -84,6 +86,7 @@ impl App {
                                 {
                                     let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
                                     paint_machine(ui, rect, &status.name, tr("this computer"), p.accent, p.accent_soft);
+                                    badge(ui, rect, number(&me));
                                     continue;
                                 }
                                 let frame = egui::Frame::new()
@@ -95,7 +98,7 @@ impl App {
                                         if !view.paired {
                                             unreachable.push(view.name.clone());
                                         }
-                                        machine_tile(ui, id, &view, tile);
+                                        machine_tile(ui, id, &view, tile, number(id));
                                     }
                                     None => {
                                         let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
@@ -141,7 +144,7 @@ impl App {
                         ui.label(RichText::new(tr("none")).color(p.muted));
                     }
                     for id in unplaced {
-                        machine_tile(ui, &id, &machines(&id), SMALL_TILE);
+                        machine_tile(ui, &id, &machines(&id), SMALL_TILE, None);
                     }
                 });
             },
@@ -445,7 +448,24 @@ fn rearranged(cells: &[(String, i32, i32)], me: &str, id: &str, cell: Option<(i3
 }
 
 /// A computer that can be dragged.
-fn machine_tile(ui: &mut egui::Ui, machine: &str, view: &MachineView, size: Vec2) {
+/// The number of a computer in the corner of its tile (Ctrl+Shift+Alt+number goes there).
+fn badge(ui: &egui::Ui, rect: egui::Rect, number: Option<usize>) {
+    let Some(number) = number else { return };
+    let p = theme::colors(ui);
+    let center = rect.min + egui::vec2(13.0, 13.0);
+    ui.painter().circle_filled(center, 9.0, p.field);
+    ui.painter()
+        .circle_stroke(center, 9.0, egui::Stroke::new(1.0, p.border));
+    ui.painter().text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        number.to_string(),
+        egui::FontId::new(11.0, theme::semibold()),
+        p.muted,
+    );
+}
+
+fn machine_tile(ui: &mut egui::Ui, machine: &str, view: &MachineView, size: Vec2, number: Option<usize>) {
     let id = egui::Id::new(("machine", machine));
     let p = theme::colors(ui);
     ui.dnd_drag_source(id, Dragged(machine.to_string()), |ui| {
@@ -459,6 +479,7 @@ fn machine_tile(ui: &mut egui::Ui, machine: &str, view: &MachineView, size: Vec2
             (p.muted, p.field, tr("not connected"))
         };
         paint_machine(ui, rect, &view.name, caption, frame, screen);
+        badge(ui, rect, number);
     })
     .response
     .on_hover_cursor(egui::CursorIcon::Grab);

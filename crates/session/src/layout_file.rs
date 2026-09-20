@@ -189,6 +189,14 @@ pub fn desk(file: &LayoutFile, me: &str, canonical: impl Fn(&str) -> String) -> 
     placed
 }
 
+/// The machines of a desk in reading order (row by row, left to right): number 1 is the first.
+/// Ctrl+Shift+Alt+number goes to that computer.
+pub fn reading_order(cells: &[(String, i32, i32)]) -> Vec<String> {
+    let mut sorted: Vec<_> = cells.iter().collect();
+    sorted.sort_by_key(|(_, x, y)| (*y, *x));
+    sorted.into_iter().map(|(m, ..)| m.clone()).collect()
+}
+
 /// The neighbors of an arrangement drawn on a grid: computers in cells next to each other become
 /// neighbors. Only what is connected to `me` counts; computers on their own island are left out.
 pub fn from_grid(cells: &[(String, i32, i32)], me: &str) -> Vec<Neighbor> {
@@ -382,6 +390,13 @@ mod tests {
         let mut expected = grid[..4].to_vec();
         expected.sort();
         assert_eq!(back, expected);
+    }
+
+    #[test]
+    fn numbered_like_reading() {
+        let cell = |m: &str, x, y| (m.to_string(), x, y);
+        let desk = vec![cell("me", 0, 0), cell("pc", 1, 0), cell("pi", -1, 0), cell("tv", 0, -1)];
+        assert_eq!(reading_order(&desk), ["tv", "pi", "me", "pc"]);
     }
 
     #[test]

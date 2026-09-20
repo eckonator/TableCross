@@ -166,6 +166,10 @@ impl App {
                     tr("Ctrl + Shift + Alt + arrow key"),
                     tr("Go to the computer on that side"),
                 ),
+                (
+                    tr("Ctrl + Shift + Alt + 1 … 9"),
+                    tr("Go to the computer with that number (see Computers)"),
+                ),
                 (tr("Ctrl + Shift + Alt + L"), tr("Lock the screens of all computers")),
             ] {
                 ui.label(RichText::new(keys).monospace().strong());

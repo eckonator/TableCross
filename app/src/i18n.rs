@@ -176,6 +176,10 @@ fn de(en: &str) -> Option<&'static str> {
         "All screens were locked" => "Alle Bildschirme wurden gesperrt",
         "Lock all screens" => "Alle Bildschirme sperren",
         "Ctrl + Shift + Alt + L" => "Strg + Umschalt + Alt + L",
+        "Ctrl + Shift + Alt + 1 … 9" => "Strg + Umschalt + Alt + 1 … 9",
+        "Go to the computer with that number (see Computers)" => {
+            "Zum Rechner mit dieser Nummer wechseln (siehe Rechner)"
+        }
         "Lock the screens of all computers" => "Die Bildschirme aller Rechner sperren",
         "The button opens the settings and a Finder window with the helper file: switch it on there, or drag the file into the list." => {
             "Der Knopf öffnet die Einstellungen und ein Finder-Fenster mit der Datei des Systemhelfers: dort einschalten oder die Datei in die Liste ziehen."

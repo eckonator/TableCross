@@ -25,6 +25,8 @@ use crate::transfer::{self, Cancels, Progress, TransferState, TransferView};
 
 const ESCAPE: u16 = 0x29;
 const KEY_L: u16 = 0x0F;
+/// Keys 1 to 9 of the main block.
+const DIGITS: [u16; 9] = [0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26];
 const ARROWS: [(u16, Side); 4] = [
     (0x4F, Side::Right),
     (0x50, Side::Left),
@@ -311,6 +313,18 @@ impl Shared {
         }
     }
 
+    /// The computer with number `index + 1` on the desk, as machine id of the engine.
+    fn numbered(&self, index: usize) -> Option<String> {
+        let file = self.status.lock().expect("status lock").layout.clone();
+        let resolve = self.resolver();
+        let me = layout_file::machine_id(&self.node.fingerprint());
+        let desk = layout_file::desk(&file, &me, |entry| {
+            resolve(entry).map_or_else(|| entry.to_string(), |fp| layout_file::machine_id(&fp))
+        });
+        let id = layout_file::reading_order(&desk).into_iter().nth(index)?;
+        resolve(&id).map(|fp| fp.to_string())
+    }
+
     fn layout(&self) -> Result<Layout> {
         let file = layout_file::load(&self.dir)?;
         let resolve = self.resolver();
@@ -487,6 +501,13 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 }
                 let _ = shared.internal.send(Internal::Notice(Notice::EmergencyRelease));
                 return true;
+            }
+            if prefix && let Some(number) = DIGITS.iter().position(|u| *u == usage) {
+                if down && let Some(target) = shared.numbered(number) {
+                    let actions = shared.engine.lock().expect("engine lock").switch_to(&target);
+                    shared.execute(actions);
+                }
+                return false;
             }
             if prefix && usage == KEY_L {
                 if down {
