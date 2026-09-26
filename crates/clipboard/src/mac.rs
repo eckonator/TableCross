@@ -17,6 +17,9 @@ use crate::{ClipContent, ClipError, Read, SystemClipboard};
 /// Markers of password managers and of clipboard tools (nspasteboard.org): never sent anywhere.
 const PRIVATE_TYPES: [&str; 2] = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"];
 
+/// Marks content that Apple's Universal Clipboard brought from another device.
+const UNIVERSAL_CLIPBOARD: &str = "com.apple.is-remote-clipboard";
+
 /// The general pasteboard, or a named one (tests, so the user's clipboard stays untouched).
 #[derive(Default)]
 pub struct MacClipboard {
@@ -84,6 +87,11 @@ impl SystemClipboard for MacClipboard {
                 .unwrap_or_default();
             if types.iter().any(|t| PRIVATE_TYPES.contains(&t.as_str())) {
                 return Ok(Read::Concealed);
+            }
+            if types.iter().any(|t| t == UNIVERSAL_CLIPBOARD) {
+                // Apple's own sync brought it from another device; passing it on as well makes the
+                // two syncs overwrite each other with older content
+                return Ok(Read::Empty);
             }
             if types.iter().any(|t| t == "public.file-url") {
                 let files = files_of(&board);
