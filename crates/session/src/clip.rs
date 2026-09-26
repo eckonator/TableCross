@@ -62,6 +62,14 @@ pub fn parse_header(header: &[u8]) -> Option<u64> {
     Some(u64::from_le_bytes(id.try_into().ok()?))
 }
 
+/// What makes content the same for a person: the text (line ends aside), else the image.
+fn gist(content: &ClipContent) -> Option<u64> {
+    if let Some(text) = &content.text {
+        return Some(hash(text.replace("\r\n", "\n").trim_end().as_bytes()));
+    }
+    content.png.as_deref().map(hash)
+}
+
 #[derive(Default)]
 pub struct ClipSync {
     /// Change count when we last looked (or after our own write).
@@ -74,6 +82,10 @@ pub struct ClipSync {
     remote: Option<(Fingerprint, u64, u64)>,
     /// Content that came from a peer (by hash), never announced again.
     written_hash: Option<u64>,
+    /// The gist of the newest content sent or received. Other clipboard syncs (Apple's Universal
+    /// Clipboard, Windows' clipboard history in the cloud) bring the same content back in other
+    /// formats; it is not sent again.
+    last_gist: Option<u64>,
     requested: Option<u64>,
     /// Content that came before its announcement (they travel on different streams).
     early: Option<(Fingerprint, u64, Vec<u8>)>,
@@ -126,6 +138,11 @@ impl ClipSync {
         if Some(hash(&encoded)) == self.written_hash {
             return (None, None); // What we just wrote for a peer
         }
+        let gist = gist(&content);
+        if gist.is_some() && gist == self.last_gist {
+            return (None, None); // The same again, from another sync
+        }
+        self.last_gist = gist;
         let id = self.new_id();
         let data = Arc::new(encoded);
         self.local = Some((id, data.clone(), size));
@@ -225,6 +242,7 @@ impl ClipSync {
         self.remote = None;
         self.busy = true;
         self.written_hash = Some(hash(data));
+        self.last_gist = gist(&content);
         Some(ClipAction::Write { id, content })
     }
 
@@ -274,6 +292,28 @@ mod tests {
         };
         assert!(sync.requested(id).is_some());
         assert!(sync.requested(id + 1).is_none());
+    }
+
+    #[test]
+    fn content_coming_back_from_another_sync_is_not_sent_again() {
+        let mut sync = ClipSync::default();
+        sync.poll(1);
+        // Copied here and announced
+        assert_eq!(sync.poll(2), Some(ClipAction::Read));
+        assert!(sync.read_done(text("Grüße\n"), 1000).0.is_some());
+        // Apple's Universal Clipboard brings it back with rich text and Windows line ends
+        assert_eq!(sync.poll(3), Some(ClipAction::Read));
+        let back = ClipContent {
+            text: Some("Grüße\r\n".into()),
+            rtf: Some(b"{\\rtf1 Gr\\u252e\\u223e}".to_vec()),
+            ..ClipContent::default()
+        };
+        assert_eq!(sync.read_done(Read::Content(back), 1000), (None, None));
+        // Something else is new, and the first text again after it as well
+        assert_eq!(sync.poll(4), Some(ClipAction::Read));
+        assert!(sync.read_done(text("other"), 1000).0.is_some());
+        assert_eq!(sync.poll(5), Some(ClipAction::Read));
+        assert!(sync.read_done(text("Grüße"), 1000).0.is_some());
     }
 
     #[test]
