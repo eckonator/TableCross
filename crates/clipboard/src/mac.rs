@@ -211,6 +211,33 @@ mod tests {
         assert!(found[0].ends_with(file.file_name().unwrap()));
     }
 
+    #[test]
+    fn several_lines_travel_whole() {
+        let text = "rm -rf /Applications/Deskflow.app ~/Library/Deskflow\ndefaults delete org.deskflow.deskflow\n\
+                    rm -f ~/Library/Application\\ Support/CrashReporter/deskflow-*\n";
+        let pid = std::process::id();
+        let from = MacClipboard {
+            name: Some(format!("tablecross-test-from-{pid}")),
+        };
+        let to = MacClipboard {
+            name: Some(format!("tablecross-test-to-{pid}")),
+        };
+        from.write(&ClipContent {
+            text: Some(text.into()),
+            ..ClipContent::default()
+        })
+        .unwrap();
+        let Read::Content(read) = from.read().unwrap() else {
+            panic!("no content");
+        };
+        let travelled = ClipContent::decode(&read.encode()).unwrap();
+        to.write(&travelled).unwrap();
+        let Read::Content(arrived) = to.read().unwrap() else {
+            panic!("no content");
+        };
+        assert_eq!(arrived.text.as_deref(), Some(text));
+    }
+
     fn tiny_png() -> Vec<u8> {
         let mut out = Vec::new();
         let mut encoder = png::Encoder::new(&mut out, 2, 1);

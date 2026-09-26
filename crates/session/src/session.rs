@@ -978,6 +978,13 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
 /// Writes content from a peer into the local clipboard (on a blocking thread).
 fn clip_write(shared: &Arc<Shared>, peer: Fingerprint, action: Option<ClipAction>) {
     if let (Some(ClipAction::Write { content, .. }), Some(clipboard)) = (action, &shared.clipboard) {
+        let text = content.text.as_ref().map_or(0, |t| t.chars().count());
+        tracing::info!(
+            "clipboard from {}: {} bytes as {:?}, text {text} characters",
+            shared.name_of(&peer.to_string()),
+            content.size(),
+            content.formats()
+        );
         let system = clipboard.system.clone();
         let internal = shared.internal.clone();
         tokio::task::spawn_blocking(move || {
@@ -1030,6 +1037,9 @@ fn clip_read(shared: &Arc<Shared>, read: Option<tc_clipboard::Read>) {
         shared.notice(Notice::ClipboardSkipped(skip));
     }
     if let Some((offer, eager)) = announcement {
+        if let Message::ClipboardOffer { formats, size, .. } = &offer {
+            tracing::info!("clipboard changed here: {size} bytes as {formats:?}");
+        }
         for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
             clip::announce(&shared.node, &peer.peer.fingerprint, &offer, eager.as_ref());
         }
