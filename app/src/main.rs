@@ -16,6 +16,7 @@ mod settings;
 mod texts;
 mod theme;
 mod tray;
+mod uninstall;
 mod update;
 
 use eframe::egui;

@@ -61,10 +61,20 @@ pub struct App {
     /// After the system helper was replaced: until then, show where to grant its permission as
     /// soon as it reports that it lacks it (a replaced helper may lose it).
     pub helper_prompt: Option<Instant>,
+    /// Removing TableCross: settings page choices, and the removal once started.
+    pub remove_settings: bool,
+    pub confirm_remove: bool,
+    removal: Option<Removal>,
 }
 
 /// How often to look for a new version while running.
 const UPDATE_EVERY: Duration = Duration::from_secs(12 * 3600);
+struct Removal {
+    remove_settings: bool,
+    started: Instant,
+    job: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+}
+
 /// How long after replacing the system helper its missing permission opens the settings by itself.
 pub const HELPER_PROMPT_FOR: Duration = Duration::from_secs(90);
 
@@ -115,6 +125,9 @@ impl App {
             update_job: None,
             update_checked: None,
             self_update: None,
+            remove_settings: true,
+            confirm_remove: false,
+            removal: None,
             helper_prompt: std::env::args()
                 .any(|a| a == crate::self_update::AFTER_UPDATE_FLAG)
                 .then(|| Instant::now() + HELPER_PROMPT_FOR),
@@ -395,6 +408,62 @@ impl App {
         }
     }
 
+    /// Removes TableCross: first the paired computers forget this one, then the session stops and
+    /// everything is removed in the background; the app quits when done.
+    pub fn start_removal(&mut self) {
+        if self.remove_settings {
+            for peer in &self.status.peers {
+                self.send(Command::Unpair(peer.fingerprint));
+            }
+        }
+        self.removal = Some(Removal {
+            remove_settings: self.remove_settings,
+            started: Instant::now(),
+            job: None,
+        });
+    }
+
+    fn poll_removal(&mut self, ctx: &egui::Context) {
+        let Some(removal) = &mut self.removal else { return };
+        ctx.request_repaint_after(Duration::from_millis(200));
+        if removal.job.is_none() {
+            // Time for the unpair messages to go out
+            if removal.started.elapsed() < Duration::from_millis(1500) {
+                return;
+            }
+            let remove_settings = removal.remove_settings;
+            let dir = self.dir.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::uninstall::run(&dir, remove_settings));
+            });
+            if let Some(removal) = &mut self.removal {
+                removal.job = Some(rx);
+            }
+            self.stop_session();
+            return;
+        }
+        let result = removal.job.as_ref().and_then(|job| job.try_recv().ok());
+        match result {
+            Some(Ok(())) => {
+                tracing::info!("TableCross removed");
+                self.quit_flag.store(true, Ordering::SeqCst);
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
+            Some(Err(e)) => {
+                self.removal = None;
+                self.confirm_remove = false;
+                self.show_info(i18n::trf("That did not work: {}", &[&e]));
+                self.start_session(ctx);
+            }
+            None => {}
+        }
+    }
+
+    pub fn removing(&self) -> bool {
+        self.removal.is_some()
+    }
+
     /// Opens the Input Monitoring settings and the helper file once, if a just replaced helper lacks
     /// the permission.
     fn helper_prompt(&mut self) {
@@ -466,6 +535,7 @@ impl eframe::App for App {
         self.update_check(&ctx);
         self.status = self.current_status();
         self.helper_prompt();
+        self.poll_removal(&ctx);
 
         // Closing the window keeps TableCross running in the menu bar / notification area
         if ctx.input(|i| i.viewport().close_requested())

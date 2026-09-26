@@ -173,6 +173,17 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Remove TableCross" => "TableCross entfernen",
+        "Remove TableCross …" => "TableCross entfernen …",
+        "Removes TableCross from this computer with everything it set up: the system helper, the permissions, starting with the system and the program itself." => {
+            "Entfernt TableCross von diesem Rechner mit allem, was es eingerichtet hat: Systemhelfer, Berechtigungen, Start mit dem System und das Programm selbst."
+        }
+        "Also delete settings and pairings (the other computers forget this one)" => {
+            "Auch Einstellungen und Kopplungen löschen (die anderen Rechner vergessen diesen)"
+        }
+        "Removing TableCross …" => "TableCross wird entfernt …",
+        "Really remove TableCross?" => "TableCross wirklich entfernen?",
+        "Yes, remove" => "Ja, entfernen",
         "All screens were locked" => "Alle Bildschirme wurden gesperrt",
         "Lock all screens" => "Alle Bildschirme sperren",
         "Ctrl + Shift + Alt + L" => "Strg + Umschalt + Alt + L",

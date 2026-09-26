@@ -105,14 +105,14 @@ fn work_dir() -> Result<PathBuf, String> {
 }
 
 /// `…/TableCross.app` this program runs from.
-fn bundle() -> Option<PathBuf> {
+pub fn bundle() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let bundle = exe.ancestors().nth(3)?;
     (bundle.extension()? == "app").then(|| bundle.to_path_buf())
 }
 
 /// Installed by the setup program (not the portable zip): the uninstaller lies next to it.
-fn installed_with_setup() -> bool {
+pub fn installed_with_setup() -> bool {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("unins000.exe").exists()))
@@ -235,7 +235,7 @@ fn run(url: &str, report: &impl Fn(Progress)) -> Result<(), String> {
 
 /// Where `install.sh` put the programs (`~/.local/bin` or `$XDG_BIN_HOME`), if this program runs
 /// from there.
-fn installed_for_user() -> Option<PathBuf> {
+pub fn installed_for_user() -> Option<PathBuf> {
     let bin = std::env::var_os("XDG_BIN_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/bin")))?;

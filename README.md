@@ -80,6 +80,9 @@ bar (macOS) or notification area (Windows). The interface is in English and Germ
 Any number of computers can share one desk. The arrangement is shared between all paired computers,
 and the Computers page shows the whole desk.
 
+Removing it: Settings → *Remove TableCross* takes away everything TableCross set up (system helper,
+permissions, starting with the system, the program; optionally settings and pairings).
+
 ## Goals
 
 - **Reliable first.** Automatic reconnect after sleep, network changes and restarts; no stuck keys

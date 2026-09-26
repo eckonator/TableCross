@@ -190,8 +190,50 @@ impl App {
                 }
             });
         });
+        ui.add_space(14.0);
+        card(ui, tr("Remove TableCross"), |ui| self.removal_card(ui));
         if changed {
             self.save_settings();
+        }
+    }
+
+    fn removal_card(&mut self, ui: &mut egui::Ui) {
+        let p = crate::theme::colors(ui);
+        ui.label(
+            RichText::new(tr(
+                "Removes TableCross from this computer with everything it set up: the system helper, the \
+                 permissions, starting with the system and the program itself.",
+            ))
+            .color(p.muted),
+        );
+        ui.checkbox(
+            &mut self.remove_settings,
+            tr("Also delete settings and pairings (the other computers forget this one)"),
+        );
+        ui.add_space(6.0);
+        if self.removing() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(tr("Removing TableCross …"));
+            });
+        } else if self.confirm_remove {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(tr("Really remove TableCross?")).color(p.bad));
+                if ui
+                    .add(egui::Button::new(RichText::new(tr("Yes, remove")).color(p.on_accent)).fill(p.bad))
+                    .clicked()
+                {
+                    self.start_removal();
+                }
+                if ui.button(tr("Cancel")).clicked() {
+                    self.confirm_remove = false;
+                }
+            });
+        } else if ui
+            .add_enabled(self.demo.is_none(), egui::Button::new(tr("Remove TableCross …")))
+            .clicked()
+        {
+            self.confirm_remove = true;
         }
     }
 }

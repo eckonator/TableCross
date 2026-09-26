@@ -175,7 +175,9 @@ pub fn show_permission_place() {
 pub fn uninstall() -> Result<()> {
     as_admin(&format!(
         "launchctl bootout system/{LABEL} 2>/dev/null || true
-rm -f {PLIST} {INSTALLED_BINARY}"
+rm -f {PLIST} {INSTALLED_BINARY}
+rm -rf /Library/Logs/TableCross
+tccutil reset ListenEvent {LABEL} 2>/dev/null || true"
     ))
 }
 
