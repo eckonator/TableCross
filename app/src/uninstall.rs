@@ -2,7 +2,9 @@
 //! permission, the Accessibility permission, starting with the system, optionally settings and
 //! pairings, and the program itself.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::path::PathBuf;
 
 /// Runs on a background thread after the session stopped; the app quits afterwards.
 pub fn run(dir: &Path, remove_settings: bool) -> Result<(), String> {
