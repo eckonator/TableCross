@@ -14,7 +14,9 @@ use eframe::egui;
 
 /// Releases look only for releases; test builds also for newer test builds (the newest of both).
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases/latest";
-const NEWEST_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=1";
+/// GitHub does not list releases by date (the test build often comes last), so the newest is picked
+/// from the first page by its publishing time.
+const NEWEST_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=20";
 
 /// Built from a release tag (not a test build from main).
 pub fn is_release() -> bool {
@@ -72,7 +74,7 @@ fn check() -> Option<NewVersion> {
     }
     let out = cmd.output().ok().filter(|o| o.status.success())?;
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    let release = json.as_array().and_then(|a| a.first()).unwrap_or(&json);
+    let release = json.as_array().and_then(|a| newest(a)).unwrap_or(&json);
     newer_release(
         release,
         env!("CARGO_PKG_VERSION"),
@@ -81,6 +83,13 @@ fn check() -> Option<NewVersion> {
         env!("TC_GIT_TIME"),
         crate::self_update::asset_suffix(),
     )
+}
+
+/// The release published last ("2026-…" times sort as text).
+fn newest(releases: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    releases
+        .iter()
+        .max_by_key(|r| r.get("published_at").and_then(|p| p.as_str()).unwrap_or_default())
 }
 
 /// Compares a release (GitHub API object) with this build.
@@ -189,6 +198,17 @@ mod tests {
         assert!(newer_release(&release, "0.0.1", "", "", None).is_none());
         assert!(newer_release(&release, "0.0.0", "", "", None).is_some());
         assert!(newer_release(&release, "0.0.2", "1111111", &earlier, None).is_none());
+    }
+
+    #[test]
+    fn the_newest_is_found_wherever_it_is_listed() {
+        let list = serde_json::json!([
+            {"tag_name": "v0.1.2", "published_at": "2026-10-17T16:25:09Z"},
+            {"tag_name": "v0.1.1", "published_at": "2026-10-17T16:11:12Z"},
+            {"tag_name": "testing", "published_at": "2026-10-17T17:44:53Z"},
+        ]);
+        let found = newest(list.as_array().unwrap()).unwrap();
+        assert_eq!(found["tag_name"], "testing");
     }
 
     #[test]

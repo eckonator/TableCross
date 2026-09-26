@@ -29,7 +29,7 @@ main() {
   local api url version
   # The newest release; TC_TEST=1: the newest of all, including the test build
   if [ -n "${TC_TEST:-}" ]; then
-    api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1") \
+    api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/tags/testing") \
       || fail "Could not reach GitHub. Download manually: https://github.com/$REPO/releases"
   else
     api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest") \
