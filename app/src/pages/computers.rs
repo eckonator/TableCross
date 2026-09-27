@@ -82,13 +82,13 @@ impl App {
             .fold(f32::INFINITY, f32::min);
         // Computers whose screens are not known (not connected) as a common full HD screen
         let unknown = [egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0))];
-        let scale = scale.min(fit_scale(&unknown, monitor_area(tile)).unwrap_or(f32::INFINITY));
-        let shapes = |id: &str| {
-            let screens = screens
-                .iter()
-                .find(|(m, _)| m == id)
-                .map_or(&unknown[..], |(_, s)| s.as_slice());
-            scale.is_finite().then_some(Shapes { screens, scale })
+        let unknown_scale = fit_scale(&unknown, monitor_area(tile)).unwrap_or(1.0).min(scale);
+        let shapes = |id: &str| match screens.iter().find(|(m, _)| m == id) {
+            Some((_, s)) => Some(Shapes { screens: s, scale }),
+            None => Some(Shapes {
+                screens: &unknown,
+                scale: unknown_scale,
+            }),
         };
         let dragging = egui::DragAndDrop::has_any_payload(ui.ctx());
         let mut dropped: Option<(String, Option<(i32, i32)>)> = None;
@@ -538,7 +538,7 @@ struct Shapes<'a> {
 }
 
 /// Room above the screens for the number of the computer.
-const SCREENS_TOP: f32 = 20.0;
+const SCREENS_TOP: f32 = 8.0;
 
 /// Where the screens are drawn in a tile (the name goes below).
 fn monitor_area(tile: Vec2) -> Vec2 {
