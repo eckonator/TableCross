@@ -227,19 +227,21 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn listed() -> bool {
+    /// How many assertions with our reason exist (a running TableCross may hold one as well).
+    fn listed() -> usize {
         let out = std::process::Command::new("pmset")
             .args(["-g", "assertions"])
             .output()
             .unwrap();
-        String::from_utf8_lossy(&out.stdout).contains(REASON)
+        String::from_utf8_lossy(&out.stdout).matches(REASON).count()
     }
 
     #[test]
     fn keeps_awake_while_it_exists() {
+        let before = listed();
         let awake = KeepAwake::new().expect("assertion");
-        assert!(listed());
+        assert_eq!(listed(), before + 1);
         drop(awake);
-        assert!(!listed());
+        assert_eq!(listed(), before);
     }
 }
