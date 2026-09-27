@@ -54,17 +54,42 @@ impl App {
         let order = layout_file::reading_order(&cells);
         let number = |id: &str| order.iter().position(|m| m == id).map(|i| i + 1).filter(|n| *n <= 9);
 
+        // The desk as shown: moved by the view shift (dragging this computer moves all of it)
+        let shift = self.settings.desk_shift;
+        let shown: Vec<(String, i32, i32)> = cells
+            .iter()
+            .map(|(m, x, y)| (m.clone(), x + shift.0, y + shift.1))
+            .collect();
         // At least five columns and three rows, always one free row and column around the desk
-        let (min_x, max_x) = cells
+        let (min_x, max_x) = shown
             .iter()
             .fold((-2, 2), |(a, b), (_, x, _)| (a.min(x - 1), b.max(x + 1)));
-        let (min_y, max_y) = cells
+        let (min_y, max_y) = shown
             .iter()
             .fold((-1, 1), |(a, b), (_, _, y)| (a.min(y - 1), b.max(y + 1)));
         let cols = (max_x - min_x + 1) as f32;
         let gap = 10.0;
         let width = ((ui.available_width() - 24.0 - gap * (cols - 1.0)) / cols).clamp(70.0, TILE.x);
         let tile = Vec2::new(width, width * 0.75);
+        // Real screens, all at one scale, so their sizes compare
+        let screens: Vec<(String, Vec<egui::Rect>)> = shown
+            .iter()
+            .filter_map(|(id, ..)| screens_of(status, &me, id).map(|s| (id.clone(), s)))
+            .collect();
+        let scale = screens
+            .iter()
+            .filter_map(|(_, s)| fit_scale(s, monitor_area(tile)))
+            .fold(f32::INFINITY, f32::min);
+        // Computers whose screens are not known (not connected) as a common full HD screen
+        let unknown = [egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0))];
+        let scale = scale.min(fit_scale(&unknown, monitor_area(tile)).unwrap_or(f32::INFINITY));
+        let shapes = |id: &str| {
+            let screens = screens
+                .iter()
+                .find(|(m, _)| m == id)
+                .map_or(&unknown[..], |(_, s)| s.as_slice());
+            scale.is_finite().then_some(Shapes { screens, scale })
+        };
         let dragging = egui::DragAndDrop::has_any_payload(ui.ctx());
         let mut dropped: Option<(String, Option<(i32, i32)>)> = None;
         let mut unreachable = Vec::new();
@@ -80,15 +105,7 @@ impl App {
                     egui::Grid::new("desk").spacing([gap, gap]).show(ui, |ui| {
                         for y in min_y..=max_y {
                             for x in min_x..=max_x {
-                                let occupant = cells.iter().find(|(_, cx, cy)| (*cx, *cy) == (x, y));
-                                if let Some((id, ..)) = occupant
-                                    && *id == me
-                                {
-                                    let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
-                                    paint_machine(ui, rect, &status.name, tr("this computer"), p.accent, p.accent_soft);
-                                    badge(ui, rect, number(&me));
-                                    continue;
-                                }
+                                let occupant = shown.iter().find(|(_, cx, cy)| (*cx, *cy) == (x, y));
                                 let frame = egui::Frame::new()
                                     .corner_radius(8.0)
                                     .stroke(egui::Stroke::new(1.0, if dragging { p.accent } else { p.border }));
@@ -98,7 +115,7 @@ impl App {
                                         if !view.paired {
                                             unreachable.push(view.name.clone());
                                         }
-                                        machine_tile(ui, id, &view, tile, number(id));
+                                        machine_tile(ui, id, &view, tile, number(id), shapes(id));
                                     }
                                     None => {
                                         let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
@@ -144,7 +161,7 @@ impl App {
                         ui.label(RichText::new(tr("none")).color(p.muted));
                     }
                     for id in unplaced {
-                        machine_tile(ui, &id, &machines(&id), SMALL_TILE, None);
+                        machine_tile(ui, &id, &machines(&id), SMALL_TILE, None, None);
                     }
                 });
             },
@@ -163,8 +180,20 @@ impl App {
                 ),
             );
         }
-        if let Some((id, cell)) = dropped {
-            self.arrange(rearranged(&cells, &me, &id, cell));
+        match dropped {
+            // This computer: the whole desk moves along, the arrangement stays
+            Some((id, Some((x, y)))) if id == me => {
+                if let Some((_, mx, my)) = shown.iter().find(|(m, ..)| *m == me) {
+                    self.settings.desk_shift = (shift.0 + x - mx, shift.1 + y - my);
+                    self.save_settings();
+                }
+            }
+            Some((id, None)) if id == me => {}
+            Some((id, cell)) => {
+                let cell = cell.map(|(x, y)| (x - shift.0, y - shift.1));
+                self.arrange(rearranged(&cells, &me, &id, cell));
+            }
+            None => {}
         }
     }
 
@@ -373,6 +402,7 @@ struct MachineView {
     name: String,
     paired: bool,
     connected: bool,
+    this: bool,
 }
 
 fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
@@ -381,6 +411,7 @@ fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
             name: status.name.clone(),
             paired: true,
             connected: true,
+            this: true,
         };
     }
     match status
@@ -392,6 +423,7 @@ fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
             name: peer.name.clone(),
             paired: true,
             connected: peer.link.is_some(),
+            this: false,
         },
         None => MachineView {
             name: status
@@ -402,6 +434,7 @@ fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
                 .unwrap_or_else(|| id.chars().take(8).collect()),
             paired: false,
             connected: false,
+            this: false,
         },
     }
 }
@@ -452,10 +485,10 @@ fn rearranged(cells: &[(String, i32, i32)], me: &str, id: &str, cell: Option<(i3
 fn badge(ui: &egui::Ui, rect: egui::Rect, number: Option<usize>) {
     let Some(number) = number else { return };
     let p = theme::colors(ui);
-    let center = rect.min + egui::vec2(13.0, 13.0);
-    ui.painter().circle_filled(center, 9.0, p.field);
+    let center = rect.min + egui::vec2(11.0, 11.0);
+    ui.painter().circle_filled(center, 8.0, p.field);
     ui.painter()
-        .circle_stroke(center, 9.0, egui::Stroke::new(1.0, p.border));
+        .circle_stroke(center, 8.0, egui::Stroke::new(1.0, p.border));
     ui.painter().text(
         center,
         egui::Align2::CENTER_CENTER,
@@ -465,12 +498,21 @@ fn badge(ui: &egui::Ui, rect: egui::Rect, number: Option<usize>) {
     );
 }
 
-fn machine_tile(ui: &mut egui::Ui, machine: &str, view: &MachineView, size: Vec2, number: Option<usize>) {
+fn machine_tile(
+    ui: &mut egui::Ui,
+    machine: &str,
+    view: &MachineView,
+    size: Vec2,
+    number: Option<usize>,
+    shapes: Option<Shapes>,
+) {
     let id = egui::Id::new(("machine", machine));
     let p = theme::colors(ui);
     ui.dnd_drag_source(id, Dragged(machine.to_string()), |ui| {
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        let (frame, screen, caption) = if !view.paired {
+        let (frame, screen, caption) = if view.this {
+            (p.accent, p.accent_soft, tr("this computer"))
+        } else if !view.paired {
             (p.border, p.field, tr("not paired here"))
         } else if view.connected {
             // A blank caption keeps all monitors the same size
@@ -478,11 +520,130 @@ fn machine_tile(ui: &mut egui::Ui, machine: &str, view: &MachineView, size: Vec2
         } else {
             (p.muted, p.field, tr("not connected"))
         };
-        paint_machine(ui, rect, &view.name, caption, frame, screen);
+        match shapes {
+            Some(shapes) => paint_screens(ui, rect, &view.name, caption, frame, screen, &shapes),
+            None => paint_machine(ui, rect, &view.name, caption, frame, screen),
+        }
         badge(ui, rect, number);
     })
     .response
     .on_hover_cursor(egui::CursorIcon::Grab);
+}
+
+/// The screens of a computer in logical points, from its top left corner.
+struct Shapes<'a> {
+    screens: &'a [egui::Rect],
+    /// Pixels on the page per logical point, the same for all computers.
+    scale: f32,
+}
+
+/// Room above the screens for the number of the computer.
+const SCREENS_TOP: f32 = 20.0;
+
+/// Where the screens are drawn in a tile (the name goes below).
+fn monitor_area(tile: Vec2) -> Vec2 {
+    Vec2::new(tile.x - 12.0, tile.y - 34.0 - SCREENS_TOP - 4.0)
+}
+
+fn fit_scale(screens: &[egui::Rect], area: Vec2) -> Option<f32> {
+    let bounds = screens.iter().copied().reduce(|a, b| a.union(b))?;
+    (bounds.width() > 0.0 && bounds.height() > 0.0).then(|| (area.x / bounds.width()).min(area.y / bounds.height()))
+}
+
+/// The screens of this computer or of a connected peer, in logical points.
+fn screens_of(status: &Status, me: &str, id: &str) -> Option<Vec<egui::Rect>> {
+    let screens = if id == me {
+        status.screens.clone()
+    } else {
+        status
+            .peers
+            .iter()
+            .find(|peer| layout_file::machine_id(&peer.fingerprint) == id)?
+            .link
+            .as_ref()?
+            .screens
+            .clone()
+    };
+    let rects: Vec<egui::Rect> = screens
+        .iter()
+        .filter(|s| s.width > 0 && s.height > 0 && s.scale > 0.0)
+        .map(|s| {
+            egui::Rect::from_min_size(
+                egui::pos2(s.x as f32 / s.scale, s.y as f32 / s.scale),
+                egui::vec2(s.width as f32 / s.scale, s.height as f32 / s.scale),
+            )
+        })
+        .collect();
+    let bounds = rects.iter().copied().reduce(|a, b| a.union(b))?;
+    Some(rects.iter().map(|r| r.translate(-bounds.min.to_vec2())).collect())
+}
+
+/// A computer drawn with its real screens (sizes to scale), a stand under each, the name below.
+fn paint_screens(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    name: &str,
+    caption: &str,
+    frame: Color32,
+    fill: Color32,
+    shapes: &Shapes,
+) {
+    let p = theme::colors(ui);
+    let area = monitor_area(rect.size());
+    let bounds = shapes
+        .screens
+        .iter()
+        .copied()
+        .reduce(|a, b| a.union(b))
+        .unwrap_or(egui::Rect::ZERO);
+    let size = bounds.size() * shapes.scale;
+    // Bottom aligned, so screens of different sizes stand on the same desk
+    let origin = egui::pos2(
+        rect.center().x - size.x / 2.0,
+        rect.min.y + SCREENS_TOP + area.y - size.y,
+    );
+    let painter = ui.painter();
+    for screen in shapes.screens {
+        let r = egui::Rect::from_min_size(
+            origin + screen.min.to_vec2() * shapes.scale,
+            screen.size() * shapes.scale,
+        )
+        .shrink(1.0);
+        let stand = (r.height() * 0.12).clamp(3.0, 8.0);
+        let body = egui::Rect::from_min_max(r.min, egui::pos2(r.max.x, r.max.y - stand));
+        painter.rect_filled(body, 4.0, frame);
+        painter.rect_filled(body.shrink(2.5), 2.5, fill);
+        let neck = egui::Rect::from_center_size(
+            egui::pos2(body.center().x, body.max.y + stand / 2.0),
+            egui::vec2((r.width() * 0.08).max(3.0), stand),
+        );
+        painter.rect_filled(neck, 0.0, frame);
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                egui::pos2(body.center().x, r.max.y - 1.0),
+                egui::vec2((r.width() * 0.3).max(10.0), 2.5),
+            ),
+            1.0,
+            frame,
+        );
+    }
+    let text_top = rect.min.y + SCREENS_TOP + area.y + 4.0;
+    painter.text(
+        egui::pos2(rect.center().x, text_top),
+        egui::Align2::CENTER_TOP,
+        name,
+        egui::FontId::new(13.0, theme::semibold()),
+        p.text,
+    );
+    if !caption.trim().is_empty() {
+        painter.text(
+            egui::pos2(rect.center().x, text_top + 16.0),
+            egui::Align2::CENTER_TOP,
+            caption,
+            egui::FontId::proportional(11.5),
+            p.muted,
+        );
+    }
 }
 
 #[cfg(test)]

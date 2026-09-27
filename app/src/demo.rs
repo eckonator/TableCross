@@ -70,7 +70,14 @@ pub fn status() -> Status {
         pairing_busy: false,
         input: InputState::Running,
         problems: vec![tc_input::Problem::HelperMissing],
-        screens: vec![screen(1512, 982, 1.0), screen(2560, 1440, 1.0)],
+        screens: vec![
+            screen(1512, 982, 1.0),
+            Screen {
+                x: 1512,
+                y: -458,
+                ..screen(2560, 1440, 1.0)
+            },
+        ],
         notices: [
             (ago(3600), Notice::Connected("Office-PC".into())),
             (
