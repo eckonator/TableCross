@@ -199,7 +199,7 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            Test build of the newest state of `main`, replaced on every change. For everyday use take the newest release.
+            **Test build** with the files below, made from the newest state of `main` (commit ${{ github.sha }}). It is replaced with every change and may have rough edges.
 
-            Built from commit ${{ github.sha }}.
+            For everyday use, take the release marked **Latest** above instead.
           files: pkg/*
