@@ -173,9 +173,13 @@ async fn pair_place_and_share_through_commands() {
         a.device.send(Captured::Key { usage, down: false });
     }
 
+    until("Beta free again", || b.session.status().controlled_by.is_none()).await;
+
     // Switching by command, then Beta's own mouse takes over
     a.session.send(Command::SwitchTo(Some(b_fp)));
     until("grabbed again", || a.device.grabbed()).await;
+    // Beta must know it is controlled before its own mouse can take over
+    until("Beta controlled again", || b.session.status().controlled_by.is_some()).await;
     b.device.send(Captured::Motion {
         x: 500.0,
         y: 500.0,
