@@ -375,7 +375,7 @@ impl Engine {
             Mode::Remote { target, .. } => target.clone(),
             _ => self.me.clone(),
         };
-        match self.layout.neighbor(&current, side) {
+        match self.online_neighbor(&current, side) {
             Some(next) => {
                 let next = next.to_string();
                 self.switch_to(&next)
@@ -549,9 +549,18 @@ impl Engine {
         }
     }
 
+    /// The first machine beyond `side` of `machine` that is online (several may share a place).
+    fn online_neighbor(&self, machine: &str, side: Side) -> Option<&str> {
+        self.layout
+            .neighbors(machine, side)
+            .iter()
+            .map(String::as_str)
+            .find(|m| self.machines.contains_key(*m))
+    }
+
     /// The machine beyond `side` of `machine` and where the pointer enters it.
     fn neighbor_entry(&self, machine: &str, side: Side, p: Point) -> Option<(MachineId, Point)> {
-        let next = self.layout.neighbor(machine, side)?;
+        let next = self.online_neighbor(machine, side)?;
         let from = self.machines.get(machine)?;
         let to = self.machines.get(next)?;
         let entry = to.entry(side.opposite(), from.along(side, p));

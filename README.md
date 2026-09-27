@@ -137,7 +137,9 @@ tablecross-cli run                     # on both
 
 The arrangement is shared between all paired computers, so placing a computer once is enough. With
 three or more computers, pair each one with every other one; then every keyboard reaches every
-screen, for example from the Linux computer through the Mac on to the Windows PC.
+screen, for example from the Linux computer through the Mac on to the Windows PC. Computers used in
+turn at the same place (two laptops on the same monitors, say) share a field in the arrangement; the
+edge leads to the one that is connected.
 
 Move the pointer over the edge to control the other computer; using a computer's own mouse or
 keyboard takes control back. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on

@@ -154,7 +154,7 @@ pub fn adopt(
 
 /// Where each machine stands on the desk: grid cells `(column, row)` around `me` at `(0, 0)`, found by
 /// following the placements outward. `canonical` maps an entry of the file to one id per machine.
-/// Machines that would land on a taken cell are left out.
+/// Several machines may share a cell (computers used in turn at the same place).
 pub fn desk(file: &LayoutFile, me: &str, canonical: impl Fn(&str) -> String) -> Vec<(String, i32, i32)> {
     let step = |side: Side| match side {
         Side::Left => (-1, 0),
@@ -181,7 +181,7 @@ pub fn desk(file: &LayoutFile, me: &str, canonical: impl Fn(&str) -> String) -> 
                 continue;
             };
             let cell = (x + dx, y + dy);
-            if !placed.iter().any(|(m, cx, cy)| m == other || (*cx, *cy) == cell) {
+            if !placed.iter().any(|(m, ..)| m == other) {
                 placed.push((other.clone(), cell.0, cell.1));
             }
         }
@@ -198,26 +198,27 @@ pub fn reading_order(cells: &[(String, i32, i32)]) -> Vec<String> {
 }
 
 /// The neighbors of an arrangement drawn on a grid: computers in cells next to each other become
-/// neighbors. Only what is connected to `me` counts; computers on their own island are left out.
+/// neighbors (all of a shared cell). Only what is connected to `me` counts; computers on their own
+/// island are left out.
 pub fn from_grid(cells: &[(String, i32, i32)], me: &str) -> Vec<Neighbor> {
-    let at = |x: i32, y: i32| cells.iter().find(|(_, cx, cy)| (*cx, *cy) == (x, y));
+    let at = |x: i32, y: i32| cells.iter().filter(move |(_, cx, cy)| (*cx, *cy) == (x, y));
     let mut reached: Vec<&(String, i32, i32)> = cells.iter().filter(|(m, ..)| m == me).take(1).collect();
     let mut next = 0;
     while next < reached.len() {
         let (_, x, y) = reached[next];
         next += 1;
         for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            if let Some(cell) = at(x + dx, y + dy)
-                && !reached.iter().any(|r| r.0 == cell.0)
-            {
-                reached.push(cell);
+            for cell in at(x + dx, y + dy) {
+                if !reached.iter().any(|r| r.0 == cell.0) {
+                    reached.push(cell);
+                }
             }
         }
     }
     let mut neighbors = Vec::new();
     for (machine, x, y) in &reached {
         for (dx, dy, side) in [(1, 0, Side::Right), (0, 1, Side::Bottom)] {
-            if let Some((other, ..)) = at(x + dx, y + dy) {
+            for (other, ..) in at(x + dx, y + dy) {
                 neighbors.push(Neighbor {
                     machine: other.clone(),
                     side,
@@ -388,6 +389,22 @@ mod tests {
         let mut back = desk(&file, "me", |e| e.to_string());
         back.sort();
         let mut expected = grid[..4].to_vec();
+        expected.sort();
+        assert_eq!(back, expected);
+    }
+
+    #[test]
+    fn laptops_sharing_a_place_stay_together() {
+        let cell = |m: &str, x, y| (m.to_string(), x, y);
+        let grid = vec![cell("imac", 0, 0), cell("book1", -1, 0), cell("book2", -1, 0)];
+        let file = LayoutFile {
+            neighbors: from_grid(&grid, "imac"),
+            ..LayoutFile::default()
+        };
+        assert_eq!(file.neighbors.len(), 2);
+        let mut back = desk(&file, "imac", |e| e.to_string());
+        back.sort();
+        let mut expected = grid.clone();
         expected.sort();
         assert_eq!(back, expected);
     }

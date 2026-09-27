@@ -402,6 +402,28 @@ fn using_the_target_takes_control_back() {
 }
 
 #[test]
+fn two_laptops_used_in_turn_at_the_same_place() {
+    let mut sim = Sim::new(
+        &[
+            ("imac", vec![screen(0, 0, 2560, 1440, 1.0)]),
+            ("book1", vec![screen(0, 0, 1512, 982, 1.0)]),
+            ("book2", vec![screen(0, 0, 1470, 956, 1.0)]),
+        ],
+        Layout::default()
+            .with("book1", Side::Left, "imac")
+            .with("book2", Side::Left, "imac"),
+    );
+    // Only the second laptop is there today
+    sim.disconnect("imac", "book1");
+    sim.disconnect("book1", "book2");
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(10.0, 700.0);
+    sim.glide("imac", -40.0, 0.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("book2".into()));
+    sim.glide("imac", 3000.0, 0.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+}
+
+#[test]
 fn three_machines_in_a_row() {
     let mut sim = Sim::new(
         &[

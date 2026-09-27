@@ -59,20 +59,12 @@ impl Default for LayoutFile {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayoutError {
-    /// Two different machines on the same side.
-    Conflict {
-        machine: String,
-        side: Side,
-    },
     SelfNeighbor(String),
 }
 
 impl std::fmt::Display for LayoutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LayoutError::Conflict { machine, side } => {
-                write!(f, "two machines are placed {side:?} of {machine}")
-            }
             LayoutError::SelfNeighbor(m) => write!(f, "{m} cannot be its own neighbor"),
         }
     }
@@ -80,10 +72,11 @@ impl std::fmt::Display for LayoutError {
 
 impl std::error::Error for LayoutError {}
 
-/// Resolved neighbors, keyed by machine id.
+/// Resolved neighbors, keyed by machine id. Several machines may share a place (computers used in
+/// turn at the same spot); the first of them that is online counts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
-    neighbors: HashMap<(String, Side), String>,
+    neighbors: HashMap<(String, Side), Vec<String>>,
     pub swap_cmd_ctrl: HashSet<String>,
     pub corner: f64,
 }
@@ -116,32 +109,37 @@ impl Layout {
             if machine == of {
                 return Err(LayoutError::SelfNeighbor(n.machine.clone()));
             }
-            layout.set(&of, n.side, &machine)?;
-            layout.set(&machine, n.side.opposite(), &of)?;
+            layout.set(&of, n.side, &machine);
+            layout.set(&machine, n.side.opposite(), &of);
         }
         layout.swap_cmd_ctrl = file.swap_cmd_ctrl.iter().filter_map(|n| resolve(n)).collect();
         Ok(layout)
     }
 
-    fn set(&mut self, machine: &str, side: Side, neighbor: &str) -> Result<(), LayoutError> {
-        match self.neighbors.insert((machine.to_string(), side), neighbor.to_string()) {
-            Some(previous) if previous != neighbor => Err(LayoutError::Conflict {
-                machine: machine.to_string(),
-                side,
-            }),
-            _ => Ok(()),
+    fn set(&mut self, machine: &str, side: Side, neighbor: &str) {
+        let list = self.neighbors.entry((machine.to_string(), side)).or_default();
+        if !list.iter().any(|n| n == neighbor) {
+            list.push(neighbor.to_string());
         }
     }
 
-    /// Builds a layout directly (tests, later the arrangement in the app).
+    /// Builds a layout directly (tests).
     pub fn with(mut self, machine: &str, side: Side, of: &str) -> Self {
-        self.set(of, side, machine).expect("no conflict");
-        self.set(machine, side.opposite(), of).expect("no conflict");
+        self.set(of, side, machine);
+        self.set(machine, side.opposite(), of);
         self
     }
 
+    /// The machines beyond `side` of `machine`, in the order they were placed.
+    pub fn neighbors(&self, machine: &str, side: Side) -> &[String] {
+        self.neighbors
+            .get(&(machine.to_string(), side))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The first machine beyond `side` of `machine` (whether online or not).
     pub fn neighbor(&self, machine: &str, side: Side) -> Option<&str> {
-        self.neighbors.get(&(machine.to_string(), side)).map(String::as_str)
+        self.neighbors(machine, side).first().map(String::as_str)
     }
 }
 
@@ -172,25 +170,17 @@ mod tests {
     }
 
     #[test]
-    fn conflicts_are_reported() {
+    fn computers_used_in_turn_share_a_place() {
         let file: LayoutFile = serde_json::from_str(
-            r#"{"neighbors":[{"machine":"pc","side":"right","of":"mac"},
-                             {"machine":"tv","side":"right","of":"mac"}]}"#,
+            r#"{"neighbors":[{"machine":"book1","side":"left","of":"imac"},
+                             {"machine":"book2","side":"left","of":"imac"}]}"#,
         )
         .unwrap();
-        assert!(matches!(
-            Layout::from_file(&file, same),
-            Err(LayoutError::Conflict { .. })
-        ));
+        let layout = Layout::from_file(&file, same).unwrap();
+        assert_eq!(layout.neighbors("imac", Side::Left), ["book1", "book2"]);
+        assert_eq!(layout.neighbor("book2", Side::Right), Some("imac"));
         let file: LayoutFile =
             serde_json::from_str(r#"{"neighbors":[{"machine":"a","side":"left","of":"a"}]}"#).unwrap();
         assert!(Layout::from_file(&file, same).is_err());
-        // The same relation written twice is fine
-        let file: LayoutFile = serde_json::from_str(
-            r#"{"neighbors":[{"machine":"pc","side":"right","of":"mac"},
-                             {"machine":"mac","side":"left","of":"pc"}]}"#,
-        )
-        .unwrap();
-        assert!(Layout::from_file(&file, same).is_ok());
     }
 }

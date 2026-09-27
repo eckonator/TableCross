@@ -42,7 +42,8 @@ impl App {
         let p = theme::colors(ui);
         ui.label(
             RichText::new(tr(
-                "Drag the computers to where they stand on your desk. Computers side by side share that edge.",
+                "Drag the computers to where they stand on your desk. Computers side by side share that edge; \
+                 computers used in turn at the same place share a field.",
             ))
             .color(p.muted),
         );
@@ -105,19 +106,34 @@ impl App {
                     egui::Grid::new("desk").spacing([gap, gap]).show(ui, |ui| {
                         for y in min_y..=max_y {
                             for x in min_x..=max_x {
-                                let occupant = shown.iter().find(|(_, cx, cy)| (*cx, *cy) == (x, y));
+                                let occupants: Vec<&String> = shown
+                                    .iter()
+                                    .filter(|(_, cx, cy)| (*cx, *cy) == (x, y))
+                                    .map(|(id, ..)| id)
+                                    .collect();
                                 let frame = egui::Frame::new()
                                     .corner_radius(8.0)
                                     .stroke(egui::Stroke::new(1.0, if dragging { p.accent } else { p.border }));
-                                let (_, payload) = ui.dnd_drop_zone::<Dragged, _>(frame, |ui| match occupant {
-                                    Some((id, ..)) => {
-                                        let view = machines(id);
-                                        if !view.paired {
-                                            unreachable.push(view.name.clone());
+                                let (_, payload) = ui.dnd_drop_zone::<Dragged, _>(frame, |ui| match occupants.len() {
+                                    1.. => {
+                                        // Computers sharing the place (used in turn) side by side
+                                        let n = occupants.len() as f32;
+                                        let part = Vec2::new((tile.x - 4.0 * (n - 1.0)) / n, tile.y);
+                                        let (cell, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
+                                        for (i, id) in occupants.iter().enumerate() {
+                                            let view = machines(id);
+                                            if !view.paired {
+                                                unreachable.push(view.name.clone());
+                                            }
+                                            let shapes = shapes(id).map(|s| s.fitted(monitor_area(part)));
+                                            let min = cell.min + egui::vec2(i as f32 * (part.x + 4.0), 0.0);
+                                            let place = egui::Rect::from_min_size(min, part);
+                                            ui.scope_builder(egui::UiBuilder::new().max_rect(place), |ui| {
+                                                machine_tile(ui, id, &view, part, number(id), shapes);
+                                            });
                                         }
-                                        machine_tile(ui, id, &view, tile, number(id), shapes(id));
                                     }
-                                    None => {
+                                    _ => {
                                         let (rect, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
                                         if dragging {
                                             ui.painter().text(
@@ -455,29 +471,18 @@ fn canonical(status: &Status, me: &Fingerprint, entry: &str) -> String {
         .map_or_else(|| entry.to_string(), |p| layout_file::machine_id(&p.fingerprint))
 }
 
-/// The desk after `id` was dropped on `cell` (`None`: taken off the desk). A computer already on
-/// that cell takes the old place of the dropped one, or leaves the desk.
+/// The desk after `id` was dropped on `cell` (`None`: taken off the desk). On a cell that is taken
+/// it shares the place with the computers there (used in turn); this computer's place is not shared.
 fn rearranged(cells: &[(String, i32, i32)], me: &str, id: &str, cell: Option<(i32, i32)>) -> Vec<(String, i32, i32)> {
-    let from = cells.iter().find(|(c, ..)| c == id).map(|(_, x, y)| (*x, *y));
-    let mut out = Vec::new();
-    for (c, x, y) in cells {
-        if c == id {
-            continue;
+    let mut out: Vec<_> = cells.iter().filter(|(c, ..)| c != id).cloned().collect();
+    match cell {
+        Some((x, y)) if out.iter().any(|(c, cx, cy)| c == me && (*cx, *cy) == (x, y)) => cells.to_vec(),
+        Some((x, y)) => {
+            out.push((id.to_string(), x, y));
+            out
         }
-        if Some((*x, *y)) == cell && c != me {
-            if let Some((fx, fy)) = from {
-                out.push((c.clone(), fx, fy));
-            }
-            continue;
-        }
-        out.push((c.clone(), *x, *y));
+        None => out,
     }
-    if let Some((x, y)) = cell
-        && !out.iter().any(|(_, cx, cy)| (*cx, *cy) == (x, y))
-    {
-        out.push((id.to_string(), x, y));
-    }
-    out
 }
 
 /// A computer that can be dragged.
@@ -527,7 +532,8 @@ fn machine_tile(
         badge(ui, rect, number);
     })
     .response
-    .on_hover_cursor(egui::CursorIcon::Grab);
+    .on_hover_cursor(egui::CursorIcon::Grab)
+    .on_hover_text(&view.name);
 }
 
 /// The screens of a computer in logical points, from its top left corner.
@@ -539,6 +545,14 @@ struct Shapes<'a> {
 
 /// Room above the screens for the number of the computer.
 const SCREENS_TOP: f32 = 8.0;
+
+impl Shapes<'_> {
+    /// Smaller if the screens do not fit into `area` (a shared place).
+    fn fitted(self, area: Vec2) -> Self {
+        let scale = fit_scale(self.screens, area).map_or(self.scale, |fit| fit.min(self.scale));
+        Shapes { scale, ..self }
+    }
+}
 
 /// Where the screens are drawn in a tile (the name goes below).
 fn monitor_area(tile: Vec2) -> Vec2 {
@@ -628,21 +642,17 @@ fn paint_screens(
         );
     }
     let text_top = rect.min.y + SCREENS_TOP + area.y + 4.0;
-    painter.text(
-        egui::pos2(rect.center().x, text_top),
-        egui::Align2::CENTER_TOP,
-        name,
-        egui::FontId::new(13.0, theme::semibold()),
-        p.text,
-    );
+    // Long names end in "…" (shared places are narrow)
+    let line = |text: &str, font: egui::FontId, color: Color32, top: f32| {
+        let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 6.0);
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        let pos = egui::pos2(rect.center().x - galley.size().x / 2.0, top);
+        painter.galley(pos, galley, color);
+    };
+    line(name, egui::FontId::new(13.0, theme::semibold()), p.text, text_top);
     if !caption.trim().is_empty() {
-        painter.text(
-            egui::pos2(rect.center().x, text_top + 16.0),
-            egui::Align2::CENTER_TOP,
-            caption,
-            egui::FontId::proportional(11.5),
-            p.muted,
-        );
+        line(caption, egui::FontId::proportional(11.5), p.muted, text_top + 16.0);
     }
 }
 
@@ -655,20 +665,19 @@ mod tests {
     }
 
     #[test]
-    fn dropping_moves_swaps_and_removes() {
+    fn dropping_moves_shares_and_removes() {
         let desk = vec![cell("me", 0, 0), cell("pc", 1, 0), cell("pi", -1, 0)];
         // Onto a free cell
         let moved = rearranged(&desk, "me", "pi", Some((2, 0)));
         assert!(moved.contains(&cell("pi", 2, 0)) && moved.len() == 3);
-        // Onto another computer: they swap
-        let swapped = rearranged(&desk, "me", "pi", Some((1, 0)));
-        assert!(swapped.contains(&cell("pi", 1, 0)) && swapped.contains(&cell("pc", -1, 0)));
-        // Onto this computer: nothing moves away from it
-        let refused = rearranged(&desk, "me", "pi", Some((0, 0)));
-        assert!(refused.contains(&cell("me", 0, 0)) && !refused.iter().any(|(m, ..)| m == "pi"));
-        // From outside onto a taken cell: the one there leaves the desk
+        // Onto another computer: both share the place
+        let shared = rearranged(&desk, "me", "pi", Some((1, 0)));
+        assert!(shared.contains(&cell("pi", 1, 0)) && shared.contains(&cell("pc", 1, 0)));
+        // Onto this computer: nothing changes
+        assert_eq!(rearranged(&desk, "me", "pi", Some((0, 0))), desk);
+        // From outside onto a taken cell
         let new = rearranged(&desk, "me", "tv", Some((1, 0)));
-        assert!(new.contains(&cell("tv", 1, 0)) && !new.iter().any(|(m, ..)| m == "pc"));
+        assert!(new.contains(&cell("tv", 1, 0)) && new.contains(&cell("pc", 1, 0)));
         // Off the desk
         let off = rearranged(&desk, "me", "pc", None);
         assert_eq!(off, vec![cell("me", 0, 0), cell("pi", -1, 0)]);

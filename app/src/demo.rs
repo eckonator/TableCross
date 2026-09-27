@@ -90,6 +90,11 @@ pub fn status() -> Status {
                     of: "5a5a5a5a5a5a5a5a".into(),
                 },
                 tc_core::Neighbor {
+                    machine: "2222222222222222".into(),
+                    side: Side::Right,
+                    of: "5a5a5a5a5a5a5a5a".into(),
+                },
+                tc_core::Neighbor {
                     machine: "3333333333333333".into(),
                     side: Side::Right,
                     of: "1111111111111111".into(),

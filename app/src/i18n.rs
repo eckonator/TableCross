@@ -197,8 +197,8 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "Test build {} ({})" => "Testversion {} ({})",
         "Update system helper …" => "Systemhelfer aktualisieren …",
-        "Drag the computers to where they stand on your desk. Computers side by side share that edge." => {
-            "Zieh die Rechner dorthin, wo sie auf deinem Schreibtisch stehen. Nebeneinanderliegende Rechner teilen sich diese Kante."
+        "Drag the computers to where they stand on your desk. Computers side by side share that edge; computers used in turn at the same place share a field." => {
+            "Zieh die Rechner dorthin, wo sie auf deinem Schreibtisch stehen. Nebeneinanderliegende Rechner teilen sich diese Kante; Rechner, die abwechselnd am selben Platz stehen, teilen sich ein Feld."
         }
         "Already switched on and still shown here (often after an update)? Select {} in the list, remove it with “–” and add it again with “+”." => {
             "Schon eingeschaltet und trotzdem hier aufgeführt (oft nach einem Update)? {} in der Liste auswählen, mit „–“ entfernen und mit „+“ neu hinzufügen."
