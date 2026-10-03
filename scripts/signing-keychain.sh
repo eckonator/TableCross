@@ -19,6 +19,12 @@ security set-keychain-settings "$KEYCHAIN"
 security unlock-keychain -p "$LOCK" "$KEYCHAIN"
 security import "$P12" -k "$KEYCHAIN" -P "$PASSWORD" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple: -s -k "$LOCK" "$KEYCHAIN" >/dev/null
+# codesign looks for the private key in the search list; on the CI machine add the keychain there
+# (on a developer's Mac the list stays as it is)
+if [ -n "${CI:-}" ]; then
+  # shellcheck disable=SC2046
+  security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+fi
 IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *1\)/ {print $2; exit}')
 if [ -z "$IDENTITY" ]; then
   echo "no signing identity in $P12" >&2
