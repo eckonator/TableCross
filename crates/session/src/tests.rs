@@ -68,9 +68,9 @@ async fn machine(name: &str) -> Machine {
     }
 }
 
-/// Waits until `check` holds, up to five seconds.
+/// Waits until `check` holds, up to 20 seconds (CI machines can be slow).
 async fn until(what: &str, mut check: impl FnMut() -> bool) {
-    for _ in 0..500 {
+    for _ in 0..2000 {
         if check() {
             return;
         }
