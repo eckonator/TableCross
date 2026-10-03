@@ -226,6 +226,8 @@ fn request_accessibility() -> bool {
 /// State shared by capture and injection.
 struct Shared {
     grabbed: AtomicBool,
+    /// Where the pointer is held while grabbed.
+    park: Mutex<CGPoint>,
     /// The system helper, once capture runs.
     helper: Mutex<Option<Arc<HelperClient>>>,
     tap: AtomicPtr<c_void>,
@@ -260,6 +262,7 @@ pub fn backend() -> Result<Backend, InputError> {
     }
     let shared = Arc::new(Shared {
         grabbed: AtomicBool::new(false),
+        park: Mutex::new(CGPoint { x: 0.0, y: 0.0 }),
         helper: Mutex::new(None),
         tap: AtomicPtr::new(std::ptr::null_mut()),
         run_loop: AtomicPtr::new(std::ptr::null_mut()),
@@ -467,7 +470,29 @@ extern "C" fn tap_callback(_proxy: Ref, kind: u32, event: Ref, user_info: *mut c
         pass
     }))
     .unwrap_or(true);
+    if matches!(kind, MOUSE_MOVED | LEFT_DRAGGED | RIGHT_DRAGGED | OTHER_DRAGGED) {
+        keep_parked(&context.shared, event);
+    }
     if pass { event } else { std::ptr::null_mut() }
+}
+
+/// While grabbed the pointer must stay at its parking spot. macOS sometimes connects mouse and
+/// pointer again by itself (fast back and forth over the edge); then the local pointer moved along
+/// with the remote one. Disconnect and park it again.
+fn keep_parked(shared: &Shared, event: Ref) {
+    if !shared.grabbed.load(Ordering::SeqCst) {
+        return;
+    }
+    let park = *shared.park.lock().expect("park lock");
+    let at = unsafe { CGEventGetLocation(event) };
+    if (at.x - park.x).abs() > 3.0 || (at.y - park.y).abs() > 3.0 {
+        tracing::warn!("pointer left its parking spot while grabbed, holding it again");
+        unsafe {
+            CGAssociateMouseAndMouseCursorPosition(false);
+            CGWarpMouseCursorPosition(park);
+            CGAssociateMouseAndMouseCursorPosition(false);
+        }
+    }
 }
 
 fn button_of(kind: u32, event: Ref) -> MouseButton {
@@ -713,6 +738,7 @@ impl InjectState {
 
 impl Inject for MacInject {
     fn grab(&self, park: Point) -> Result<(), InputError> {
+        *self.shared.park.lock().expect("park lock") = CGPoint { x: park.x, y: park.y };
         self.shared.grabbed.store(true, Ordering::SeqCst);
         self.set_seize(true);
         let mut state = self.shared.inject.lock().expect("inject lock");
