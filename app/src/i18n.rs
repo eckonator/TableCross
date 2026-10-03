@@ -173,6 +173,7 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "used in turn" => "abwechselnd hier",
         "Update to {}" => "Auf {} aktualisieren",
         "Updating …" => "Wird aktualisiert …",
         "Remove TableCross" => "TableCross entfernen",

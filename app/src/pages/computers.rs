@@ -120,9 +120,12 @@ impl App {
                                         let n = occupants.len() as f32;
                                         let part = Vec2::new((tile.x - 4.0 * (n - 1.0)) / n, tile.y);
                                         let (cell, _) = ui.allocate_exact_size(tile, egui::Sense::hover());
+                                        // Sharing the place with this computer: never side by side, no pairing needed
+                                        let with_me = occupants.iter().any(|id| **id == me);
                                         for (i, id) in occupants.iter().enumerate() {
-                                            let view = machines(id);
-                                            if !view.paired {
+                                            let mut view = machines(id);
+                                            view.in_turn = with_me && **id != me;
+                                            if !view.paired && !with_me {
                                                 unreachable.push(view.name.clone());
                                             }
                                             let shapes = shapes(id).map(|s| s.fitted(monitor_area(part)));
@@ -419,6 +422,8 @@ struct MachineView {
     paired: bool,
     connected: bool,
     this: bool,
+    /// Shares the place with this computer (used in turn, never side by side).
+    in_turn: bool,
 }
 
 fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
@@ -428,6 +433,7 @@ fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
             paired: true,
             connected: true,
             this: true,
+            in_turn: false,
         };
     }
     match status
@@ -440,6 +446,7 @@ fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
             paired: true,
             connected: peer.link.is_some(),
             this: false,
+            in_turn: false,
         },
         None => MachineView {
             name: status
@@ -451,6 +458,7 @@ fn machine_view(status: &Status, me: &str, id: &str) -> MachineView {
             paired: false,
             connected: false,
             this: false,
+            in_turn: false,
         },
     }
 }
@@ -513,18 +521,26 @@ fn machine_tile(
 ) {
     let id = egui::Id::new(("machine", machine));
     let p = theme::colors(ui);
+    let (frame, screen, caption) = if view.this {
+        (p.accent, p.accent_soft, tr("this computer"))
+    } else if view.in_turn && !view.connected {
+        (p.border, p.field, tr("used in turn"))
+    } else if !view.paired {
+        (p.border, p.field, tr("not paired here"))
+    } else if view.connected {
+        // A blank caption keeps all monitors the same size
+        (p.accent, p.accent_soft, " ")
+    } else {
+        (p.muted, p.field, tr("not connected"))
+    };
+    // The full text, as narrow tiles cut it
+    let hover = if caption.trim().is_empty() {
+        view.name.clone()
+    } else {
+        format!("{} – {caption}", view.name)
+    };
     ui.dnd_drag_source(id, Dragged(machine.to_string()), |ui| {
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        let (frame, screen, caption) = if view.this {
-            (p.accent, p.accent_soft, tr("this computer"))
-        } else if !view.paired {
-            (p.border, p.field, tr("not paired here"))
-        } else if view.connected {
-            // A blank caption keeps all monitors the same size
-            (p.accent, p.accent_soft, " ")
-        } else {
-            (p.muted, p.field, tr("not connected"))
-        };
         match shapes {
             Some(shapes) => paint_screens(ui, rect, &view.name, caption, frame, screen, &shapes),
             None => paint_machine(ui, rect, &view.name, caption, frame, screen),
@@ -533,7 +549,7 @@ fn machine_tile(
     })
     .response
     .on_hover_cursor(egui::CursorIcon::Grab)
-    .on_hover_text(&view.name);
+    .on_hover_text(hover);
 }
 
 /// The screens of a computer in logical points, from its top left corner.
