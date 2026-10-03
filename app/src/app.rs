@@ -47,6 +47,8 @@ pub struct App {
     pub isolated: bool,
     pub log_file: Option<PathBuf>,
     quit_flag: Arc<AtomicBool>,
+    /// "Update to …" was chosen in the menu of the status icon.
+    update_flag: Arc<AtomicBool>,
     tray: Option<crate::tray::Tray>,
     dev: DevTools,
     background: bool,
@@ -68,7 +70,7 @@ pub struct App {
 }
 
 /// How often to look for a new version while running.
-const UPDATE_EVERY: Duration = Duration::from_secs(12 * 3600);
+const UPDATE_EVERY: Duration = Duration::from_secs(3600);
 struct Removal {
     remove_settings: bool,
     started: Instant,
@@ -117,6 +119,7 @@ impl App {
             isolated,
             log_file,
             quit_flag: Arc::new(AtomicBool::new(false)),
+            update_flag: Arc::new(AtomicBool::new(false)),
             tray: None,
             dev,
             background,
@@ -149,7 +152,12 @@ impl App {
             .map(|s| s.clamp(1, 3) - 1)
             .or((first_start && app.dev.page.is_none()).then_some(0));
         if !app.dev.quitting_after_screenshot() {
-            app.tray = crate::tray::Tray::new(&ctx, app.session.clone(), app.quit_flag.clone());
+            app.tray = crate::tray::Tray::new(
+                &ctx,
+                app.session.clone(),
+                app.quit_flag.clone(),
+                app.update_flag.clone(),
+            );
             // Only with a status icon: otherwise the window could not be found again
             if app.tray.is_some() {
                 crate::tray::menu_bar_only();
@@ -340,6 +348,7 @@ impl App {
         if nav_item(ui, "✦", tr("Setup"), self.setup_step.is_some()).clicked() {
             self.setup_step = Some(0);
         }
+        let mut install = false;
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.add_space(14.0);
             ui.horizontal(|ui| {
@@ -350,6 +359,26 @@ impl App {
                         .color(p.muted),
                 );
             });
+            // A new version: one click installs it and starts it again
+            if let Some(new) = self.new_version.clone().filter(|n| n.asset.is_some()) {
+                ui.add_space(6.0);
+                if self
+                    .update_progress
+                    .as_ref()
+                    .is_some_and(|p| !matches!(p, crate::self_update::Progress::Failed(_)))
+                {
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        ui.spinner();
+                        ui.label(RichText::new(tr("Updating …")).small().color(p.muted));
+                    });
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.add_space(6.0);
+                        install = theme::primary_button(ui, &i18n::trf("Update to {}", &[&new.version])).clicked();
+                    });
+                }
+            }
             ui.add_space(6.0);
             let release = ui
                 .add_sized(
@@ -363,6 +392,9 @@ impl App {
                 self.send(Command::ReleaseAll);
             }
         });
+        if install {
+            self.install_update(ui.ctx());
+        }
     }
 
     /// Title and one line below it at the top of a page.
@@ -383,6 +415,17 @@ impl App {
         {
             self.new_version = result;
             self.update_job = None;
+        }
+        if let Some(tray) = &self.tray {
+            let version = self
+                .new_version
+                .as_ref()
+                .filter(|n| n.asset.is_some())
+                .map(|n| n.version.as_str());
+            tray.set_update(version);
+        }
+        if self.update_flag.swap(false, Ordering::SeqCst) {
+            self.install_update(ctx);
         }
         if let Some(job) = &self.self_update {
             while let Ok(progress) = job.try_recv() {

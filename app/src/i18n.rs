@@ -173,6 +173,8 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Update to {}" => "Auf {} aktualisieren",
+        "Updating …" => "Wird aktualisiert …",
         "Remove TableCross" => "TableCross entfernen",
         "Remove TableCross …" => "TableCross entfernen …",
         "Removes TableCross from this computer with everything it set up: the system helper, the permissions, starting with the system and the program itself." => {

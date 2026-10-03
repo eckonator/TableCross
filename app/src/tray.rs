@@ -14,6 +14,10 @@ use crate::i18n::tr;
 
 pub struct Tray {
     _icon: TrayIcon,
+    menu: Menu,
+    /// "Update to …", in the menu only while a new version is there.
+    update: MenuItem,
+    update_shown: std::cell::Cell<bool>,
     show: MenuItem,
     release: MenuItem,
     lock: MenuItem,
@@ -47,8 +51,14 @@ fn show_window(ctx: &egui::Context) {
 }
 
 impl Tray {
-    /// `quit` is set when the user chose "Quit" in the menu.
-    pub fn new(ctx: &egui::Context, session: Option<SessionHandle>, quit_flag: Arc<AtomicBool>) -> Option<Self> {
+    /// `quit` is set when the user chose "Quit" in the menu, `update_flag` when "Update to …".
+    pub fn new(
+        ctx: &egui::Context,
+        session: Option<SessionHandle>,
+        quit_flag: Arc<AtomicBool>,
+        update_flag: Arc<AtomicBool>,
+    ) -> Option<Self> {
+        let update = MenuItem::new("", true, None);
         let show = MenuItem::new(tr("Show TableCross"), true, None);
         let release = MenuItem::new(tr("Release everything"), true, None);
         let lock = MenuItem::new(tr("Lock all screens"), true, None);
@@ -64,7 +74,10 @@ impl Tray {
         let builder = TrayIconBuilder::new().with_icon_templated(icon);
         #[cfg(not(target_os = "macos"))]
         let builder = TrayIconBuilder::new().with_icon(icon);
-        let tray = builder.with_tooltip("TableCross").with_menu(Box::new(menu)).build();
+        let tray = builder
+            .with_tooltip("TableCross")
+            .with_menu(Box::new(menu.clone()))
+            .build();
         let tray = match tray {
             Ok(t) => t,
             Err(e) => {
@@ -74,6 +87,7 @@ impl Tray {
         };
         let (show_id, release_id, quit_id) = (show.id().clone(), release.id().clone(), quit.id().clone());
         let lock_id = lock.id().clone();
+        let update_id = update.id().clone();
         let menu_ctx = ctx.clone();
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             if event.id == show_id {
@@ -82,6 +96,9 @@ impl Tray {
                 if let Some(session) = &session {
                     session.send(Command::ReleaseAll);
                 }
+            } else if event.id == update_id {
+                update_flag.store(true, Ordering::SeqCst);
+                menu_ctx.request_repaint();
             } else if event.id == lock_id {
                 if let Some(session) = &session {
                     session.send(Command::LockAll);
@@ -109,11 +126,31 @@ impl Tray {
         }
         Some(Self {
             _icon: tray,
+            menu,
+            update,
+            update_shown: std::cell::Cell::new(false),
             show,
             release,
             lock,
             quit,
         })
+    }
+
+    /// Shows "Update to `version`" at the top of the menu, or removes it (`None`).
+    pub fn set_update(&self, version: Option<&str>) {
+        match version {
+            Some(version) => {
+                self.update.set_text(crate::i18n::trf("Update to {}", &[&version]));
+                if !self.update_shown.replace(true) {
+                    let _ = self.menu.insert(&self.update, 0);
+                }
+            }
+            None => {
+                if self.update_shown.replace(false) {
+                    let _ = self.menu.remove(&self.update);
+                }
+            }
+        }
     }
 
     /// After a language change.
