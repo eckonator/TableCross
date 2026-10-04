@@ -376,8 +376,12 @@ fn using_the_target_takes_control_back() {
     let mut sim = Sim::mac_pc();
     cross_to_pc(&mut sim);
     sim.key("mac", A, true);
-    // A tiny wobble of the PC mouse does not count
-    sim.mouse("pc", 1.0, 0.0);
+    // A tiny wobble of the PC mouse does not count, not even many of them over time
+    for _ in 0..40 {
+        sim.mouse("pc", 3.0, 0.0);
+        let actions = sim.machines.get_mut("pc").unwrap().engine.tick();
+        sim.apply("pc", actions);
+    }
     assert_eq!(sim.role("pc"), Role::ControlledBy("mac".into()));
     // Real movement does
     sim.mouse("pc", 30.0, 0.0);
@@ -393,11 +397,13 @@ fn using_the_target_takes_control_back() {
     assert_eq!(sim.os("mac").seen, ["-4", "+6", "-6"]);
     sim.assert_all_released();
 
-    // A key on the target takes over at once
+    // A key on the target types there and keeps the pointer where it is (mouse of one
+    // computer, keyboard of the other)
     cross_to_pc(&mut sim);
     sim.key("pc", C, true);
-    assert_eq!(sim.role("mac"), Role::Idle);
     sim.key("pc", C, false);
+    assert_eq!(sim.role("mac"), Role::Controlling("pc".into()));
+    assert_eq!(sim.os("pc").seen.last().map(String::as_str), Some("-6"));
     sim.assert_all_released();
 }
 

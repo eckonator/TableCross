@@ -141,8 +141,9 @@ screen, for example from the Linux computer through the Mac on to the Windows PC
 turn at the same place (two laptops on the same monitors, say) share a field in the arrangement; the
 edge leads to the one that is connected.
 
-Move the pointer over the edge to control the other computer; using a computer's own mouse or
-keyboard takes control back. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on
+Move the pointer over the edge to control the other computer; moving a computer's own mouse takes
+control back. Its own keyboard simply keeps typing there, so the mouse of one computer and the
+keyboard of another work together. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on
 `place` swaps ⌘ and Ctrl while controlling that computer. On macOS the terminal (later the app) needs
 the Accessibility permission.
 

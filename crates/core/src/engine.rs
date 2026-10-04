@@ -25,9 +25,12 @@ use crate::layout::Layout;
 
 pub type MachineId = String;
 
-/// Logical points the local mouse must move while controlled by a remote machine before this
-/// machine takes control back. Keys, buttons and wheel take over at once.
-const TAKEOVER_MOTION: f64 = 4.0;
+/// Logical points the local mouse must move between two ticks (about 250 ms) while controlled by
+/// a remote machine before this machine takes control back. Counting per tick keeps a resting
+/// mouse that jitters now and then from taking over. Keys, buttons and wheel never take over: they
+/// simply work here as well (the mouse of one computer and the keyboard of another is a common
+/// setup).
+const TAKEOVER_MOTION: f64 = 8.0;
 
 /// Input from this machine's own devices.
 #[derive(Debug, Clone, PartialEq)]
@@ -232,17 +235,29 @@ impl Engine {
         let mut actions = Vec::new();
         if let Mode::Controlled { by, .. } = &self.mode {
             let by = by.clone();
-            if let Captured::Motion { x, y, dx, dy } = event {
-                let scale = self
-                    .machines
-                    .get(&self.me)
-                    .map_or(1.0, |s| s.screen_at(Point::new(x, y)).scale);
-                self.takeover_motion += dx.hypot(dy) / scale;
-                if self.takeover_motion < TAKEOVER_MOTION {
-                    return actions;
-                }
+            let Captured::Motion { x, y, dx, dy } = event else {
+                // Local keys and clicks just reach the local system, as usual
+                return match event {
+                    Captured::Key { usage, down } => {
+                        self.key(usage, down, &mut actions);
+                        actions
+                    }
+                    Captured::Button { button, down } => {
+                        self.button(button, down, &mut actions);
+                        actions
+                    }
+                    _ => actions,
+                };
+            };
+            let scale = self
+                .machines
+                .get(&self.me)
+                .map_or(1.0, |s| s.screen_at(Point::new(x, y)).scale);
+            self.takeover_motion += dx.hypot(dy) / scale;
+            if self.takeover_motion < TAKEOVER_MOTION {
+                return actions;
             }
-            // Someone uses this machine: it takes control back
+            // Someone moves this machine's mouse: it takes control back
             self.release_injected(&mut actions);
             actions.push(Action::Send {
                 to: by,
@@ -362,9 +377,10 @@ impl Engine {
     }
 
     /// Call about every 250 ms: repeats the last position once after the pointer stopped, in case
-    /// that datagram was lost.
+    /// that datagram was lost, and forgets small local mouse movements.
     pub fn tick(&mut self) -> Vec<Action> {
         let mut actions = Vec::new();
+        self.takeover_motion = 0.0;
         if self.resend
             && let Mode::Remote { target, pos, .. } = &self.mode
         {

@@ -543,9 +543,22 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
             }
         }
         let mut engine = shared.engine.lock().expect("engine lock");
+        let controlled = matches!(engine.role(), Role::ControlledBy(_));
+        let seen = controlled.then(|| event.clone());
         let mut actions = engine.captured(event);
         let grabbed = matches!(engine.role(), Role::Controlling(_));
         drop(engine);
+        if let Some(seen) = seen
+            && let Some(to) = actions.iter().find_map(|a| match a {
+                Action::Send {
+                    to,
+                    message: Message::TakeOver,
+                } => Some(to),
+                _ => None,
+            })
+        {
+            tracing::info!("local input takes control back from {}: {seen:?}", shared.name_of(to));
+        }
         if let Some(before) = drag_before
             && dragged_over_edge(&actions)
         {

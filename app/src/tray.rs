@@ -30,6 +30,9 @@ pub struct Tray {
 pub const POWER_OFF_OTHERS: u8 = 1;
 pub const POWER_OFF_ALL: u8 = 2;
 
+/// After "Quit" the process ends at the latest after this long.
+const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// macOS: TableCross lives in the menu bar only, without a Dock icon or an entry in ⌘Tab.
 pub fn menu_bar_only() {
     #[cfg(target_os = "macos")]
@@ -141,10 +144,21 @@ impl Tray {
                 power_off.store(which, Ordering::SeqCst);
                 show_window(&menu_ctx);
             } else if event.id == quit_id {
+                tracing::info!("quit chosen in the status icon menu");
+                // Stop sharing right away, without waiting for the (maybe hidden) window
+                if let Some(session) = &session {
+                    session.send(Command::Shutdown);
+                }
                 quit_flag.store(true, Ordering::SeqCst);
                 menu_ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                 menu_ctx.send_viewport_cmd(ViewportCommand::Close);
                 menu_ctx.request_repaint();
+                // Quit means quit: if the window does not close, end the process anyway
+                std::thread::spawn(|| {
+                    std::thread::sleep(QUIT_GRACE);
+                    tracing::warn!("window did not close after quit, ending the process");
+                    std::process::exit(0);
+                });
             }
         }));
         // Windows: a click on the symbol opens the window, the menu is on the right button
