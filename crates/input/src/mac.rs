@@ -486,11 +486,31 @@ fn keep_parked(shared: &Shared, event: Ref) {
     let park = *shared.park.lock().expect("park lock");
     let at = unsafe { CGEventGetLocation(event) };
     if (at.x - park.x).abs() > 3.0 || (at.y - park.y).abs() > 3.0 {
-        tracing::warn!("pointer left its parking spot while grabbed, holding it again");
+        log_unparked();
         unsafe {
             CGAssociateMouseAndMouseCursorPosition(false);
             CGWarpMouseCursorPosition(park);
             CGAssociateMouseAndMouseCursorPosition(false);
+        }
+    }
+}
+
+/// It can happen on every mouse event for a while; log at most every few seconds with a count.
+fn log_unparked() {
+    static LAST: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    match &mut *last {
+        Some((at, skipped)) if at.elapsed() < Duration::from_secs(5) => *skipped += 1,
+        _ => {
+            let skipped = last.map_or(0, |(_, skipped)| skipped);
+            if skipped > 0 {
+                tracing::warn!("pointer left its parking spot while grabbed, holding it again ({skipped} more before)");
+            } else {
+                tracing::warn!("pointer left its parking spot while grabbed, holding it again");
+            }
+            *last = Some((Instant::now(), 0));
         }
     }
 }

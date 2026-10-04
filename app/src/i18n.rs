@@ -298,6 +298,9 @@ fn de(en: &str) -> Option<&'static str> {
         "Takes effect after a restart of the connection." => "Wirkt nach einem Neustart der Verbindung.",
         "That did not work: {}" => "Das hat nicht geklappt: {}",
         "the other computer cannot be reached" => "der andere Rechner ist nicht erreichbar",
+        "the other computer cannot be reached: its address {} is not in this computer's network (a virtual machine needs a bridged network adapter instead of NAT)" => {
+            "der andere Rechner ist nicht erreichbar: seine Adresse {} liegt nicht im Netz dieses Rechners (eine virtuelle Maschine braucht eine Netzwerkbrücke statt NAT)"
+        }
         "the other computer is not showing a code (expired or too many attempts)" => {
             "der andere Rechner zeigt keinen Code (abgelaufen oder zu viele Versuche)"
         }

@@ -72,6 +72,14 @@ pub fn pair_error(e: &PairError) -> String {
     match e {
         PairError::NoAddress => tr("the other computer was not found on the network").into(),
         PairError::Unreachable => tr("the other computer cannot be reached").into(),
+        PairError::OtherNetwork(ips) => {
+            let ips = ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+            trf(
+                "the other computer cannot be reached: its address {} is not in this computer's network \
+                 (a virtual machine needs a bridged network adapter instead of NAT)",
+                &[&ips],
+            )
+        }
         PairError::NotShowingCode => {
             tr("the other computer is not showing a code (expired or too many attempts)").into()
         }

@@ -21,6 +21,7 @@ sha2 = "0.10"
 hmac = "0.12"
 getrandom = "0.3"
 mdns-sd = "0.21"
+if-addrs = "0.15"
 socket2 = "0.6"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
 tracing = "0.1"

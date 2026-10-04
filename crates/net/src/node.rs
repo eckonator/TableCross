@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -180,6 +180,10 @@ pub enum PairError {
     NoAddress,
     #[error("the other computer cannot be reached")]
     Unreachable,
+    /// Unreachable, and none of its IPv4 addresses is in one of this computer's networks (typically a
+    /// virtual machine behind NAT).
+    #[error("the other computer cannot be reached, its address {} is outside this computer's networks", list_ips(.0))]
+    OtherNetwork(Vec<Ipv4Addr>),
     #[error("the other computer is not showing a pairing code (expired, or too many wrong attempts)")]
     NotShowingCode,
     #[error("wrong code")]
@@ -991,7 +995,13 @@ async fn pair_with(inner: &Arc<Inner>, addresses: &[SocketAddr], code: &PairingC
     .await;
     drop(attempts);
     let Ok(Some((connection, address))) = connected else {
-        return Err(PairError::Unreachable);
+        let local = local_ipv4_networks();
+        let foreign = foreign_ipv4(addresses, &local);
+        return Err(if foreign.is_empty() {
+            PairError::Unreachable
+        } else {
+            PairError::OtherNetwork(foreign)
+        });
     };
     match timeout(SETUP_TIMEOUT * 2, pair_exchange(inner, &connection, address, code)).await {
         Ok(result) => result,
@@ -1000,6 +1010,42 @@ async fn pair_with(inner: &Arc<Inner>, addresses: &[SocketAddr], code: &PairingC
             Err(PairError::Protocol("no answer".into()))
         }
     }
+}
+
+fn list_ips(ips: &[Ipv4Addr]) -> String {
+    ips.iter().map(Ipv4Addr::to_string).collect::<Vec<_>>().join(", ")
+}
+
+/// Address and prefix length of every IPv4 network this computer is in.
+fn local_ipv4_networks() -> Vec<(Ipv4Addr, u8)> {
+    let interfaces = if_addrs::get_if_addrs().unwrap_or_default();
+    interfaces
+        .into_iter()
+        .filter_map(|interface| match interface.addr {
+            if_addrs::IfAddr::V4(v4) => Some((v4.ip, v4.prefixlen)),
+            if_addrs::IfAddr::V6(_) => None,
+        })
+        .collect()
+}
+
+/// The IPv4 addresses of a peer if none of them lies in a local network, otherwise none. Without IPv4
+/// addresses nothing can be said (IPv6 link-local addresses look reachable on every interface).
+fn foreign_ipv4(addresses: &[SocketAddr], local: &[(Ipv4Addr, u8)]) -> Vec<Ipv4Addr> {
+    let mut ips: Vec<Ipv4Addr> = Vec::new();
+    for address in addresses {
+        if let IpAddr::V4(ip) = address.ip()
+            && !ips.contains(&ip)
+        {
+            ips.push(ip);
+        }
+    }
+    let same_network = |ip: &Ipv4Addr| {
+        local.iter().any(|&(net, prefix)| {
+            let mask = u32::MAX.checked_shl(32 - u32::from(prefix.min(32))).unwrap_or(0);
+            u32::from(*ip) & mask == u32::from(net) & mask
+        })
+    };
+    if ips.iter().any(same_network) { Vec::new() } else { ips }
 }
 
 async fn pair_exchange(
@@ -1228,4 +1274,24 @@ fn bind_once(address: SocketAddr) -> io::Result<std::net::UdpSocket> {
     }
     socket.bind(&address.into())?;
     Ok(socket.into())
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+
+    #[test]
+    fn addresses_outside_all_local_networks_are_reported() {
+        let local = [(Ipv4Addr::new(192, 168, 178, 71), 24), (Ipv4Addr::LOCALHOST, 8)];
+        let nat: SocketAddr = "192.168.142.129:24800".parse().unwrap();
+        let link_local: SocketAddr = "[fe80::20c:29ff:fe74:ffb7]:24800".parse().unwrap();
+        let home: SocketAddr = "192.168.178.30:24800".parse().unwrap();
+        assert_eq!(
+            foreign_ipv4(&[nat, link_local, nat], &local),
+            vec![Ipv4Addr::new(192, 168, 142, 129)]
+        );
+        assert!(foreign_ipv4(&[nat, home], &local).is_empty());
+        assert!(foreign_ipv4(&[link_local], &local).is_empty());
+        assert!(foreign_ipv4(&[nat], &[(Ipv4Addr::new(10, 0, 0, 1), 0)]).is_empty());
+    }
 }
