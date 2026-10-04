@@ -42,6 +42,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>TableCross connects to your other computers on the local network to share mouse, keyboard and clipboard.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>TableCross asks the system to shut down when you shut down all computers at once.</string>
   <key>NSBonjourServices</key>
   <array><string>_tablecross._udp</string></array>
 </dict>

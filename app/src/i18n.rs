@@ -198,6 +198,19 @@ fn de(en: &str) -> Option<&'static str> {
         "Yes, remove" => "Ja, entfernen",
         "All screens were locked" => "Alle Bildschirme wurden gesperrt",
         "Lock all screens" => "Alle Bildschirme sperren",
+        "Shut down other computers …" => "Andere Rechner herunterfahren …",
+        "Shut down all computers …" => "Alle Rechner herunterfahren …",
+        "Shut down all computers?" => "Alle Rechner herunterfahren?",
+        "Shut down the other computers?" => "Die anderen Rechner herunterfahren?",
+        "No other computer is connected." => "Kein anderer Rechner ist verbunden.",
+        "Only this computer is connected." => "Nur dieser Rechner ist verbunden.",
+        "This computer and {}" => "Dieser Rechner und {}",
+        "Programs with unsaved documents may still ask before they quit." => {
+            "Programme mit ungesicherten Dokumenten können vor dem Beenden noch nachfragen."
+        }
+        "Shut down" => "Herunterfahren",
+        "This computer is shutting down" => "Dieser Rechner wird heruntergefahren",
+        "Shutting down: {}" => "Wird heruntergefahren: {}",
         "Ctrl + Shift + Alt + L" => "Strg + Umschalt + Alt + L",
         "Ctrl + Shift + Alt + 1 … 9" => "Strg + Umschalt + Alt + 1 … 9",
         "Go to the computer with that number (see Computers)" => {

@@ -3,7 +3,7 @@
 //! running when its window is closed; the symbol brings the window back.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use eframe::egui::{self, ViewportCommand};
 use tc_session::{Command, SessionHandle};
@@ -21,8 +21,14 @@ pub struct Tray {
     show: MenuItem,
     release: MenuItem,
     lock: MenuItem,
+    power_off_others: MenuItem,
+    power_off_all: MenuItem,
     quit: MenuItem,
 }
+
+/// What the menu asked to shut down, kept until the window asked back.
+pub const POWER_OFF_OTHERS: u8 = 1;
+pub const POWER_OFF_ALL: u8 = 2;
 
 /// macOS: TableCross lives in the menu bar only, without a Dock icon or an entry in ⌘Tab.
 pub fn menu_bar_only() {
@@ -61,21 +67,33 @@ fn show_window(ctx: &egui::Context) {
 }
 
 impl Tray {
-    /// `quit` is set when the user chose "Quit" in the menu, `update_flag` when "Update to …".
+    /// `quit` is set when the user chose "Quit" in the menu, `update_flag` when "Update to …",
+    /// `power_off` to `POWER_OFF_OTHERS` or `POWER_OFF_ALL` when the window should ask about that.
     pub fn new(
         ctx: &egui::Context,
         session: Option<SessionHandle>,
         quit_flag: Arc<AtomicBool>,
         update_flag: Arc<AtomicBool>,
+        power_off: Arc<AtomicU8>,
     ) -> Option<Self> {
         let update = MenuItem::new("", true, None);
         let show = MenuItem::new(tr("Show TableCross"), true, None);
         let release = MenuItem::new(tr("Release everything"), true, None);
         let lock = MenuItem::new(tr("Lock all screens"), true, None);
+        let power_off_others = MenuItem::new(tr("Shut down other computers …"), true, None);
+        let power_off_all = MenuItem::new(tr("Shut down all computers …"), true, None);
         let quit = MenuItem::new(tr("Quit TableCross"), true, None);
         let menu = Menu::new();
-        menu.append_items(&[&show, &release, &lock, &PredefinedMenuItem::separator(), &quit])
-            .ok()?;
+        menu.append_items(&[
+            &show,
+            &release,
+            &lock,
+            &power_off_others,
+            &power_off_all,
+            &PredefinedMenuItem::separator(),
+            &quit,
+        ])
+        .ok()?;
         let template = cfg!(target_os = "macos");
         let size = if template { 36 } else { 32 };
         let icon = Icon::from_rgba(crate::icon::rgba(size, template), size, size).ok()?;
@@ -97,6 +115,7 @@ impl Tray {
         };
         let (show_id, release_id, quit_id) = (show.id().clone(), release.id().clone(), quit.id().clone());
         let lock_id = lock.id().clone();
+        let (others_id, all_id) = (power_off_others.id().clone(), power_off_all.id().clone());
         let update_id = update.id().clone();
         let menu_ctx = ctx.clone();
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
@@ -113,6 +132,14 @@ impl Tray {
                 if let Some(session) = &session {
                     session.send(Command::LockAll);
                 }
+            } else if event.id == others_id || event.id == all_id {
+                let which = if event.id == all_id {
+                    POWER_OFF_ALL
+                } else {
+                    POWER_OFF_OTHERS
+                };
+                power_off.store(which, Ordering::SeqCst);
+                show_window(&menu_ctx);
             } else if event.id == quit_id {
                 quit_flag.store(true, Ordering::SeqCst);
                 menu_ctx.send_viewport_cmd(ViewportCommand::Visible(true));
@@ -142,6 +169,8 @@ impl Tray {
             show,
             release,
             lock,
+            power_off_others,
+            power_off_all,
             quit,
         })
     }
@@ -168,6 +197,8 @@ impl Tray {
         self.show.set_text(tr("Show TableCross"));
         self.release.set_text(tr("Release everything"));
         self.lock.set_text(tr("Lock all screens"));
+        self.power_off_others.set_text(tr("Shut down other computers …"));
+        self.power_off_all.set_text(tr("Shut down all computers …"));
         self.quit.set_text(tr("Quit TableCross"));
     }
 }

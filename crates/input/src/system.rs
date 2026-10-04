@@ -1,9 +1,11 @@
-//! Things of the whole system: keeping the computer awake while it is used across computers, and
-//! locking the screen.
+//! Things of the whole system: keeping the computer awake while it is used across computers, locking
+//! the screen and shutting down.
 //!
-//! - macOS: a power assertion (`IOPMAssertionCreateWithName`), locking through the login framework.
-//! - Windows: a power request (`PowerCreateRequest`), `LockWorkStation`.
-//! - Linux: the Inhibit portal of the desktop, `loginctl lock-session`.
+//! - macOS: a power assertion (`IOPMAssertionCreateWithName`), locking through the login framework,
+//!   shutting down through the login window.
+//! - Windows: a power request (`PowerCreateRequest`), `LockWorkStation`, `ExitWindowsEx`.
+//! - Linux: the Inhibit portal of the desktop, `loginctl lock-session`, the session manager of the
+//!   desktop or `systemctl poweroff`.
 
 /// Keeps display and system awake while it exists. Without it, a Mac whose keyboard the system
 /// helper holds counts as unused while someone types on another computer, and goes to sleep.
@@ -208,6 +210,95 @@ pub fn lock_screen() -> Result<(), String> {
     {
         Err("not supported".into())
     }
+}
+
+/// Shuts this computer down like its own menu does: applications are asked to quit and may stop it
+/// for unsaved documents.
+pub fn power_off() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // The "shut" event of the login window: no dialog, but applications may still object
+        run(
+            "osascript",
+            &["-e", "tell application \"loginwindow\" to «event aevtshut»"],
+        )
+    }
+    #[cfg(windows)]
+    {
+        windows_power_off()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_uppercase();
+        let session = if desktop.contains("GNOME") {
+            run("gnome-session-quit", &["--power-off", "--no-prompt"])
+        } else if desktop.contains("KDE") {
+            run(
+                "dbus-send",
+                &[
+                    "--session",
+                    "--type=method_call",
+                    "--dest=org.kde.Shutdown",
+                    "/Shutdown",
+                    "org.kde.Shutdown.logoutAndShutdown",
+                ],
+            )
+        } else {
+            Err("no session manager".into())
+        };
+        session.or_else(|_| run("systemctl", &["poweroff"]))
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+    {
+        Err("not supported".into())
+    }
+}
+
+/// Every user may shut down, but the right has to be switched on in the process token first.
+#[cfg(windows)]
+fn windows_power_off() -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LUID};
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED, SE_SHUTDOWN_NAME,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Shutdown::{
+        EWX_POWEROFF, EWX_SHUTDOWN, ExitWindowsEx, SHTDN_REASON_FLAG_PLANNED, SHTDN_REASON_MAJOR_OTHER,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let error = || std::io::Error::last_os_error().to_string();
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token) == 0 {
+            return Err(error());
+        }
+        let mut luid = LUID {
+            LowPart: 0,
+            HighPart: 0,
+        };
+        let found = LookupPrivilegeValueW(std::ptr::null(), SE_SHUTDOWN_NAME, &mut luid) != 0;
+        let privileges = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        let adjusted =
+            found && AdjustTokenPrivileges(token, 0, &privileges, 0, std::ptr::null_mut(), std::ptr::null_mut()) != 0;
+        CloseHandle(token);
+        if !adjusted {
+            return Err(error());
+        }
+        if ExitWindowsEx(
+            EWX_SHUTDOWN | EWX_POWEROFF,
+            SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_FLAG_PLANNED,
+        ) == 0
+        {
+            return Err(error());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]

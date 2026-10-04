@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on every incompatible change; both sides compare it in `Message::Hello`.
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Largest message in bytes. Larger payloads (clipboard, files) are sent in chunks.
 pub const MAX_MESSAGE_LEN: usize = 64 * 1024;
@@ -142,6 +142,9 @@ pub enum Message {
     ReleaseAll,
     /// Lock the screen (someone locked all computers at once).
     LockScreen,
+    /// Shut the computer down (someone shut down all computers at once). Applications may still ask
+    /// to save their documents.
+    PowerOff,
     /// Keep-alive; when it stops arriving the connection counts as lost.
     Heartbeat {
         seq: u32,
@@ -313,6 +316,7 @@ mod tests {
             },
             Message::ReleaseAll,
             Message::LockScreen,
+            Message::PowerOff,
             Message::Heartbeat { seq: u32::MAX },
             Message::Ping { seq: 7 },
             Message::Pong { seq: 7 },

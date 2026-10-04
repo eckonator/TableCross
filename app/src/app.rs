@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText, ViewportCommand};
@@ -49,6 +49,10 @@ pub struct App {
     quit_flag: Arc<AtomicBool>,
     /// "Update to …" was chosen in the menu of the status icon.
     update_flag: Arc<AtomicBool>,
+    /// "Shut down …" was chosen in the menu of the status icon (`tray::POWER_OFF_*`).
+    power_off_flag: Arc<AtomicU8>,
+    /// Asking whether to shut down; `true` includes this computer.
+    confirm_power_off: Option<bool>,
     tray: Option<crate::tray::Tray>,
     dev: DevTools,
     background: bool,
@@ -126,6 +130,8 @@ impl App {
             log_file,
             quit_flag: Arc::new(AtomicBool::new(false)),
             update_flag: Arc::new(AtomicBool::new(false)),
+            power_off_flag: Arc::new(AtomicU8::new(0)),
+            confirm_power_off: None,
             tray: None,
             dev,
             background,
@@ -166,6 +172,7 @@ impl App {
                 app.session.clone(),
                 app.quit_flag.clone(),
                 app.update_flag.clone(),
+                app.power_off_flag.clone(),
             );
             // Only with a status icon: otherwise the window could not be found again
             if app.tray.is_some() {
@@ -579,6 +586,73 @@ impl App {
         self.removal.is_some()
     }
 
+    /// Asks before shutting down what the menu of the status icon chose.
+    fn power_off_dialog(&mut self, ctx: &egui::Context) {
+        match self.power_off_flag.swap(0, Ordering::SeqCst) {
+            crate::tray::POWER_OFF_OTHERS => self.confirm_power_off = Some(false),
+            crate::tray::POWER_OFF_ALL => self.confirm_power_off = Some(true),
+            _ => {}
+        }
+        let Some(this_one) = self.confirm_power_off else { return };
+        let others: Vec<String> = self
+            .status
+            .peers
+            .iter()
+            .filter(|p| p.link.is_some())
+            .map(|p| p.name.clone())
+            .collect();
+        if !this_one && others.is_empty() {
+            self.confirm_power_off = None;
+            self.show_info(tr("No other computer is connected."));
+            return;
+        }
+        let p = theme::palette(ctx);
+        let mut decided = None;
+        let modal = egui::Modal::new(egui::Id::new("power_off")).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            let title = if this_one {
+                tr("Shut down all computers?")
+            } else {
+                tr("Shut down the other computers?")
+            };
+            ui.label(RichText::new(title).size(16.0).strong());
+            ui.add_space(6.0);
+            let list = if others.is_empty() {
+                tr("Only this computer is connected.").to_string()
+            } else if this_one {
+                i18n::trf("This computer and {}", &[&others.join(", ")])
+            } else {
+                others.join(", ")
+            };
+            ui.label(list);
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(tr("Programs with unsaved documents may still ask before they quit.")).color(p.muted),
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::Button::new(RichText::new(tr("Shut down")).color(p.on_accent)).fill(p.bad))
+                    .clicked()
+                {
+                    decided = Some(true);
+                }
+                if ui.button(tr("Cancel")).clicked() {
+                    decided = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && decided.is_none() {
+            decided = Some(false);
+        }
+        if let Some(go) = decided {
+            self.confirm_power_off = None;
+            if go {
+                self.send(Command::PowerOff { this_one });
+            }
+        }
+    }
+
     /// Opens the Input Monitoring settings and the helper file once, if a just replaced helper lacks
     /// the permission.
     fn helper_prompt(&mut self) {
@@ -713,6 +787,7 @@ impl eframe::App for App {
                     }
                 });
             });
+        self.power_off_dialog(&ctx);
         // Numbers like the round trip change without events
         ctx.request_repaint_after(Duration::from_millis(500));
     }

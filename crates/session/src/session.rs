@@ -70,6 +70,10 @@ pub enum Command {
     Arrange(Vec<(String, i32, i32)>),
     /// Lock the screens of all connected computers and of this one.
     LockAll,
+    /// Shut down all connected computers, and this one as well with `this_one`.
+    PowerOff {
+        this_one: bool,
+    },
     /// Put a peer next to this computer (`None`: nowhere).
     Place {
         peer: Fingerprint,
@@ -121,6 +125,8 @@ pub enum Notice {
     TransferFailed(String, String),
     /// All screens were locked from here.
     LockedAll,
+    /// These computers were told to shut down from here.
+    PoweringOff(Vec<String>),
 }
 
 impl std::fmt::Display for Notice {
@@ -155,6 +161,7 @@ impl std::fmt::Display for Notice {
             }
             Notice::TransferFailed(n, e) => write!(f, "file transfer with {n} failed: {e}"),
             Notice::LockedAll => write!(f, "all screens locked"),
+            Notice::PoweringOff(names) => write!(f, "shutting down: {}", names.join(", ")),
         }
     }
 }
@@ -1066,6 +1073,35 @@ fn lock_all(shared: &Arc<Shared>) {
     lock_here();
 }
 
+/// Shuts this computer down without blocking the loop.
+fn power_off_here() {
+    std::thread::spawn(|| {
+        if let Err(e) = tc_input::system::power_off() {
+            tracing::warn!("cannot shut down: {e}");
+        }
+    });
+}
+
+/// Mouse and keyboard back home, then every connected computer shuts down; this one a moment later,
+/// so that the messages are out before TableCross is asked to quit.
+fn power_off_all(shared: &Arc<Shared>, this_one: bool) {
+    let actions = shared.engine.lock().expect("engine lock").release_everything();
+    shared.execute(actions);
+    let mut names = Vec::new();
+    for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
+        shared.node.send(&peer.peer.fingerprint, Message::PowerOff);
+        names.push(shared.name_of(&peer.peer.fingerprint.to_string()));
+    }
+    tracing::info!("shutting down {} other computer(s), this one: {this_one}", names.len());
+    shared.notice(Notice::PoweringOff(names));
+    if this_one {
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            power_off_here();
+        });
+    }
+}
+
 fn handle_event(shared: &Arc<Shared>, event: Event) {
     match event {
         Event::Connected {
@@ -1183,6 +1219,13 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             tracing::info!("{} locks all screens", shared.name_of(&peer.to_string()));
             lock_here();
         }
+        Event::Message {
+            peer,
+            message: Message::PowerOff,
+        } => {
+            tracing::info!("{} shuts down all computers", shared.name_of(&peer.to_string()));
+            power_off_here();
+        }
         Event::Message { peer, message } => {
             let actions = shared
                 .engine
@@ -1273,6 +1316,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             shared.execute(actions);
         }
         Command::LockAll => lock_all(shared),
+        Command::PowerOff { this_one } => power_off_all(shared, this_one),
         Command::ReleaseAll => {
             let actions = shared.engine.lock().expect("engine lock").release_everything();
             shared.execute(actions);
