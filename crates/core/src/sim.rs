@@ -549,6 +549,34 @@ fn being_entered_by_another_leader_stops_leading() {
 }
 
 #[test]
+fn a_second_leader_sends_the_first_one_home() {
+    let mut sim = Sim::new(
+        &[
+            ("book2", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("imac", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("book1", vec![screen(0, 0, 1000, 800, 1.0)]),
+        ],
+        Layout::default()
+            .with("imac", Side::Right, "book2")
+            .with("book1", Side::Bottom, "imac"),
+    );
+    sim.machines.get_mut("book2").unwrap().os.pointer = Point::new(990.0, 400.0);
+    sim.glide("book2", 20.0, 0.0);
+    sim.key("book2", A, true);
+    assert_eq!(sim.role("imac"), Role::ControlledBy("book2".into()));
+    // Someone uses the other laptop and moves up into the iMac
+    sim.machines.get_mut("book1").unwrap().os.pointer = Point::new(500.0, 10.0);
+    sim.glide("book1", 0.0, -20.0);
+    assert_eq!(sim.role("imac"), Role::ControlledBy("book1".into()));
+    assert_eq!(sim.role("book2"), Role::Idle);
+    assert!(!sim.os("book2").grabbed, "pointer visible again at home");
+    sim.key("book2", A, false);
+    sim.glide("book1", 0.0, 2000.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    sim.assert_all_released();
+}
+
+#[test]
 fn wheel_goes_to_the_target() {
     let mut sim = Sim::mac_pc();
     sim.feed(

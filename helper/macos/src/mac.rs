@@ -4,19 +4,23 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
+use core_foundation_sys::base::CFGetTypeID;
 use core_foundation_sys::base::{CFAllocatorRef, CFIndex, CFRelease, kCFAllocatorDefault};
 use core_foundation_sys::dictionary::{
     CFDictionaryCreate, CFDictionaryRef, kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks,
 };
-use core_foundation_sys::number::{CFNumberCreate, CFNumberRef, kCFNumberSInt32Type};
+use core_foundation_sys::number::{
+    CFNumberCreate, CFNumberGetTypeID, CFNumberGetValue, CFNumberRef, kCFNumberSInt32Type,
+};
 use core_foundation_sys::runloop::{CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopRunInMode, kCFRunLoopDefaultMode};
 use core_foundation_sys::set::{CFSetGetCount, CFSetGetValues, CFSetRef};
 use core_foundation_sys::string::{CFStringCreateWithCString, CFStringRef, kCFStringEncodingUTF8};
 use tc_input::helper_protocol::{
-    CONSUMER_KEYS, DeadManSwitch, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
+    CONSUMER_KEYS, DeadManSwitch, F1, F12, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
 };
 
 type Ref = *mut c_void;
@@ -34,6 +38,7 @@ unsafe extern "C" {
     );
     fn IOHIDDeviceOpen(device: Ref, options: u32) -> i32;
     fn IOHIDDeviceClose(device: Ref, options: u32) -> i32;
+    fn IOHIDDeviceGetProperty(device: Ref, key: CFStringRef) -> *const c_void;
     fn IOHIDDeviceScheduleWithRunLoop(device: Ref, run_loop: CFRunLoopRef, mode: CFStringRef);
     fn IOHIDDeviceUnscheduleFromRunLoop(device: Ref, run_loop: CFRunLoopRef, mode: CFStringRef);
     fn IOHIDDeviceRegisterInputValueCallback(
@@ -65,6 +70,14 @@ const ACCESS_GRANTED: u32 = 0;
 const SEIZE_DEVICE: u32 = 1;
 const PAGE_KEYBOARD: u32 = 0x07;
 const PAGE_CONSUMER: u32 = 0x0C;
+/// fn (globe) of Apple keyboards: usage 3 on the "top case" page, on some models on the vendor
+/// keyboard page.
+const PAGES_APPLE_FN: [u32; 2] = [0xFF, 0xFF01];
+const USAGE_APPLE_FN: u32 = 0x03;
+/// Apple over USB/internal and over Bluetooth.
+const APPLE_VENDORS: [i32; 2] = [0x05AC, 0x004C];
+/// Callback context of Apple keyboards (others get null).
+const APPLE_KEYBOARD: *mut c_void = std::ptr::without_provenance_mut(1);
 /// Without the permission the helper restarts now and then: the system grants it only to a fresh
 /// process (measured), and launchd starts the helper again by itself.
 const RESTART_WITHOUT_ACCESS: Duration = Duration::from_secs(30);
@@ -114,12 +127,45 @@ fn keyboard_matching() -> CFDictionaryRef {
     }
 }
 
-extern "C" fn key_callback(_context: *mut c_void, _result: i32, _sender: *mut c_void, value: Ref) {
+/// fn is held on an Apple keyboard.
+static FN_HELD: AtomicBool = AtomicBool::new(false);
+
+fn is_apple(device: Ref) -> bool {
+    unsafe {
+        let key = cf_string("VendorID");
+        let value = IOHIDDeviceGetProperty(device, key);
+        CFRelease(key.cast());
+        let mut vendor = 0i32;
+        !value.is_null()
+            && CFGetTypeID(value) == CFNumberGetTypeID()
+            && CFNumberGetValue(
+                value as CFNumberRef,
+                kCFNumberSInt32Type,
+                (&mut vendor as *mut i32).cast(),
+            )
+            && APPLE_VENDORS.contains(&vendor)
+    }
+}
+
+extern "C" fn key_callback(context: *mut c_void, _result: i32, _sender: *mut c_void, value: Ref) {
     unsafe {
         let element = IOHIDValueGetElement(value);
         let page = IOHIDElementGetUsagePage(element);
         let usage = IOHIDElementGetUsage(element);
         let down = IOHIDValueGetIntegerValue(value) != 0;
+        let apple = context == APPLE_KEYBOARD;
+        if apple && PAGES_APPLE_FN.contains(&page) && usage == USAGE_APPLE_FN {
+            FN_HELD.store(down, Ordering::SeqCst);
+            return;
+        }
+        if apple && page == PAGE_KEYBOARD && (u32::from(F1)..=u32::from(F12)).contains(&usage) {
+            send(&FromHelper::FunctionKey {
+                usage: usage as u16,
+                down,
+                fn_held: FN_HELD.load(Ordering::SeqCst),
+            });
+            return;
+        }
         if page == PAGE_CONSUMER {
             if let Some((_, key)) = CONSUMER_KEYS.iter().find(|(u, _)| *u == usage) {
                 send(&FromHelper::Media { key: *key, down });
@@ -193,7 +239,12 @@ impl Keyboards {
                 CFRelease(device.cast());
                 return;
             }
-            IOHIDDeviceRegisterInputValueCallback(device, Some(key_callback), std::ptr::null_mut());
+            let context = if is_apple(device) {
+                APPLE_KEYBOARD
+            } else {
+                std::ptr::null_mut()
+            };
+            IOHIDDeviceRegisterInputValueCallback(device, Some(key_callback), context);
             IOHIDDeviceScheduleWithRunLoop(device, self.run_loop, kCFRunLoopDefaultMode);
         }
         self.seized.push(device);
@@ -219,6 +270,7 @@ impl Keyboards {
 
     fn release(&mut self) {
         self.active = false;
+        FN_HELD.store(false, Ordering::SeqCst);
         for device in self.seized.drain(..) {
             unsafe {
                 IOHIDDeviceRegisterInputValueCallback(device, None, std::ptr::null_mut());

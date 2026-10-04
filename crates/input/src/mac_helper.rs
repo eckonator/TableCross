@@ -2,6 +2,7 @@
 //! take the keyboards while the pointer is on another computer, and hands its keys to the capture
 //! handler. Without the helper everything works as before, except while Secure Input is active.
 
+use std::collections::BTreeSet;
 use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,8 +11,18 @@ use std::time::Duration;
 
 use tc_core::Captured;
 
+use core_foundation_sys::base::{CFGetTypeID, CFRelease, CFTypeRef};
+use core_foundation_sys::number::{
+    CFBooleanGetTypeID, CFBooleanGetValue, CFBooleanRef, CFNumberGetTypeID, CFNumberGetValue, CFNumberRef,
+    kCFNumberSInt32Type,
+};
+use core_foundation_sys::preferences::{
+    CFPreferencesAppSynchronize, CFPreferencesCopyAppValue, kCFPreferencesAnyApplication,
+};
+use core_foundation_sys::string::{CFStringCreateWithCString, kCFStringEncodingUTF8};
+
 use crate::helper_protocol::{
-    ALIVE_INTERVAL, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
+    ALIVE_INTERVAL, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, top_row, write_frame,
 };
 
 const RECONNECT: Duration = Duration::from_secs(2);
@@ -80,6 +91,8 @@ impl HelperClient {
             version: HELPER_VERSION,
         });
         let mut reader = BufReader::new(reader);
+        // Top-row keys that went down as media keys, so they also come up as such
+        let mut media_down = BTreeSet::new();
         while let Ok(message) = read_frame::<FromHelper>(&mut reader) {
             match message {
                 FromHelper::Hello { version, access } => {
@@ -101,6 +114,21 @@ impl HelperClient {
                 }
                 FromHelper::Key { usage, down } => on_key(Captured::Key { usage, down }),
                 FromHelper::Media { key, down } => on_key(Captured::Media { key, down }),
+                FromHelper::FunctionKey { usage, down, fn_held } => {
+                    let media = if down {
+                        top_row(usage, fn_held, fn_keys_standard()).inspect(|_| {
+                            media_down.insert(usage);
+                        })
+                    } else if media_down.remove(&usage) {
+                        top_row(usage, false, false)
+                    } else {
+                        None
+                    };
+                    match media {
+                        Some(key) => on_key(Captured::Media { key, down }),
+                        None => on_key(Captured::Key { usage, down }),
+                    }
+                }
                 FromHelper::Status {
                     seized,
                     devices,
@@ -135,5 +163,34 @@ impl HelperClient {
 
     pub fn status(&self) -> HelperStatus {
         self.status.lock().expect("helper status").clone()
+    }
+}
+
+/// The setting "Use F1, F2, etc. keys as standard function keys" (System Settings → Keyboard).
+fn fn_keys_standard() -> bool {
+    unsafe {
+        CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            c"com.apple.keyboard.fnState".as_ptr(),
+            kCFStringEncodingUTF8,
+        );
+        let value: CFTypeRef = CFPreferencesCopyAppValue(key, kCFPreferencesAnyApplication);
+        CFRelease(key.cast());
+        if value.is_null() {
+            return false;
+        }
+        let kind = CFGetTypeID(value);
+        let on = if kind == CFBooleanGetTypeID() {
+            CFBooleanGetValue(value as CFBooleanRef)
+        } else if kind == CFNumberGetTypeID() {
+            let mut n = 0i32;
+            CFNumberGetValue(value as CFNumberRef, kCFNumberSInt32Type, (&mut n as *mut i32).cast());
+            n != 0
+        } else {
+            false
+        };
+        CFRelease(value);
+        on
     }
 }

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 /// Changed on incompatible changes; app and helper must match.
-pub const HELPER_VERSION: u16 = 2;
+pub const HELPER_VERSION: u16 = 3;
 pub const SOCKET_PATH: &str = "/var/run/de.eckonator.tablecross.helper.sock";
 
 /// `TC_HELPER_SOCKET` overrides the path (tests).
@@ -58,6 +58,10 @@ pub enum FromHelper {
     Key { usage: u16, down: bool },
     /// A media key of a taken keyboard (consumer page).
     Media { key: tc_protocol::MediaKey, down: bool },
+    /// F1–F12 of an Apple keyboard. Taken away from the system it reports the top row as plain
+    /// function keys; whether a key means volume, brightness … is decided by `fn_held` and the
+    /// user's setting, see [`top_row`].
+    FunctionKey { usage: u16, down: bool, fn_held: bool },
     /// Current state after every change.
     Status {
         seized: bool,
@@ -66,6 +70,39 @@ pub enum FromHelper {
         /// Keyboards that could not be taken (their keys also reach the system).
         failed: u16,
     },
+}
+
+/// F1 … F12 (USB HID usages).
+pub const F1: u16 = 0x3A;
+pub const F12: u16 = 0x45;
+
+/// What the top row of Apple keyboards does without fn (F1 … F12); `None` keeps the function key.
+const TOP_ROW: [Option<tc_protocol::MediaKey>; 12] = {
+    use tc_protocol::MediaKey::*;
+    [
+        Some(BrightnessDown),
+        Some(BrightnessUp),
+        None,
+        None,
+        None,
+        None,
+        Some(Previous),
+        Some(PlayPause),
+        Some(Next),
+        Some(Mute),
+        Some(VolumeDown),
+        Some(VolumeUp),
+    ]
+};
+
+/// The media key meant by F1 … F12 of an Apple keyboard, or `None` for the plain function key.
+/// `fn_keys_standard` is the setting "Use F1, F2, etc. keys as standard function keys": then fn
+/// selects the media key, otherwise it selects the function key.
+pub fn top_row(usage: u16, fn_held: bool, fn_keys_standard: bool) -> Option<tc_protocol::MediaKey> {
+    if !(F1..=F12).contains(&usage) || fn_held != fn_keys_standard {
+        return None;
+    }
+    TOP_ROW[usize::from(usage - F1)]
 }
 
 /// Length (u16 little endian) and postcard bytes.
@@ -142,6 +179,21 @@ mod tests {
             FromHelper::Key { usage: 4, down: true }
         );
         assert!(read_frame::<ToHelper>(&mut cursor).is_err());
+    }
+
+    #[test]
+    fn apple_top_row_follows_fn_and_the_setting() {
+        use tc_protocol::MediaKey;
+        const F11: u16 = 0x44;
+        assert_eq!(top_row(F12, false, false), Some(MediaKey::VolumeUp));
+        assert_eq!(top_row(F11, false, false), Some(MediaKey::VolumeDown));
+        assert_eq!(top_row(F1, false, false), Some(MediaKey::BrightnessDown));
+        assert_eq!(top_row(F11, true, false), None);
+        assert_eq!(top_row(F11, false, true), None);
+        assert_eq!(top_row(F11, true, true), Some(MediaKey::VolumeDown));
+        // Mission Control and friends stay function keys
+        assert_eq!(top_row(F1 + 2, false, false), None);
+        assert_eq!(top_row(0x04, false, false), None);
     }
 
     #[test]

@@ -291,6 +291,12 @@ impl Engine {
                         self.leave_remote(&target, &mut actions);
                         actions.push(Action::Ungrab { at: exit });
                     }
+                    // Another leader comes in: the previous one must stop, otherwise it keeps its
+                    // pointer hidden and sends moves that are ignored here
+                    Mode::Controlled { by, .. } if by != from => actions.push(Action::Send {
+                        to: by.clone(),
+                        message: Message::TakeOver,
+                    }),
                     Mode::Controlled { .. } | Mode::Local => {}
                 }
                 self.release_injected(&mut actions);
