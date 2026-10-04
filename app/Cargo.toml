@@ -28,6 +28,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # On Linux the status icon talks StatusNotifierItem over D-Bus (no GTK needed)
 tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Window frame with real buttons where the compositor leaves decorations to the app (GNOME on Wayland)
+winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }

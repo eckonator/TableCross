@@ -42,6 +42,16 @@ pub fn bring_to_front() {
     }
 }
 
+/// Linux: Wayland cannot hide a window at all, and GNOME shows the status icon only with an
+/// extension. Minimizing works everywhere and keeps the window reachable from the dock or taskbar.
+pub fn hide_window(ctx: &egui::Context) {
+    if cfg!(target_os = "linux") {
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+    } else {
+        ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+    }
+}
+
 fn show_window(ctx: &egui::Context) {
     bring_to_front();
     ctx.send_viewport_cmd(ViewportCommand::Visible(true));

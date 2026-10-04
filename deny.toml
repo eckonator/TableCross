@@ -18,6 +18,9 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "unmaintained only, no newer release of its users yet" },
     { id = "RUSTSEC-2026-0371", reason = "unmaintained only, no newer release of its users yet" },
     { id = "RUSTSEC-2026-0372", reason = "unmaintained only, no newer release of its users yet" },
+    # ttf-parser draws the title of the Wayland window frame (winit -> sctk-adwaita -> ab_glyph) and only
+    # reads system fonts
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained only, no newer release of its users yet" },
 ]
 
 [licenses]

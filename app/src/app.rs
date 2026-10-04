@@ -176,7 +176,7 @@ impl App {
             }
         }
         if background && app.has_tray() {
-            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            crate::tray::hide_window(&ctx);
         }
         app
     }
@@ -659,7 +659,7 @@ impl eframe::App for App {
             && self.has_tray()
         {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            crate::tray::hide_window(&ctx);
         }
         if self.background {
             self.background = false;
