@@ -173,6 +173,10 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Update together with paired computers" => "Mit gekoppelten Rechnern aktualisieren",
+        "When a paired computer runs a newer version, this one fetches the same version from GitHub and installs it." => {
+            "Hat ein gekoppelter Rechner eine neuere Version, holt dieser Rechner dieselbe Version von GitHub und installiert sie."
+        }
         "Check for updates" => "Nach Updates suchen",
         "TableCross {} is up to date." => "TableCross {} ist aktuell.",
         "GitHub could not be reached; try again later." => {

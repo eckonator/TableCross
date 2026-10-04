@@ -58,6 +58,10 @@ pub struct App {
     update_job: Option<std::sync::mpsc::Receiver<Result<Option<crate::update::NewVersion>, ()>>>,
     /// The running check was asked for by hand: say what came out.
     update_manual: bool,
+    /// A paired computer runs this newer version: install it as soon as the check finds it.
+    follow_peer: Option<String>,
+    /// Newer peer versions already followed (once each).
+    followed: Vec<String>,
     update_checked: Option<Instant>,
     /// Installing a new version from inside the app, and how far it got.
     self_update: Option<std::sync::mpsc::Receiver<crate::self_update::Progress>>,
@@ -129,6 +133,8 @@ impl App {
             new_version: None,
             update_job: None,
             update_manual: false,
+            follow_peer: None,
+            followed: Vec::new(),
             update_checked: None,
             self_update: None,
             remove_settings: true,
@@ -424,11 +430,21 @@ impl App {
                         self.show_info(i18n::trf("TableCross {} is up to date.", &[&env!("CARGO_PKG_VERSION")]));
                     }
                     self.new_version = new;
+                    // Started because a paired computer is newer: install right away
+                    if let (Some(target), Some(found)) = (self.follow_peer.take(), &self.new_version)
+                        && found.asset.is_some()
+                        && !crate::update::newer(&target, &found.version)
+                        && self.update_progress.is_none()
+                    {
+                        tracing::info!("updating to {} like a paired computer", found.version);
+                        self.install_update(ctx);
+                    }
                 }
                 Err(()) if manual => self.show_info(tr("GitHub could not be reached; try again later.")),
                 Err(()) => {}
             }
         }
+        self.follow_peers(ctx);
         if let Some(tray) = &self.tray {
             let version = self
                 .new_version
@@ -455,6 +471,35 @@ impl App {
             self.update_checked = Some(Instant::now());
             self.update_job = Some(crate::update::check_in_background(ctx.clone()));
         }
+    }
+
+    /// A paired computer runs a newer version: look for it now (and install it when found).
+    fn follow_peers(&mut self, ctx: &egui::Context) {
+        if !self.settings.update_with_peers || self.demo.is_some() || self.update_job.is_some() {
+            return;
+        }
+        let newest = self
+            .status
+            .peers
+            .iter()
+            .filter_map(|p| p.link.as_ref().map(|l| l.app_version.clone()))
+            .filter(|v| crate::update::newer(v, env!("CARGO_PKG_VERSION")))
+            .max_by(|a, b| {
+                if crate::update::newer(a, b) {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                }
+            });
+        let Some(version) = newest else { return };
+        if self.followed.contains(&version) {
+            return;
+        }
+        tracing::info!("a paired computer runs {version}, looking for it");
+        self.followed.push(version.clone());
+        self.follow_peer = Some(version);
+        self.update_checked = Some(Instant::now());
+        self.update_job = Some(crate::update::check_in_background(ctx.clone()));
     }
 
     /// Looks for a new version now (button), also if regular checks are off.

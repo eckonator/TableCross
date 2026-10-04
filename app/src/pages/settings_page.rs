@@ -69,6 +69,18 @@ impl App {
                         self.check_button(ui);
                     });
                     ui.end_row();
+                    ui.label("");
+                    changed |= ui
+                        .checkbox(
+                            &mut self.settings.update_with_peers,
+                            tr("Update together with paired computers"),
+                        )
+                        .on_hover_text(tr(
+                            "When a paired computer runs a newer version, this one fetches the same version from \
+                             GitHub and installs it.",
+                        ))
+                        .changed();
+                    ui.end_row();
 
                     ui.label(tr("Start"));
                     if ui

@@ -46,6 +46,8 @@ pub struct Settings {
     pub clipboard_max_mb: u32,
     /// Look for new versions on GitHub (`None`: not asked yet).
     pub update_check: Option<bool>,
+    /// Update by itself when a paired computer runs a newer version.
+    pub update_with_peers: bool,
     /// Where the desk sits in the arrangement grid (view only, the arrangement stays the same).
     pub desk_shift: (i32, i32),
 }
@@ -63,6 +65,7 @@ impl Default for Settings {
             clipboard: true,
             clipboard_max_mb: 50,
             update_check: None,
+            update_with_peers: true,
             desk_shift: (0, 0),
         }
     }
@@ -104,6 +107,7 @@ impl Settings {
             clipboard: field(&fields, "clipboard", d.clipboard),
             clipboard_max_mb: field(&fields, "clipboard_max_mb", d.clipboard_max_mb).clamp(1, 64),
             update_check: field(&fields, "update_check", d.update_check),
+            update_with_peers: field(&fields, "update_with_peers", d.update_with_peers),
             desk_shift: {
                 let (x, y) = field(&fields, "desk_shift", d.desk_shift);
                 (x.clamp(-20, 20), y.clamp(-20, 20))
