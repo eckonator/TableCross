@@ -16,7 +16,10 @@ impl App {
             } else {
                 trf("Test build {} ({})", &[&env!("CARGO_PKG_VERSION"), &commit])
             };
-            ui.label(version);
+            ui.horizontal(|ui| {
+                ui.label(version);
+                self.check_button(ui);
+            });
             ui.add_space(4.0);
             ui.label(tr(
                 "Shares one mouse, keyboard and clipboard between the computers on your desk, \

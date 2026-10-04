@@ -173,6 +173,11 @@ fn de(en: &str) -> Option<&'static str> {
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
+        "Check for updates" => "Nach Updates suchen",
+        "TableCross {} is up to date." => "TableCross {} ist aktuell.",
+        "GitHub could not be reached; try again later." => {
+            "GitHub war nicht erreichbar; bitte später noch einmal versuchen."
+        }
         "used in turn" => "abwechselnd hier",
         "Update to {}" => "Auf {} aktualisieren",
         "Updating …" => "Wird aktualisiert …",

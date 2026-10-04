@@ -32,14 +32,15 @@ pub struct NewVersion {
     pub asset: Option<String>,
 }
 
-/// Starts the check in the background; the result comes through the receiver (`None`: nothing new).
-pub fn check_in_background(ctx: egui::Context) -> Receiver<Option<NewVersion>> {
+/// Starts the check in the background; the result comes through the receiver (`Ok(None)`: nothing
+/// new, `Err`: GitHub not reachable).
+pub fn check_in_background(ctx: egui::Context) -> Receiver<Result<Option<NewVersion>, ()>> {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("tablecross-update".into())
         .spawn(move || {
             let result = check();
-            if let Some(v) = &result {
+            if let Ok(Some(v)) = &result {
                 tracing::info!("newer version available: {} ({})", v.version, v.url);
             }
             let _ = tx.send(result);
@@ -49,7 +50,7 @@ pub fn check_in_background(ctx: egui::Context) -> Receiver<Option<NewVersion>> {
     rx
 }
 
-fn check() -> Option<NewVersion> {
+fn check() -> Result<Option<NewVersion>, ()> {
     // TC_UPDATE_URL (debug builds only): another source, e.g. a local JSON file for testing
     let url = std::env::var("TC_UPDATE_URL")
         .ok()
@@ -72,17 +73,17 @@ fn check() -> Option<NewVersion> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let out = cmd.output().ok().filter(|o| o.status.success())?;
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let out = cmd.output().ok().filter(|o| o.status.success()).ok_or(())?;
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| ())?;
     let release = json.as_array().and_then(|a| newest(a)).unwrap_or(&json);
-    newer_release(
+    Ok(newer_release(
         release,
         env!("CARGO_PKG_VERSION"),
         // A release is new only with a higher version
         if is_release() { "" } else { env!("TC_GIT_HASH") },
         env!("TC_GIT_TIME"),
         crate::self_update::asset_suffix(),
-    )
+    ))
 }
 
 /// The release published last ("2026-…" times sort as text).

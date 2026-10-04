@@ -55,7 +55,9 @@ pub struct App {
     logo: Option<egui::TextureHandle>,
     /// A newer version found on GitHub.
     pub new_version: Option<crate::update::NewVersion>,
-    update_job: Option<std::sync::mpsc::Receiver<Option<crate::update::NewVersion>>>,
+    update_job: Option<std::sync::mpsc::Receiver<Result<Option<crate::update::NewVersion>, ()>>>,
+    /// The running check was asked for by hand: say what came out.
+    update_manual: bool,
     update_checked: Option<Instant>,
     /// Installing a new version from inside the app, and how far it got.
     self_update: Option<std::sync::mpsc::Receiver<crate::self_update::Progress>>,
@@ -126,6 +128,7 @@ impl App {
             logo,
             new_version: None,
             update_job: None,
+            update_manual: false,
             update_checked: None,
             self_update: None,
             remove_settings: true,
@@ -413,8 +416,18 @@ impl App {
         if let Some(job) = &self.update_job
             && let Ok(result) = job.try_recv()
         {
-            self.new_version = result;
             self.update_job = None;
+            let manual = std::mem::take(&mut self.update_manual);
+            match result {
+                Ok(new) => {
+                    if manual && new.is_none() {
+                        self.show_info(i18n::trf("TableCross {} is up to date.", &[&env!("CARGO_PKG_VERSION")]));
+                    }
+                    self.new_version = new;
+                }
+                Err(()) if manual => self.show_info(tr("GitHub could not be reached; try again later.")),
+                Err(()) => {}
+            }
         }
         if let Some(tray) = &self.tray {
             let version = self
@@ -442,6 +455,20 @@ impl App {
             self.update_checked = Some(Instant::now());
             self.update_job = Some(crate::update::check_in_background(ctx.clone()));
         }
+    }
+
+    /// Looks for a new version now (button), also if regular checks are off.
+    pub fn check_updates_now(&mut self, ctx: &egui::Context) {
+        if self.update_job.is_some() || self.demo.is_some() {
+            return;
+        }
+        self.update_manual = true;
+        self.update_checked = Some(Instant::now());
+        self.update_job = Some(crate::update::check_in_background(ctx.clone()));
+    }
+
+    pub fn checking_updates(&self) -> bool {
+        self.update_job.is_some()
     }
 
     pub fn install_update(&mut self, ctx: &egui::Context) {

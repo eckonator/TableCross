@@ -60,11 +60,14 @@ impl App {
                     ui.end_row();
 
                     ui.label(tr("Updates"));
-                    let mut check = self.settings.update_check == Some(true);
-                    if ui.checkbox(&mut check, tr("Look for new versions on GitHub")).changed() {
-                        self.settings.update_check = Some(check);
-                        changed = true;
-                    }
+                    ui.horizontal(|ui| {
+                        let mut check = self.settings.update_check == Some(true);
+                        if ui.checkbox(&mut check, tr("Look for new versions on GitHub")).changed() {
+                            self.settings.update_check = Some(check);
+                            changed = true;
+                        }
+                        self.check_button(ui);
+                    });
                     ui.end_row();
 
                     ui.label(tr("Start"));
@@ -194,6 +197,16 @@ impl App {
         card(ui, tr("Remove TableCross"), |ui| self.removal_card(ui));
         if changed {
             self.save_settings();
+        }
+    }
+
+    /// "Check for updates", with a spinner while it runs.
+    pub fn check_button(&mut self, ui: &mut egui::Ui) {
+        if self.checking_updates() {
+            ui.spinner();
+        } else if ui.button(tr("Check for updates")).clicked() {
+            let ctx = ui.ctx().clone();
+            self.check_updates_now(&ctx);
         }
     }
 
