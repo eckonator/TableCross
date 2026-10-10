@@ -131,15 +131,46 @@ impl Settings {
     }
 }
 
-/// Host name without domain ("office-mac.fritz.box" → "office-mac").
+/// The name of this computer: on macOS the one in System Settings (General → About), which no
+/// router can change; elsewhere the host name without domain ("office-pc.fritz.box" → "office-pc").
 pub fn host_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(name) = mac_computer_name() {
+        return name;
+    }
     let name = gethostname::gethostname().to_string_lossy().into_owned();
     name.split('.').next().unwrap_or_default().to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn mac_computer_name() -> Option<String> {
+    use core_foundation_sys::base::{CFRelease, CFTypeRef};
+    use core_foundation_sys::string::{CFStringGetCString, CFStringRef, kCFStringEncodingUTF8};
+    #[link(name = "SystemConfiguration", kind = "framework")]
+    unsafe extern "C" {
+        fn SCDynamicStoreCopyComputerName(store: CFTypeRef, encoding: *mut u32) -> CFStringRef;
+    }
+    unsafe {
+        let name = SCDynamicStoreCopyComputerName(std::ptr::null(), std::ptr::null_mut());
+        if name.is_null() {
+            return None;
+        }
+        let mut buf = [0 as std::ffi::c_char; 256];
+        let ok = CFStringGetCString(name, buf.as_mut_ptr(), buf.len() as _, kCFStringEncodingUTF8) != 0;
+        CFRelease(name.cast());
+        let text = std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().trim().to_string();
+        (ok && !text.is_empty()).then_some(text)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn this_computer_has_a_name() {
+        assert!(!host_name().is_empty());
+    }
 
     #[test]
     fn broken_fields_keep_the_others() {

@@ -541,7 +541,7 @@ impl Engine {
                     return;
                 };
                 let Some(side) = mine.exit_side(p, Point::new(p.x + dx, p.y + dy)) else {
-                    self.edge_push = None;
+                    self.end_push_if_away(dx, dy);
                     return;
                 };
                 if mine.corner_distance(side, p) < self.layout.corner {
@@ -587,7 +587,7 @@ impl Engine {
                 let here = screens.screen_at(pos);
                 let to = Point::new(pos.x + lx * here.scale, pos.y + ly * here.scale);
                 let Some(side) = screens.exit_side(pos, to) else {
-                    self.edge_push = None;
+                    self.end_push_if_away(lx, ly);
                     self.set_position(&target, to, lx, ly, actions);
                     return;
                 };
@@ -622,6 +622,21 @@ impl Engine {
                 }
             }
             Mode::Controlled { .. } => {}
+        }
+    }
+
+    /// Moving away from the edge ends a push; sideways motion while pushing does not (a mouse sends
+    /// many events without a vertical part even when it is pushed up or down).
+    fn end_push_if_away(&mut self, dx: f64, dy: f64) {
+        let away = match self.edge_push.as_ref().map(|p| p.side) {
+            Some(Side::Top) => dy > 0.0,
+            Some(Side::Bottom) => dy < 0.0,
+            Some(Side::Left) => dx > 0.0,
+            Some(Side::Right) => dx < 0.0,
+            None => false,
+        };
+        if away {
+            self.edge_push = None;
         }
     }
 

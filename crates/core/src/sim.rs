@@ -619,6 +619,21 @@ fn top_and_bottom_edges_need_a_moment_of_pushing() {
     assert_eq!(sim.role("imac"), Role::Controlling("below".into()), "only a short push");
     sim.glide("imac", 0.0, -400.0);
     assert_eq!(sim.role("imac"), Role::Idle);
+    // Pushing with a real mouse: many events have no vertical part at all
+    for _ in 0..80 {
+        sim.mouse("imac", 0.0, 12.0);
+        sim.mouse("imac", 3.0, 0.0);
+    }
+    assert_eq!(
+        sim.role("imac"),
+        Role::Controlling("below".into()),
+        "sideways jitter must not stop the push"
+    );
+    for _ in 0..80 {
+        sim.mouse("imac", 0.0, -12.0);
+        sim.mouse("imac", -3.0, 0.0);
+    }
+    assert_eq!(sim.role("imac"), Role::Idle);
     // Left edge: at once, as before
     sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(10.0, 400.0);
     sim.glide("imac", -20.0, 0.0);
