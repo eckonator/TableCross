@@ -231,6 +231,9 @@ impl App {
             });
         match runtime.block_on(tc_session::Session::start(config, backend, clipboard, Some(on_change))) {
             Ok((handle, task)) => {
+                if self.settings.collect_logs {
+                    handle.send(Command::CollectLogs(true));
+                }
                 self.session = Some(handle);
                 self.task = Some(task);
             }

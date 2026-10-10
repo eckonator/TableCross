@@ -6,6 +6,7 @@ use super::card;
 use crate::app::App;
 use crate::i18n::{tr, trf};
 use crate::settings::{LangSetting, ThemeSetting, host_name};
+use tc_session::Command;
 
 impl App {
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
@@ -204,6 +205,32 @@ impl App {
                     super::open(&log.display().to_string());
                 }
             });
+        });
+        ui.add_space(14.0);
+        card(ui, tr("Troubleshooting"), |ui| {
+            if ui
+                .checkbox(
+                    &mut self.settings.collect_logs,
+                    tr("Collect the logs of the other computers here"),
+                )
+                .changed()
+            {
+                changed = true;
+                self.send(Command::CollectLogs(self.settings.collect_logs));
+            }
+            ui.label(
+                RichText::new(tr(
+                    "The connected computers send their log to this one while it is on, so a problem can be \
+                     looked at in one place. Only on paired computers, over the encrypted connection; the logs \
+                     contain no typed text.",
+                ))
+                .weak(),
+            );
+            let folder = tc_session::peer_logs::folder(&self.dir);
+            if ui.button(tr("Open the folder with the collected logs")).clicked() {
+                let _ = std::fs::create_dir_all(&folder);
+                super::open(&folder.display().to_string());
+            }
         });
         ui.add_space(14.0);
         card(ui, tr("Remove TableCross"), |ui| self.removal_card(ui));

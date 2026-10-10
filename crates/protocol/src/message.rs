@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on every incompatible change; both sides compare it in `Message::Hello`.
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Largest message in bytes. Larger payloads (clipboard, files) are sent in chunks.
 pub const MAX_MESSAGE_LEN: usize = 64 * 1024;
@@ -194,7 +194,18 @@ pub enum Message {
         placements: Vec<Placement>,
         names: Vec<(String, String)>,
     },
+    /// The sender collects the logs of its peers for troubleshooting (`on`) or stops doing so.
+    LogSubscribe {
+        on: bool,
+    },
+    /// New lines of the sender's log, for a peer that subscribed. At most `MAX_LOG_TEXT` bytes.
+    LogLines {
+        text: String,
+    },
 }
+
+/// Longest text in one `Message::LogLines`.
+pub const MAX_LOG_TEXT: usize = 32 * 1024;
 
 impl Message {
     /// Messages that may travel as unreliable datagrams. Everything else needs the ordered stream.
@@ -223,6 +234,7 @@ impl Message {
             Message::Layout { placements, names, .. } => {
                 placements.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS
             }
+            Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
             _ => true,
         }
     }
@@ -328,6 +340,10 @@ mod tests {
                 size: 1234,
             },
             Message::ClipboardRequest { id: 9 },
+            Message::LogSubscribe { on: true },
+            Message::LogLines {
+                text: "2026-10-19T07:55:13Z INFO input is local\n".into(),
+            },
             Message::FilesOffer {
                 id: 3,
                 names: vec!["Fotos".into()],

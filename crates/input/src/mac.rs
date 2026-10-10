@@ -459,6 +459,7 @@ extern "C" fn tap_callback(_proxy: Ref, kind: u32, event: Ref, user_info: *mut c
     if unsafe { CGEventGetIntegerValueField(event, SOURCE_USER_DATA) } == OWN_EVENTS {
         return event;
     }
+    let started = Instant::now();
     let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut pass = true;
         let Ok(mut handler) = context.handler.lock() else {
@@ -472,6 +473,11 @@ extern "C" fn tap_callback(_proxy: Ref, kind: u32, event: Ref, user_info: *mut c
     .unwrap_or(true);
     if matches!(kind, MOUSE_MOVED | LEFT_DRAGGED | RIGHT_DRAGGED | OTHER_DRAGGED) {
         keep_parked(&context.shared, event);
+    }
+    // Every event of the system waits for this callback: a slow one makes keyboard and mouse lag
+    let took = started.elapsed();
+    if took > SLOW_CALLBACK {
+        log_slow(kind, took);
     }
     if pass { event } else { std::ptr::null_mut() }
 }
@@ -491,6 +497,27 @@ fn keep_parked(shared: &Shared, event: Ref) {
             CGAssociateMouseAndMouseCursorPosition(false);
             CGWarpMouseCursorPosition(park);
             CGAssociateMouseAndMouseCursorPosition(false);
+        }
+    }
+}
+
+/// Longer than this in the tap callback is worth a log line.
+const SLOW_CALLBACK: Duration = Duration::from_millis(50);
+
+fn log_slow(kind: u32, took: Duration) {
+    static LAST: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    match &mut *last {
+        Some((at, skipped)) if at.elapsed() < Duration::from_secs(5) => *skipped += 1,
+        _ => {
+            let skipped = last.map_or(0, |(_, skipped)| skipped);
+            tracing::warn!(
+                "event tap callback took {} ms (event type {kind}, {skipped} more before)",
+                took.as_millis()
+            );
+            *last = Some((Instant::now(), 0));
         }
     }
 }

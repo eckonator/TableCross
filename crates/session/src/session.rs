@@ -21,6 +21,7 @@ use tokio::task::JoinHandle;
 use crate::clip::{self, ClipAction, ClipSync, Clipboard, Skip};
 use crate::files::{self, Listing};
 use crate::layout_file;
+use crate::peer_logs;
 use crate::transfer::{self, Cancels, Progress, TransferState, TransferView};
 
 const ESCAPE: u16 = 0x29;
@@ -94,6 +95,8 @@ pub enum Command {
     /// Try to start input capture again (after granting a permission).
     RetryInput,
     CancelTransfer(u64),
+    /// Collect the logs of the connected computers in `logs/peers` (troubleshooting), or stop.
+    CollectLogs(bool),
     Shutdown,
 }
 
@@ -272,6 +275,15 @@ struct Shared {
     clipboard: Option<Clipboard>,
     clip: Mutex<ClipSync>,
     files: Mutex<FileState>,
+    logs: Mutex<LogState>,
+}
+
+/// Log collection: whether this computer collects, and who collects ours.
+#[derive(Default)]
+struct LogState {
+    collect: bool,
+    /// Who collects our log, and up to where it got it.
+    subscribers: Vec<(Fingerprint, u64)>,
 }
 
 impl Shared {
@@ -651,6 +663,7 @@ impl Session {
             clipboard,
             clip: Mutex::new(ClipSync::default()),
             files: Mutex::new(FileState::default()),
+            logs: Mutex::new(LogState::default()),
         });
         shared.reload_layout();
         shared.refresh();
@@ -695,11 +708,26 @@ async fn run(
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
     let mut screen_tick = tokio::time::interval(Duration::from_secs(2));
     let mut clip_tick = tokio::time::interval(Duration::from_millis(300));
+    let mut log_tick = tokio::time::interval(Duration::from_secs(1));
     loop {
         tokio::select! {
             event = events.recv() => {
                 let Some(event) = event else { break };
-                handle_event(&shared, event);
+                let mut pending = Some(event);
+                while let Some(event) = pending.take() {
+                    // Positions are absolute: when several wait, only the newest is injected, so
+                    // a flood from the other computer cannot clog the local input queue
+                    if is_mouse_move(&event)
+                        && let Ok(next) = events.try_recv()
+                    {
+                        if !(is_mouse_move(&next) && same_peer(&event, &next)) {
+                            handle_event(&shared, event);
+                        }
+                        pending = Some(next);
+                        continue;
+                    }
+                    handle_event(&shared, event);
+                }
             }
             command = commands.recv() => {
                 match command {
@@ -793,6 +821,7 @@ async fn run(
                 shared.changed();
             }
             _ = clip_tick.tick() => clip_poll(&shared),
+            _ = log_tick.tick() => send_log_lines(&shared),
             _ = screen_tick.tick() => {
                 if let Some(inject) = &shared.inject {
                     let now = inject.screens();
@@ -815,6 +844,19 @@ async fn run(
         capture.stop();
     }
     shared.node.shutdown().await;
+}
+
+/// New lines of our log to the computers that collect it.
+fn send_log_lines(shared: &Arc<Shared>) {
+    let mut outgoing = Vec::new();
+    for (peer, position) in &mut shared.logs.lock().expect("logs lock").subscribers {
+        outgoing.push((*peer, peer_logs::since(position)));
+    }
+    for (peer, texts) in outgoing {
+        for text in texts {
+            shared.node.send(&peer, Message::LogLines { text });
+        }
+    }
 }
 
 fn files_offer(id: u64, listing: &Listing, dropped: bool) -> Message {
@@ -1115,6 +1157,20 @@ fn power_off_all(shared: &Arc<Shared>, this_one: bool) {
     }
 }
 
+fn is_mouse_move(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Message {
+            message: Message::MouseMove { .. },
+            ..
+        }
+    )
+}
+
+fn same_peer(a: &Event, b: &Event) -> bool {
+    matches!((a, b), (Event::Message { peer: p, .. }, Event::Message { peer: q, .. }) if p == q)
+}
+
 fn handle_event(shared: &Arc<Shared>, event: Event) {
     match event {
         Event::Connected {
@@ -1141,6 +1197,9 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .peer_online(&peer.to_string(), &screens);
             shared.reload_layout();
             shared.share_layout_with(&peer);
+            if shared.logs.lock().expect("logs lock").collect {
+                shared.node.send(&peer, Message::LogSubscribe { on: true });
+            }
             shared.notice(Notice::Connected(name));
         }
         Event::Disconnected { peer, reason } => {
@@ -1150,6 +1209,12 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .expect("engine lock")
                 .peer_offline(&peer.to_string());
             shared.execute(actions);
+            shared
+                .logs
+                .lock()
+                .expect("logs lock")
+                .subscribers
+                .retain(|(p, _)| *p != peer);
             if !matches!(reason, Disconnect::Replaced) {
                 shared.notice(Notice::Disconnected(shared.name_of(&peer.to_string()), reason));
             }
@@ -1231,6 +1296,37 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
         } => {
             tracing::info!("{} locks all screens", shared.name_of(&peer.to_string()));
             lock_here();
+        }
+        Event::Message {
+            peer,
+            message: Message::LogSubscribe { on },
+        } => {
+            tracing::info!(
+                "{} {} this computer's log",
+                shared.name_of(&peer.to_string()),
+                if on { "collects" } else { "no longer collects" }
+            );
+            let mut logs = shared.logs.lock().expect("logs lock");
+            logs.subscribers.retain(|(p, _)| *p != peer);
+            if on {
+                let (backlog, position) = peer_logs::backlog();
+                logs.subscribers.push((peer, position));
+                drop(logs);
+                for text in backlog {
+                    shared.node.send(&peer, Message::LogLines { text });
+                }
+            }
+        }
+        Event::Message {
+            peer,
+            message: Message::LogLines { text },
+        } => {
+            if shared.logs.lock().expect("logs lock").collect {
+                let folder = peer_logs::folder(&shared.dir);
+                if let Err(e) = peer_logs::store(&folder, &shared.name_of(&peer.to_string()), &text) {
+                    tracing::warn!("cannot store a peer's log: {e}");
+                }
+            }
         }
         Event::Message {
             peer,
@@ -1330,6 +1426,18 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
         }
         Command::LockAll => lock_all(shared),
         Command::PowerOff { this_one } => power_off_all(shared, this_one),
+        Command::CollectLogs(on) => {
+            let mut logs = shared.logs.lock().expect("logs lock");
+            if logs.collect == on {
+                return;
+            }
+            logs.collect = on;
+            drop(logs);
+            tracing::info!("collecting the logs of the other computers: {on}");
+            for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
+                shared.node.send(&peer.peer.fingerprint, Message::LogSubscribe { on });
+            }
+        }
         Command::ReleaseAll => {
             let actions = shared.engine.lock().expect("engine lock").release_everything();
             shared.execute(actions);

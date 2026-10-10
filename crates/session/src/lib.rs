@@ -6,6 +6,7 @@ mod files;
 #[cfg(target_os = "macos")]
 pub mod helper_install;
 pub mod layout_file;
+pub mod peer_logs;
 mod session;
 mod transfer;
 

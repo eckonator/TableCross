@@ -25,8 +25,12 @@ fn screen() -> Screen {
     }
 }
 
+fn dir_of(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("tablecross-session-{name}-{}", std::process::id()))
+}
+
 fn dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("tablecross-session-{name}-{}", std::process::id()));
+    let dir = dir_of(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -490,4 +494,31 @@ async fn cancelling_a_transfer_leaves_nothing_behind() {
     let _ = std::fs::remove_dir_all(&source);
     a.session.send(Command::Shutdown);
     b.session.send(Command::Shutdown);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_collects_the_logs_of_its_peers() {
+    let (a, b) = paired_pair("logs-a", "logs-b").await;
+    // Both sessions share this process; what is recorded reaches A from B
+    crate::peer_logs::record(b"before collecting\n");
+    a.session.send(Command::CollectLogs(true));
+    let folder = crate::peer_logs::folder(&dir_of("logs-a"));
+    let file = folder.join("logs-b.log");
+    until("backlog arrives", || {
+        std::fs::read_to_string(&file).is_ok_and(|t| t.contains("before collecting"))
+    })
+    .await;
+    crate::peer_logs::record(b"new line after subscribing\n");
+    until("new lines arrive", || {
+        std::fs::read_to_string(&file).is_ok_and(|t| t.contains("new line after subscribing"))
+    })
+    .await;
+    // Stopped: nothing more is stored
+    a.session.send(Command::CollectLogs(false));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let before = std::fs::read_to_string(&file).unwrap();
+    crate::peer_logs::record(b"after stopping\n");
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(!std::fs::read_to_string(&file).unwrap()[before.len()..].contains("after stopping"));
+    drop(b);
 }

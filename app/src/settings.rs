@@ -50,6 +50,8 @@ pub struct Settings {
     pub update_with_peers: bool,
     /// Where the desk sits in the arrangement grid (view only, the arrangement stays the same).
     pub desk_shift: (i32, i32),
+    /// Collect the logs of the other computers here (troubleshooting).
+    pub collect_logs: bool,
 }
 
 impl Default for Settings {
@@ -67,6 +69,7 @@ impl Default for Settings {
             update_check: None,
             update_with_peers: true,
             desk_shift: (0, 0),
+            collect_logs: false,
         }
     }
 }
@@ -112,6 +115,7 @@ impl Settings {
                 let (x, y) = field(&fields, "desk_shift", d.desk_shift);
                 (x.clamp(-20, 20), y.clamp(-20, 20))
             },
+            collect_logs: field(&fields, "collect_logs", d.collect_logs),
         }
     }
 

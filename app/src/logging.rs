@@ -51,6 +51,8 @@ impl Write for &RotatingFile {
         }
         let n = state.0.write(buf)?;
         state.1 += n as u64;
+        // For computers that collect this log (troubleshooting)
+        tc_session::peer_logs::record(&buf[..n]);
         Ok(n)
     }
 

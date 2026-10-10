@@ -284,6 +284,12 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
+        "Troubleshooting" => "Fehlersuche",
+        "Collect the logs of the other computers here" => "Protokolle der anderen Rechner hier sammeln",
+        "The connected computers send their log to this one while it is on, so a problem can be looked at in one place. Only on paired computers, over the encrypted connection; the logs contain no typed text." => {
+            "Solange das an ist, schicken die verbundenen Rechner ihr Protokoll an diesen, damit sich ein Problem an einer Stelle untersuchen lässt. Nur unter gekoppelten Rechnern und über die verschlüsselte Verbindung; die Protokolle enthalten keinen getippten Text."
+        }
+        "Open the folder with the collected logs" => "Ordner mit den gesammelten Protokollen öffnen",
         "Show pairing code" => "Kopplungscode zeigen",
         "Share the clipboard with the other computers" => "Zwischenablage mit den anderen Rechnern teilen",
         "Show TableCross" => "TableCross zeigen",
