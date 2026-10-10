@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "secure-input-probe"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "core-foundation-sys",
 ]
@@ -3619,7 +3619,7 @@ dependencies = [
 
 [[package]]
 name = "tablecross"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "eframe",
@@ -3646,7 +3646,7 @@ dependencies = [
 
 [[package]]
 name = "tablecross-cli"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -3664,7 +3664,7 @@ dependencies = [
 
 [[package]]
 name = "tablecross-helper"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "core-foundation-sys",
  "tc-input",
@@ -3672,7 +3672,7 @@ dependencies = [
 
 [[package]]
 name = "tablecross-service"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "tc-input",
  "tc-protocol",
@@ -3690,7 +3690,7 @@ dependencies = [
 
 [[package]]
 name = "tc-clipboard"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "arboard",
  "objc2 0.6.5",
@@ -3705,7 +3705,7 @@ dependencies = [
 
 [[package]]
 name = "tc-core"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -3714,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "tc-input"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "ashpd",
  "core-foundation-sys",
@@ -3737,7 +3737,7 @@ dependencies = [
 
 [[package]]
 name = "tc-net"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "getrandom 0.3.4",
  "hmac",
@@ -3760,7 +3760,7 @@ dependencies = [
 
 [[package]]
 name = "tc-protocol"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "postcard",
  "serde",
@@ -3768,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "tc-session"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "postcard",
