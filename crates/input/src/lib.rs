@@ -99,6 +99,11 @@ pub trait Capture: Send {
     fn start(&mut self, handler: Handler) -> Result<(), InputError>;
     fn stop(&mut self);
     fn health(&self) -> Health;
+    /// The system reports a single push at an edge instead of continuous motion (Wayland
+    /// barriers): edges must switch at once there.
+    fn single_push_at_edges(&self) -> bool {
+        false
+    }
 }
 
 /// The local system's pointer and keyboard.

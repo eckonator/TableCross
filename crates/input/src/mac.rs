@@ -88,6 +88,7 @@ unsafe extern "C" {
     fn CGMainDisplayID() -> u32;
     fn CGDisplayHideCursor(display: u32) -> i32;
     fn CGDisplayShowCursor(display: u32) -> i32;
+    fn CGCursorIsVisible() -> bool;
     fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(display: u32) -> CGRect;
     fn AXIsProcessTrusted() -> bool;
@@ -796,6 +797,7 @@ impl Inject for MacInject {
                 CGDisplayHideCursor(CGMainDisplayID());
                 state.cursor_hidden = true;
             }
+            tracing::info!("pointer hidden and parked (visible now: {})", CGCursorIsVisible());
         }
         Ok(())
     }
@@ -812,6 +814,7 @@ impl Inject for MacInject {
                 CGDisplayShowCursor(CGMainDisplayID());
                 state.cursor_hidden = false;
             }
+            tracing::info!("pointer shown again (visible now: {})", CGCursorIsVisible());
         }
         Ok(())
     }
@@ -819,7 +822,17 @@ impl Inject for MacInject {
     fn inject(&self, message: &Message) -> Result<(), InputError> {
         let mut state = self.shared.inject.lock().expect("inject lock");
         match *message {
-            Message::Enter { x, y } => state.move_to(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0),
+            Message::Enter { x, y } => {
+                state.move_to(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0);
+                // Troubleshooting a pointer that stays invisible on the controlled Mac
+                let visible = unsafe { CGCursorIsVisible() };
+                tracing::info!(
+                    "pointer entered at ({x}, {y}), now at {:?}, visible: {visible}, hidden by us: {}, displays: {:?}",
+                    current_position(),
+                    state.cursor_hidden,
+                    self.screens()
+                );
+            }
             Message::MouseMove { x, y, dx, dy, .. } => {
                 state.move_to(Point::new(f64::from(x), f64::from(y)), f64::from(dx), f64::from(dy))
             }

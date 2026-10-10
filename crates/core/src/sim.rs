@@ -1,6 +1,8 @@
 //! Several machines with simulated operating systems and network, to test whole sequences.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tc_protocol::{MediaKey, Message, MouseButton, Screen};
 
@@ -29,6 +31,8 @@ struct Machine {
 struct Sim {
     machines: BTreeMap<String, Machine>,
     offline: BTreeSet<(String, String)>,
+    /// Time of all engines; every mouse event takes 10 ms.
+    now: Arc<Mutex<Instant>>,
 }
 
 const A: u16 = 0x04;
@@ -53,9 +57,12 @@ impl Sim {
         let mut sim = Sim {
             machines: BTreeMap::new(),
             offline: BTreeSet::new(),
+            now: Arc::new(Mutex::new(Instant::now())),
         };
         for (name, screens) in machines {
             let mut engine = Engine::new(*name, screens, layout.clone());
+            let now = sim.now.clone();
+            engine.set_clock(move || *now.lock().unwrap());
             for (other, other_screens) in machines {
                 if other != name {
                     engine.peer_online(other, other_screens);
@@ -130,6 +137,7 @@ impl Sim {
 
     /// The user moves the mouse at `m` by `dx`/`dy` native units.
     fn mouse(&mut self, m: &str, dx: f64, dy: f64) {
+        *self.now.lock().unwrap() += Duration::from_millis(10);
         let machine = self.machines.get_mut(m).unwrap();
         let p = machine.os.pointer;
         if !machine.os.grabbed {
@@ -572,7 +580,7 @@ fn a_second_leader_sends_the_first_one_home() {
     assert_eq!(sim.role("imac"), Role::ControlledBy("book2".into()));
     // Someone uses the other laptop and moves up into the iMac
     sim.machines.get_mut("book1").unwrap().os.pointer = Point::new(500.0, 10.0);
-    sim.glide("book1", 0.0, -20.0);
+    sim.glide("book1", 0.0, -400.0);
     assert_eq!(sim.role("imac"), Role::ControlledBy("book1".into()));
     assert_eq!(sim.role("book2"), Role::Idle);
     assert!(!sim.os("book2").grabbed, "pointer visible again at home");
@@ -580,6 +588,41 @@ fn a_second_leader_sends_the_first_one_home() {
     sim.glide("book1", 0.0, 2000.0);
     assert_eq!(sim.role("imac"), Role::Idle);
     sim.assert_all_released();
+}
+
+#[test]
+fn top_and_bottom_edges_need_a_moment_of_pushing() {
+    // The iMac with the Dock at the bottom, a laptop below it, another one to its left
+    let mut sim = Sim::new(
+        &[
+            ("imac", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("below", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("left", vec![screen(0, 0, 1000, 800, 1.0)]),
+        ],
+        Layout::default()
+            .with("below", Side::Bottom, "imac")
+            .with("left", Side::Left, "imac"),
+    );
+    // Reaching for the Dock and overshooting a little: stays on the iMac
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(500.0, 780.0);
+    sim.glide("imac", 0.0, 60.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // A pause and another short push: still there
+    *sim.now.lock().unwrap() += Duration::from_millis(500);
+    sim.glide("imac", 0.0, 60.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // Pushing on: over to the laptop below
+    sim.glide("imac", 0.0, 400.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
+    // Back up from the laptop: the same moment of pushing at its top edge
+    sim.glide("imac", 0.0, -200.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()), "only a short push");
+    sim.glide("imac", 0.0, -400.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // Left edge: at once, as before
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(10.0, 400.0);
+    sim.glide("imac", -20.0, 0.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("left".into()));
 }
 
 #[test]

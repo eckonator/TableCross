@@ -142,7 +142,8 @@ turn at the same place (two laptops on the same monitors, say) share a field in 
 edge leads to the one that is connected.
 
 Move the pointer over the edge to control the other computer; moving a computer's own mouse takes
-control back. Its own keyboard simply keeps typing there, so the mouse of one computer and the
+control back. Left and right edges switch at once; at top and bottom edges, where the Dock and the
+menu bar are, push against the edge for a moment. Its own keyboard simply keeps typing there, so the mouse of one computer and the
 keyboard of another work together. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on
 `place` swaps ⌘ and Ctrl while controlling that computer. On macOS the terminal (later the app) needs
 the Accessibility permission.

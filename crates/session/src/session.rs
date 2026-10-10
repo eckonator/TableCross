@@ -681,6 +681,13 @@ fn start_capture(shared: &Arc<Shared>, capture: &mut Option<Box<dyn Capture>>) {
     let Some(capture) = capture.as_mut() else {
         return;
     };
+    if capture.single_push_at_edges() {
+        shared
+            .engine
+            .lock()
+            .expect("engine lock")
+            .set_edge_dwell(Duration::ZERO);
+    }
     let state = match capture.start(handler(shared.clone())) {
         Ok(()) => InputState::Running,
         Err(e) => {
@@ -1200,6 +1207,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             if shared.logs.lock().expect("logs lock").collect {
                 shared.node.send(&peer, Message::LogSubscribe { on: true });
             }
+            tracing::info!("screens of {name}: {screens:?}");
             shared.notice(Notice::Connected(name));
         }
         Event::Disconnected { peer, reason } => {

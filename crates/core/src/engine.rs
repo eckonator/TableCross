@@ -17,6 +17,8 @@
 //! an operating system.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use tc_protocol::{MediaKey, Message, MouseButton, PressedKeys, Screen};
 
@@ -24,6 +26,32 @@ use crate::geometry::{Point, Screens, Side};
 use crate::layout::Layout;
 
 pub type MachineId = String;
+
+/// How long the pointer must be pushed against a top or bottom edge before it moves over. The Dock
+/// and the menu bar sit at these edges; reaching for them must not switch computers. Left and
+/// right edges switch at once.
+pub const EDGE_DWELL: Duration = Duration::from_millis(250);
+/// A pause in pushing longer than this starts the dwell anew.
+const EDGE_PAUSE: Duration = Duration::from_millis(150);
+
+/// Where the time comes from (tests use their own).
+#[derive(Clone)]
+pub struct Clock(Arc<dyn Fn() -> Instant + Send + Sync>);
+
+impl std::fmt::Debug for Clock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Clock")
+    }
+}
+
+/// The pointer is pushed against an edge that leads to a neighbor.
+#[derive(Debug, Clone)]
+struct EdgePush {
+    machine: MachineId,
+    side: Side,
+    since: Instant,
+    last: Instant,
+}
 
 /// Logical points the local mouse must move between two ticks (about 250 ms) while controlled by
 /// a remote machine before this machine takes control back. Counting per tick keeps a resting
@@ -133,6 +161,9 @@ pub struct Engine {
     takeover_motion: f64,
     /// Last known position of the local pointer (from motion while not grabbed).
     local_pointer: Point,
+    clock: Clock,
+    edge_dwell: Duration,
+    edge_push: Option<EdgePush>,
 }
 
 pub fn is_modifier(usage: u16) -> bool {
@@ -175,7 +206,19 @@ impl Engine {
             resend: false,
             takeover_motion: 0.0,
             local_pointer: Point::default(),
+            clock: Clock(Arc::new(Instant::now)),
+            edge_dwell: EDGE_DWELL,
+            edge_push: None,
         }
+    }
+
+    pub fn set_clock(&mut self, clock: impl Fn() -> Instant + Send + Sync + 'static) {
+        self.clock = Clock(Arc::new(clock));
+    }
+
+    /// Zero switches at every edge at once (for systems that report only one push, like Wayland).
+    pub fn set_edge_dwell(&mut self, dwell: Duration) {
+        self.edge_dwell = dwell;
     }
 
     pub fn role(&self) -> Role {
@@ -498,15 +541,20 @@ impl Engine {
                     return;
                 };
                 let Some(side) = mine.exit_side(p, Point::new(p.x + dx, p.y + dy)) else {
+                    self.edge_push = None;
                     return;
                 };
                 if mine.corner_distance(side, p) < self.layout.corner {
                     return;
                 }
+                let scale = mine.screen_at(p).scale;
                 let Some((next, entry)) = self.neighbor_entry(&self.me, side, p) else {
                     return;
                 };
-                let scale = mine.screen_at(p).scale;
+                let me = self.me.clone();
+                if !self.pushed_long_enough(&me, side) {
+                    return;
+                }
                 // A drag ends at the edge
                 for (button, dests) in &mut self.held_buttons {
                     if dests.remove(&Dest::Local) {
@@ -539,6 +587,7 @@ impl Engine {
                 let here = screens.screen_at(pos);
                 let to = Point::new(pos.x + lx * here.scale, pos.y + ly * here.scale);
                 let Some(side) = screens.exit_side(pos, to) else {
+                    self.edge_push = None;
                     self.set_position(&target, to, lx, ly, actions);
                     return;
                 };
@@ -547,7 +596,12 @@ impl Engine {
                     self.set_position(&target, clamped, lx, ly, actions);
                     return;
                 }
-                match self.neighbor_entry(&target, side, pos) {
+                let neighbor = self.neighbor_entry(&target, side, pos);
+                if neighbor.is_some() && !self.pushed_long_enough(&target, side) {
+                    self.set_position(&target, clamped, lx, ly, actions);
+                    return;
+                }
+                match neighbor {
                     Some((next, entry)) if next == self.me => {
                         self.leave_remote(&target, actions);
                         self.mode = Mode::Local;
@@ -568,6 +622,33 @@ impl Engine {
                 }
             }
             Mode::Controlled { .. } => {}
+        }
+    }
+
+    /// Top and bottom edges switch only after the pointer was pushed against them for a moment.
+    fn pushed_long_enough(&mut self, machine: &str, side: Side) -> bool {
+        if !matches!(side, Side::Top | Side::Bottom) || self.edge_dwell.is_zero() {
+            return true;
+        }
+        let now = (self.clock.0)();
+        match &mut self.edge_push {
+            Some(push) if push.machine == machine && push.side == side && now - push.last <= EDGE_PAUSE => {
+                push.last = now;
+                if now - push.since >= self.edge_dwell {
+                    self.edge_push = None;
+                    return true;
+                }
+                false
+            }
+            _ => {
+                self.edge_push = Some(EdgePush {
+                    machine: machine.to_string(),
+                    side,
+                    since: now,
+                    last: now,
+                });
+                false
+            }
         }
     }
 

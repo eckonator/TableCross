@@ -576,6 +576,10 @@ pub struct WaylandCapture {
 }
 
 impl Capture for WaylandCapture {
+    fn single_push_at_edges(&self) -> bool {
+        true
+    }
+
     fn start(&mut self, handler: Handler) -> Result<(), InputError> {
         self.tx
             .send(Cmd::StartCapture(handler))
