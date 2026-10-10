@@ -55,19 +55,10 @@ impl App {
         let order = layout_file::reading_order(&cells);
         let number = |id: &str| order.iter().position(|m| m == id).map(|i| i + 1).filter(|n| *n <= 9);
 
-        // The desk as shown: moved by the view shift (dragging this computer moves all of it)
-        let shift = self.settings.desk_shift;
-        let shown: Vec<(String, i32, i32)> = cells
-            .iter()
-            .map(|(m, x, y)| (m.clone(), x + shift.0, y + shift.1))
-            .collect();
-        // At least five columns and three rows, always one free row and column around the desk
-        let (min_x, max_x) = shown
-            .iter()
-            .fold((-2, 2), |(a, b), (_, x, _)| (a.min(x - 1), b.max(x + 1)));
-        let (min_y, max_y) = shown
-            .iter()
-            .fold((-1, 1), |(a, b), (_, _, y)| (a.min(y - 1), b.max(y + 1)));
+        // The desk in the middle with one free ring around it, at least five columns and three rows
+        let shown = &cells;
+        let (min_x, max_x) = centered_range(shown.iter().map(|(_, x, _)| *x), 5);
+        let (min_y, max_y) = centered_range(shown.iter().map(|(_, _, y)| *y), 3);
         let cols = (max_x - min_x + 1) as f32;
         let gap = 10.0;
         let width = ((ui.available_width() - 24.0 - gap * (cols - 1.0)) / cols).clamp(70.0, TILE.x);
@@ -200,18 +191,16 @@ impl App {
             );
         }
         match dropped {
-            // This computer: the whole desk moves along, the arrangement stays
-            Some((id, Some((x, y)))) if id == me => {
-                if let Some((_, mx, my)) = shown.iter().find(|(m, ..)| *m == me) {
-                    self.settings.desk_shift = (shift.0 + x - mx, shift.1 + y - my);
-                    self.save_settings();
+            // This computer stays on the desk; dropped elsewhere it changes places like the others
+            Some((id, None)) if id == me => {}
+            // Moved away from all others, this computer would leave them behind: not allowed
+            Some((id, cell)) if id == me => {
+                let moved = rearranged(&cells, &me, &id, cell);
+                if attached(&moved, &me) == attached(&cells, &me) {
+                    self.arrange(moved);
                 }
             }
-            Some((id, None)) if id == me => {}
-            Some((id, cell)) => {
-                let cell = cell.map(|(x, y)| (x - shift.0, y - shift.1));
-                self.arrange(rearranged(&cells, &me, &id, cell));
-            }
+            Some((id, cell)) => self.arrange(rearranged(&cells, &me, &id, cell)),
             None => {}
         }
     }
@@ -481,6 +470,32 @@ fn canonical(status: &Status, me: &Fingerprint, entry: &str) -> String {
 
 /// The desk after `id` was dropped on `cell` (`None`: taken off the desk). On a cell that is taken
 /// it shares the place with the computers there (used in turn); this computer's place is not shared.
+/// Grid lines `values` need with one free line on each side, widened to at least `min` lines,
+/// alternately on the far and the near side so the desk stays in the middle.
+fn centered_range(values: impl Iterator<Item = i32>, min: i32) -> (i32, i32) {
+    let (lo, hi) = values.fold((0, 0), |(a, b), v| (a.min(v), b.max(v)));
+    let (mut lo, mut hi) = (lo - 1, hi + 1);
+    while hi - lo + 1 < min {
+        if (hi - lo) % 2 == 0 {
+            hi += 1;
+        } else {
+            lo -= 1;
+        }
+    }
+    (lo, hi)
+}
+
+/// How many computers hang together with `me` (directly or through others).
+fn attached(cells: &[(String, i32, i32)], me: &str) -> usize {
+    let mut ids: Vec<String> = layout_file::from_grid(cells, me)
+        .into_iter()
+        .flat_map(|n| [n.machine, n.of])
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids.len()
+}
+
 fn rearranged(cells: &[(String, i32, i32)], me: &str, id: &str, cell: Option<(i32, i32)>) -> Vec<(String, i32, i32)> {
     let mut out: Vec<_> = cells.iter().filter(|(c, ..)| c != id).cloned().collect();
     match cell {
@@ -674,7 +689,28 @@ fn paint_screens(
 
 #[cfg(test)]
 mod tests {
-    use super::rearranged;
+    use super::{attached, centered_range, rearranged};
+
+    #[test]
+    fn the_desk_is_centered_with_room_around_it() {
+        // Only this computer: five by three around it
+        assert_eq!(centered_range([0].into_iter(), 5), (-2, 2));
+        assert_eq!(centered_range([0].into_iter(), 3), (-1, 1));
+        // Wide desk: one free line on each side, nothing more
+        assert_eq!(centered_range([-1, 0, 1, 2].into_iter(), 5), (-2, 3));
+        // Desk above this computer: rows from it, not from this computer's place
+        assert_eq!(centered_range([-1, 0].into_iter(), 3), (-2, 1));
+    }
+
+    #[test]
+    fn this_computer_cannot_leave_the_others_behind() {
+        let desk = vec![cell("me", 0, 0), cell("imac", 0, -1), cell("book2", -1, -1)];
+        assert_eq!(attached(&desk, "me"), 3);
+        let away = rearranged(&desk, "me", "me", Some((2, 2)));
+        assert_eq!(attached(&away, "me"), 0);
+        let beside = rearranged(&desk, "me", "me", Some((1, -1)));
+        assert_eq!(attached(&beside, "me"), 3);
+    }
 
     fn cell(m: &str, x: i32, y: i32) -> (String, i32, i32) {
         (m.to_string(), x, y)
