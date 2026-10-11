@@ -50,6 +50,8 @@ pub struct Settings {
     pub update_with_peers: bool,
     /// Collect the logs of the other computers here (troubleshooting).
     pub collect_logs: bool,
+    /// macOS: switch off Universal Control at start (it takes the pointer at screen edges as well).
+    pub universal_control_off: bool,
 }
 
 impl Default for Settings {
@@ -67,6 +69,7 @@ impl Default for Settings {
             update_check: None,
             update_with_peers: true,
             collect_logs: false,
+            universal_control_off: true,
         }
     }
 }
@@ -109,6 +112,7 @@ impl Settings {
             update_check: field(&fields, "update_check", d.update_check),
             update_with_peers: field(&fields, "update_with_peers", d.update_with_peers),
             collect_logs: field(&fields, "collect_logs", d.collect_logs),
+            universal_control_off: field(&fields, "universal_control_off", d.universal_control_off),
         }
     }
 

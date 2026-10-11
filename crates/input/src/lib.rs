@@ -15,6 +15,8 @@ mod mac;
 #[cfg(target_os = "macos")]
 mod mac_helper;
 pub mod system;
+#[cfg(target_os = "macos")]
+pub mod universal_control;
 mod virtual_input;
 #[cfg(windows)]
 pub mod win_send;
@@ -58,6 +60,8 @@ pub enum Problem {
     HelperKeyboardsBusy(u16),
     /// Windows removed the hooks this many times (they were installed again).
     HooksRemoved(u32),
+    /// macOS: Universal Control is switched on and takes the pointer at screen edges as well.
+    UniversalControl,
 }
 
 impl std::fmt::Display for Problem {
@@ -79,6 +83,7 @@ impl std::fmt::Display for Problem {
                 )
             }
             Problem::HooksRemoved(n) => write!(f, "Windows removed the input hooks {n} times (installed again)"),
+            Problem::UniversalControl => write!(f, "Universal Control of macOS is switched on"),
         }
     }
 }

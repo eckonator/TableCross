@@ -285,6 +285,16 @@ fn de(en: &str) -> Option<&'static str> {
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
         "Troubleshooting" => "Fehlersuche",
+        "Universal Control" => "Universelle Steuerung",
+        "Switch off Universal Control of macOS" => "Universelle Steuerung von macOS ausschalten",
+        "Switch off Universal Control" => "Universelle Steuerung ausschalten",
+        "Could not switch off Universal Control: {}" => "Universelle Steuerung ließ sich nicht ausschalten: {}",
+        "Universal Control also moves the pointer to other Macs at the screen edges. TableCross switches it off at start so the two do not fight over the pointer." => {
+            "Die Universelle Steuerung schiebt den Zeiger an den Bildschirmrändern ebenfalls zu anderen Macs. TableCross schaltet sie beim Start aus, damit sich beide nicht um den Zeiger streiten."
+        }
+        "Universal Control of macOS is switched on. It also moves the pointer to other Macs at the screen edges, gets in the way of TableCross and takes the pointer over even when TableCross is quit." => {
+            "Die Universelle Steuerung von macOS ist eingeschaltet. Sie schiebt den Zeiger an den Bildschirmrändern ebenfalls zu anderen Macs, kommt TableCross in die Quere und übernimmt den Zeiger sogar, wenn TableCross beendet ist."
+        }
         "Collect the logs of the other computers here" => "Protokolle der anderen Rechner hier sammeln",
         "The connected computers send their log to this one while it is on, so a problem can be looked at in one place. Only on paired computers, over the encrypted connection; the logs contain no typed text." => {
             "Solange das an ist, schicken die verbundenen Rechner ihr Protokoll an diesen, damit sich ein Problem an einer Stelle untersuchen lässt. Nur unter gekoppelten Rechnern und über die verschlüsselte Verbindung; die Protokolle enthalten keinen getippten Text."

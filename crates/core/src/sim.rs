@@ -641,7 +641,7 @@ fn top_and_bottom_edges_need_a_moment_of_pushing() {
 }
 
 #[test]
-fn a_corner_that_keeps_the_pointer_is_reported() {
+fn bottom_corners_switch_after_a_push() {
     // The laptop below the iMac leads; a second laptop sits left of the iMac
     let mut sim = Sim::new(
         &[
@@ -663,12 +663,22 @@ fn a_corner_that_keeps_the_pointer_is_reported() {
     sim.glide("laptop", over + 4.0, 0.0);
     assert_eq!(sim.role("laptop"), Role::Controlling("imac".into()));
     assert!(sim.os("imac").pointer.x < 16.0);
-    // Straight down along the left edge of the iMac ends in its bottom-left corner
+    // Straight down along the left edge of the iMac into its bottom-left corner: home after a push
     sim.glide("laptop", 2.0, 2000.0);
-    assert_eq!(sim.role("laptop"), Role::Controlling("imac".into()));
-    let engine = &mut sim.machines.get_mut("laptop").unwrap().engine;
+    assert_eq!(sim.role("laptop"), Role::Idle);
+    assert_eq!(sim.machines.get_mut("laptop").unwrap().engine.take_corner_block(), None);
+}
+
+#[test]
+fn a_corner_that_keeps_the_pointer_is_reported() {
+    let mut sim = Sim::mac_pc();
+    sim.machines.get_mut("mac").unwrap().os.pointer = Point::new(1500.0, 5.0);
+    sim.glide("mac", 100.0, 0.0);
+    sim.glide("mac", 100.0, 0.0);
+    assert_eq!(sim.role("mac"), Role::Idle);
+    let engine = &mut sim.machines.get_mut("mac").unwrap().engine;
     let block = engine.take_corner_block().expect("the corner block is reported");
-    assert_eq!((block.machine.as_str(), block.side), ("imac", Side::Bottom));
+    assert_eq!((block.machine.as_str(), block.side), ("mac", Side::Right));
     assert_eq!(engine.take_corner_block(), None, "once");
 }
 

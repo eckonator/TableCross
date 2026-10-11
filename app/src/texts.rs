@@ -136,6 +136,11 @@ pub fn problem(p: &Problem) -> String {
             "Windows switched off the input capture {} times; it was restarted.",
             &[n],
         ),
+        Problem::UniversalControl => tr(
+            "Universal Control of macOS is switched on. It also moves the pointer to other Macs at the screen \
+             edges, gets in the way of TableCross and takes the pointer over even when TableCross is quit.",
+        )
+        .into(),
     }
 }
 

@@ -566,7 +566,7 @@ impl Engine {
                     self.end_push_if_away(dx, dy);
                     return;
                 };
-                if mine.corner_distance(side, p) < self.layout.corner {
+                if self.corner_blocks(side) && mine.corner_distance(side, p) < self.layout.corner {
                     if self.online_neighbor(&self.me, side).is_some() {
                         let me = self.me.clone();
                         self.note_corner_block(&me, side, p);
@@ -618,7 +618,7 @@ impl Engine {
                     return;
                 };
                 let clamped = here.clamp(to);
-                if screens.corner_distance(side, pos) < self.layout.corner {
+                if self.corner_blocks(side) && screens.corner_distance(side, pos) < self.layout.corner {
                     if self.online_neighbor(&target, side).is_some() {
                         self.note_corner_block(&target, side, pos);
                     }
@@ -667,6 +667,13 @@ impl Engine {
         if away {
             self.edge_push = None;
         }
+    }
+
+    /// Corners keep left and right edges from switching, so the pointer can reach them. Top and
+    /// bottom edges need a moment of pushing anyway, which already leaves the corners alone; a
+    /// corner rule there would trap a pointer that runs straight down along a side edge.
+    fn corner_blocks(&self, side: Side) -> bool {
+        !matches!(side, Side::Top | Side::Bottom) || self.edge_dwell.is_zero()
     }
 
     fn note_corner_block(&mut self, machine: &str, side: Side, at: Point) {

@@ -96,6 +96,32 @@ impl App {
                         }
                     }
                     ui.end_row();
+
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.label(tr("Universal Control"));
+                        if ui
+                            .checkbox(
+                                &mut self.settings.universal_control_off,
+                                tr("Switch off Universal Control of macOS"),
+                            )
+                            .on_hover_text(tr(
+                                "Universal Control also moves the pointer to other Macs at the screen edges. \
+                                 TableCross switches it off at start so the two do not fight over the pointer.",
+                            ))
+                            .changed()
+                        {
+                            changed = true;
+                            if self.settings.universal_control_off
+                                && !self.isolated
+                                && tc_input::universal_control::is_on()
+                                && let Err(e) = tc_input::universal_control::turn_off()
+                            {
+                                self.show_info(trf("Could not switch off Universal Control: {}", &[&e]));
+                            }
+                        }
+                        ui.end_row();
+                    }
                 });
         });
         ui.add_space(14.0);

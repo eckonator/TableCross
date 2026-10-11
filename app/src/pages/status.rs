@@ -274,6 +274,18 @@ impl App {
                     tc_session::helper_install::show_permission_place();
                 }
             }
+            #[cfg(target_os = "macos")]
+            Problem::UniversalControl => {
+                if ui.button(tr("Switch off Universal Control")).clicked() {
+                    match tc_input::universal_control::turn_off() {
+                        Ok(()) => tracing::info!("Universal Control switched off"),
+                        Err(e) => {
+                            tracing::warn!("cannot switch off Universal Control: {e}");
+                            self.show_info(trf("Could not switch off Universal Control: {}", &[&e]));
+                        }
+                    }
+                }
+            }
             Problem::CaptureStopped if ui.button(tr("Check again")).clicked() => {
                 self.send(Command::RetryInput);
             }

@@ -205,6 +205,13 @@ impl App {
                 return;
             }
         };
+        #[cfg(target_os = "macos")]
+        if self.settings.universal_control_off && !self.isolated && tc_input::universal_control::is_on() {
+            match tc_input::universal_control::turn_off() {
+                Ok(()) => tracing::info!("Universal Control of macOS was on, switched it off"),
+                Err(e) => tracing::warn!("cannot switch off Universal Control: {e}"),
+            }
+        }
         let backend = match tc_input::platform() {
             Ok(b) => Some(b),
             Err(e) => {

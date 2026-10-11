@@ -5,7 +5,7 @@
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::time::{Duration, Instant};
 
 use core_foundation_sys::base::{CFRelease, CFTypeRef, kCFAllocatorDefault};
@@ -277,6 +277,7 @@ pub fn backend() -> Result<Backend, InputError> {
             cursor_hidden: false,
         }),
     });
+    hold_parked(Arc::downgrade(&shared));
     Ok(Backend {
         capture: Box::new(MacCapture { shared: shared.clone() }),
         inject: Arc::new(MacInject { shared }),
@@ -442,6 +443,9 @@ impl Capture for MacCapture {
         if !covered && unsafe { IsSecureEventInputEnabled() } {
             problems.push(Problem::SecureInput);
         }
+        if crate::universal_control::is_on() {
+            problems.push(Problem::UniversalControl);
+        }
         Health { capturing, problems }
     }
 }
@@ -499,6 +503,40 @@ fn keep_parked(shared: &Shared, event: Ref) {
             CGWarpMouseCursorPosition(park);
             CGAssociateMouseAndMouseCursorPosition(false);
         }
+    }
+}
+
+/// How often the parked pointer is set to its spot again while grabbed.
+const HOLD_EVERY: Duration = Duration::from_millis(200);
+/// While grabbed, local input does not move the pointer for this long after it was set to its spot.
+const HOLD_SUPPRESSION: f64 = 0.25;
+
+/// A program in the background cannot keep mouse and pointer disconnected: macOS connects them
+/// again about 250 ms after the pointer was set somewhere, until then it ignores local motion
+/// (measured on macOS 26). Setting the pointer to its spot more often than that holds it for good.
+/// It already sits there, so the motion reported next carries no jump.
+fn hold_parked(shared: Weak<Shared>) {
+    let started = std::thread::Builder::new()
+        .name("tablecross-hold".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(HOLD_EVERY);
+                let Some(shared) = shared.upgrade() else {
+                    return;
+                };
+                // Under the lock, so it never comes after the pointer was let go
+                let _state = shared.inject.lock().expect("inject lock");
+                if shared.grabbed.load(Ordering::SeqCst) {
+                    let park = *shared.park.lock().expect("park lock");
+                    unsafe {
+                        CGWarpMouseCursorPosition(park);
+                        CGAssociateMouseAndMouseCursorPosition(false);
+                    }
+                }
+            }
+        });
+    if let Err(e) = started {
+        tracing::warn!("cannot start holding the pointer: {e}");
     }
 }
 
@@ -791,6 +829,7 @@ impl Inject for MacInject {
         self.set_seize(true);
         let mut state = self.shared.inject.lock().expect("inject lock");
         unsafe {
+            CGEventSourceSetLocalEventsSuppressionInterval(state.source(), HOLD_SUPPRESSION);
             CGWarpMouseCursorPosition(CGPoint { x: park.x, y: park.y });
             CGAssociateMouseAndMouseCursorPosition(false);
             if !state.cursor_hidden {
@@ -803,11 +842,12 @@ impl Inject for MacInject {
     }
 
     fn ungrab(&self, at: Point) -> Result<(), InputError> {
+        let mut state = self.shared.inject.lock().expect("inject lock");
         self.shared.grabbed.store(false, Ordering::SeqCst);
         self.set_seize(false);
-        let mut state = self.shared.inject.lock().expect("inject lock");
         state.position = at;
         unsafe {
+            CGEventSourceSetLocalEventsSuppressionInterval(state.source(), 0.0);
             CGWarpMouseCursorPosition(CGPoint { x: at.x, y: at.y });
             CGAssociateMouseAndMouseCursorPosition(true);
             if state.cursor_hidden {
