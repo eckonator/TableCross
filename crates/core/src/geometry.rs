@@ -154,6 +154,18 @@ impl Screens {
         d.max(0.0) / s.scale
     }
 
+    /// Distance of `p` from `side` of its screen, in logical points.
+    pub fn edge_distance(&self, side: Side, p: Point) -> f64 {
+        let s = self.screen_at(p);
+        let d = match side {
+            Side::Left => p.x - s.left,
+            Side::Right => s.right - 1.0 - p.x,
+            Side::Top => p.y - s.top,
+            Side::Bottom => s.bottom - 1.0 - p.y,
+        };
+        d.max(0.0) / s.scale
+    }
+
     /// Where the pointer appears when it comes in through `side` at `along` (0.0 to 1.0).
     pub fn entry(&self, side: Side, along: f64) -> Point {
         let b = self.bounds();

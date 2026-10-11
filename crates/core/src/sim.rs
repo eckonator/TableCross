@@ -636,6 +636,8 @@ fn top_and_bottom_edges_need_a_moment_of_pushing() {
     assert_eq!(sim.role("imac"), Role::Idle);
     // A trackpad: short strokes, the finger lifted in between
     let stroke = |sim: &mut Sim| {
+        // Putting the finger down moves the pointer back a little
+        sim.mouse("imac", 0.0, -3.0);
         for _ in 0..12 {
             sim.mouse("imac", 0.0, 5.0);
         }

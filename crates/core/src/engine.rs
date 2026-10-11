@@ -34,6 +34,8 @@ pub const EDGE_DWELL: Duration = Duration::from_millis(250);
 /// A pause in pushing longer than this starts the dwell anew. Long enough for lifting a finger
 /// between strokes on a trackpad, which never pushes a quarter second in one stroke.
 const EDGE_PAUSE: Duration = Duration::from_millis(400);
+/// Moving farther from the edge than this (logical points) ends a push.
+const EDGE_LEAVE: f64 = 24.0;
 /// One event counts as pushing for at most this long (the pause before it is no pushing).
 const EDGE_STEP: Duration = Duration::from_millis(50);
 
@@ -567,7 +569,8 @@ impl Engine {
                     return;
                 };
                 let Some(side) = mine.exit_side(p, Point::new(p.x + dx, p.y + dy)) else {
-                    self.end_push_if_away(dx, dy);
+                    let me = self.me.clone();
+                    self.end_push_if_left(&me, p);
                     return;
                 };
                 if self.corner_blocks(side) && mine.corner_distance(side, p) < self.layout.corner {
@@ -617,7 +620,7 @@ impl Engine {
                 let here = screens.screen_at(pos);
                 let to = Point::new(pos.x + lx * here.scale, pos.y + ly * here.scale);
                 let Some(side) = screens.exit_side(pos, to) else {
-                    self.end_push_if_away(lx, ly);
+                    self.end_push_if_left(&target, to);
                     self.set_position(&target, to, lx, ly, actions);
                     return;
                 };
@@ -658,17 +661,21 @@ impl Engine {
         }
     }
 
-    /// Moving away from the edge ends a push; sideways motion while pushing does not (a mouse sends
-    /// many events without a vertical part even when it is pushed up or down).
-    fn end_push_if_away(&mut self, dx: f64, dy: f64) {
-        let away = match self.edge_push.as_ref().map(|p| p.side) {
-            Some(Side::Top) => dy > 0.0,
-            Some(Side::Bottom) => dy < 0.0,
-            Some(Side::Left) => dx > 0.0,
-            Some(Side::Right) => dx < 0.0,
-            None => false,
+    /// Leaving the edge ends a push. Sideways motion does not (a mouse sends many events without a
+    /// vertical part even when it is pushed up or down), and neither does the small motion back of a
+    /// finger put down again on a trackpad.
+    fn end_push_if_left(&mut self, machine: &str, p: Point) {
+        let Some(push) = &self.edge_push else {
+            return;
         };
-        if away {
+        if push.machine != machine {
+            return;
+        }
+        let left = self
+            .machines
+            .get(machine)
+            .is_none_or(|screens| screens.edge_distance(push.side, p) > EDGE_LEAVE);
+        if left {
             self.edge_push = None;
         }
     }
