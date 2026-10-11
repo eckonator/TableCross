@@ -31,8 +31,11 @@ pub type MachineId = String;
 /// and the menu bar sit at these edges; reaching for them must not switch computers. Left and
 /// right edges switch at once.
 pub const EDGE_DWELL: Duration = Duration::from_millis(250);
-/// A pause in pushing longer than this starts the dwell anew.
-const EDGE_PAUSE: Duration = Duration::from_millis(150);
+/// A pause in pushing longer than this starts the dwell anew. Long enough for lifting a finger
+/// between strokes on a trackpad, which never pushes a quarter second in one stroke.
+const EDGE_PAUSE: Duration = Duration::from_millis(400);
+/// One event counts as pushing for at most this long (the pause before it is no pushing).
+const EDGE_STEP: Duration = Duration::from_millis(50);
 
 /// Where the time comes from (tests use their own).
 #[derive(Clone)]
@@ -49,7 +52,8 @@ impl std::fmt::Debug for Clock {
 struct EdgePush {
     machine: MachineId,
     side: Side,
-    since: Instant,
+    /// Time spent pushing so far, pauses left out.
+    pushed: Duration,
     last: Instant,
 }
 
@@ -694,7 +698,8 @@ impl Engine {
         });
     }
 
-    /// Top and bottom edges switch only after the pointer was pushed against them for a moment.
+    /// Top and bottom edges switch only after the pointer was pushed against them for a moment, in
+    /// one go or in several strokes.
     fn pushed_long_enough(&mut self, machine: &str, side: Side) -> bool {
         if !matches!(side, Side::Top | Side::Bottom) || self.edge_dwell.is_zero() {
             return true;
@@ -702,8 +707,9 @@ impl Engine {
         let now = (self.clock.0)();
         match &mut self.edge_push {
             Some(push) if push.machine == machine && push.side == side && now - push.last <= EDGE_PAUSE => {
+                push.pushed += (now - push.last).min(EDGE_STEP);
                 push.last = now;
-                if now - push.since >= self.edge_dwell {
+                if push.pushed >= self.edge_dwell {
                     self.edge_push = None;
                     return true;
                 }
@@ -713,7 +719,7 @@ impl Engine {
                 self.edge_push = Some(EdgePush {
                     machine: machine.to_string(),
                     side,
-                    since: now,
+                    pushed: Duration::ZERO,
                     last: now,
                 });
                 false

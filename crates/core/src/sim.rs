@@ -634,6 +634,21 @@ fn top_and_bottom_edges_need_a_moment_of_pushing() {
         sim.mouse("imac", -3.0, 0.0);
     }
     assert_eq!(sim.role("imac"), Role::Idle);
+    // A trackpad: short strokes, the finger lifted in between
+    let stroke = |sim: &mut Sim| {
+        for _ in 0..12 {
+            sim.mouse("imac", 0.0, 5.0);
+        }
+        *sim.now.lock().unwrap() += Duration::from_millis(300);
+    };
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(500.0, 795.0);
+    stroke(&mut sim);
+    assert_eq!(sim.role("imac"), Role::Idle, "one short stroke is not enough");
+    stroke(&mut sim);
+    stroke(&mut sim);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()), "strokes add up");
+    sim.glide("imac", 0.0, -400.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
     // Left edge: at once, as before
     sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(10.0, 400.0);
     sim.glide("imac", -20.0, 0.0);
