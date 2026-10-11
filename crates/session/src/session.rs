@@ -559,7 +559,17 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
         let seen = controlled.then(|| event.clone());
         let mut actions = engine.captured(event);
         let grabbed = matches!(engine.role(), Role::Controlling(_));
+        let corner = engine.take_corner_block();
         drop(engine);
+        if let Some(block) = corner {
+            tracing::info!(
+                "no switch at the {:?} edge of {}: too close to a corner at ({:.0}, {:.0})",
+                block.side,
+                shared.name_of(&block.machine),
+                block.at.x,
+                block.at.y
+            );
+        }
         if let Some(seen) = seen
             && let Some(to) = actions.iter().find_map(|a| match a {
                 Action::Send {

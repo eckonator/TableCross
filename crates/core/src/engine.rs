@@ -164,7 +164,22 @@ pub struct Engine {
     clock: Clock,
     edge_dwell: Duration,
     edge_push: Option<EdgePush>,
+    /// A corner kept the pointer from switching and nobody has asked about it yet.
+    corner_block: Option<CornerBlock>,
+    /// When a corner block was last reported, per machine and side (reported again only after a pause).
+    corner_reported: Option<(MachineId, Side, Instant)>,
 }
+
+/// The pointer was pushed over an edge with a neighbor, but too close to a corner to switch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CornerBlock {
+    pub machine: MachineId,
+    pub side: Side,
+    pub at: Point,
+}
+
+/// A corner block is reported once, and again only when it happens after this long.
+const CORNER_REPORT_PAUSE: Duration = Duration::from_secs(5);
 
 pub fn is_modifier(usage: u16) -> bool {
     (0xE0..=0xE7).contains(&usage)
@@ -209,7 +224,14 @@ impl Engine {
             clock: Clock(Arc::new(Instant::now)),
             edge_dwell: EDGE_DWELL,
             edge_push: None,
+            corner_block: None,
+            corner_reported: None,
         }
+    }
+
+    /// The last time a corner kept the pointer from switching (for the log).
+    pub fn take_corner_block(&mut self) -> Option<CornerBlock> {
+        self.corner_block.take()
     }
 
     pub fn set_clock(&mut self, clock: impl Fn() -> Instant + Send + Sync + 'static) {
@@ -545,6 +567,10 @@ impl Engine {
                     return;
                 };
                 if mine.corner_distance(side, p) < self.layout.corner {
+                    if self.online_neighbor(&self.me, side).is_some() {
+                        let me = self.me.clone();
+                        self.note_corner_block(&me, side, p);
+                    }
                     return;
                 }
                 let scale = mine.screen_at(p).scale;
@@ -593,6 +619,9 @@ impl Engine {
                 };
                 let clamped = here.clamp(to);
                 if screens.corner_distance(side, pos) < self.layout.corner {
+                    if self.online_neighbor(&target, side).is_some() {
+                        self.note_corner_block(&target, side, pos);
+                    }
                     self.set_position(&target, clamped, lx, ly, actions);
                     return;
                 }
@@ -638,6 +667,24 @@ impl Engine {
         if away {
             self.edge_push = None;
         }
+    }
+
+    fn note_corner_block(&mut self, machine: &str, side: Side, at: Point) {
+        let now = (self.clock.0)();
+        if let Some((m, s, last)) = &mut self.corner_reported
+            && m == machine
+            && *s == side
+            && now - *last < CORNER_REPORT_PAUSE
+        {
+            *last = now;
+            return;
+        }
+        self.corner_reported = Some((machine.to_string(), side, now));
+        self.corner_block = Some(CornerBlock {
+            machine: machine.to_string(),
+            side,
+            at,
+        });
     }
 
     /// Top and bottom edges switch only after the pointer was pushed against them for a moment.
