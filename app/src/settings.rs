@@ -158,7 +158,10 @@ fn mac_computer_name() -> Option<String> {
         let mut buf = [0 as std::ffi::c_char; 256];
         let ok = CFStringGetCString(name, buf.as_mut_ptr(), buf.len() as _, kCFStringEncodingUTF8) != 0;
         CFRelease(name.cast());
-        let text = std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().trim().to_string();
+        let text = std::ffi::CStr::from_ptr(buf.as_ptr())
+            .to_string_lossy()
+            .trim()
+            .to_string();
         (ok && !text.is_empty()).then_some(text)
     }
 }
