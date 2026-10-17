@@ -23,6 +23,7 @@ unsafe impl Send for KeepAwake {}
 unsafe impl Sync for KeepAwake {}
 
 const REASON: &str = "Mouse and keyboard are shared with another computer";
+const SYSTEM_REASON: &str = "Stays reachable for the other computers of TableCross";
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -69,11 +70,25 @@ mod mac {
 }
 
 impl KeepAwake {
+    /// Display and system stay awake.
     pub fn new() -> Option<Self> {
+        Self::with(true, REASON)
+    }
+
+    /// Only the system stays awake (reachable on the network); the display may still turn off.
+    pub fn system_only() -> Option<Self> {
+        Self::with(false, SYSTEM_REASON)
+    }
+
+    fn with(display: bool, reason: &str) -> Option<Self> {
         #[cfg(target_os = "macos")]
         {
-            let kind = mac::cf("PreventUserIdleDisplaySleep");
-            let name = mac::cf(REASON);
+            let kind = mac::cf(if display {
+                "PreventUserIdleDisplaySleep"
+            } else {
+                "PreventUserIdleSystemSleep"
+            });
+            let name = mac::cf(reason);
             let mut id = 0;
             let result = unsafe { mac::IOPMAssertionCreateWithName(kind, 255, name, &mut id) };
             mac::release(kind);
@@ -89,7 +104,7 @@ impl KeepAwake {
             use windows_sys::Win32::System::Threading::{
                 POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0,
             };
-            let mut reason: Vec<u16> = REASON.encode_utf16().chain(Some(0)).collect();
+            let mut reason: Vec<u16> = reason.encode_utf16().chain(Some(0)).collect();
             let context = REASON_CONTEXT {
                 Version: POWER_REQUEST_CONTEXT_VERSION,
                 Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING,
@@ -102,13 +117,16 @@ impl KeepAwake {
                 return None;
             }
             unsafe {
-                PowerSetRequest(handle, PowerRequestDisplayRequired);
+                if display {
+                    PowerSetRequest(handle, PowerRequestDisplayRequired);
+                }
                 PowerSetRequest(handle, PowerRequestSystemRequired);
             }
             Some(Self { handle })
         }
         #[cfg(target_os = "linux")]
         {
+            let reason = reason.to_string();
             let (tx, rx) = tokio::sync::oneshot::channel::<()>();
             std::thread::Builder::new()
                 .name("tablecross-awake".into())
@@ -123,8 +141,12 @@ impl KeepAwake {
                             proxy
                                 .inhibit(
                                     None,
-                                    InhibitFlags::Idle | InhibitFlags::Suspend,
-                                    InhibitOptions::default().set_reason(REASON),
+                                    if display {
+                                        InhibitFlags::Idle | InhibitFlags::Suspend
+                                    } else {
+                                        InhibitFlags::Suspend.into()
+                                    },
+                                    InhibitOptions::default().set_reason(reason.as_str()),
                                 )
                                 .await
                         }
@@ -143,6 +165,7 @@ impl KeepAwake {
         }
         #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
         {
+            let _ = (display, reason);
             None
         }
     }
@@ -318,21 +341,30 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// How many assertions with our reason exist (a running TableCross may hold one as well).
-    fn listed() -> usize {
+    /// How many assertions with this reason exist (a running TableCross may hold one as well).
+    fn listed(reason: &str) -> usize {
         let out = std::process::Command::new("pmset")
             .args(["-g", "assertions"])
             .output()
             .unwrap();
-        String::from_utf8_lossy(&out.stdout).matches(REASON).count()
+        String::from_utf8_lossy(&out.stdout).matches(reason).count()
     }
 
     #[test]
     fn keeps_awake_while_it_exists() {
-        let before = listed();
+        let before = listed(REASON);
         let awake = KeepAwake::new().expect("assertion");
-        assert_eq!(listed(), before + 1);
+        assert_eq!(listed(REASON), before + 1);
         drop(awake);
-        assert_eq!(listed(), before);
+        assert_eq!(listed(REASON), before);
+    }
+
+    #[test]
+    fn keeps_the_system_awake_while_it_exists() {
+        let before = listed(SYSTEM_REASON);
+        let awake = KeepAwake::system_only().expect("assertion");
+        assert_eq!(listed(SYSTEM_REASON), before + 1);
+        drop(awake);
+        assert_eq!(listed(SYSTEM_REASON), before);
     }
 }

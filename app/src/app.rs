@@ -77,6 +77,8 @@ pub struct App {
     pub remove_settings: bool,
     pub confirm_remove: bool,
     removal: Option<Removal>,
+    /// Keeps the system (and with `true` the display) awake while the settings ask for it.
+    stay_awake: Option<(bool, tc_input::system::KeepAwake)>,
 }
 
 /// How often to look for a new version while running.
@@ -150,7 +152,9 @@ impl App {
                 .any(|a| a == crate::self_update::AFTER_UPDATE_FLAG)
                 .then(|| Instant::now() + HELPER_PROMPT_FOR),
             update_progress: None,
+            stay_awake: None,
         };
+        app.apply_stay_awake();
         if app.demo.is_none() {
             app.start_session(&ctx);
         }
@@ -295,6 +299,32 @@ impl App {
     pub fn save_settings(&self) {
         if !self.isolated {
             self.settings.save(&self.dir);
+        }
+    }
+
+    /// Takes or lets go of the wake lock after the settings.
+    pub fn apply_stay_awake(&mut self) {
+        let wanted = (self.settings.stay_awake && !self.isolated).then_some(self.settings.screen_stays_on);
+        if wanted == self.stay_awake.as_ref().map(|(screen, _)| *screen) {
+            return;
+        }
+        self.stay_awake = None;
+        match wanted {
+            Some(screen) => {
+                let lock = if screen {
+                    tc_input::system::KeepAwake::new()
+                } else {
+                    tc_input::system::KeepAwake::system_only()
+                };
+                match lock {
+                    Some(lock) => {
+                        tracing::info!("keeping this computer from going to sleep (screen on: {screen})");
+                        self.stay_awake = Some((screen, lock));
+                    }
+                    None => tracing::warn!("cannot keep this computer from going to sleep"),
+                }
+            }
+            None => tracing::info!("this computer may go to sleep again"),
         }
     }
 

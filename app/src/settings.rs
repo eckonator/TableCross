@@ -52,6 +52,10 @@ pub struct Settings {
     pub collect_logs: bool,
     /// macOS: switch off Universal Control at start (it takes the pointer at screen edges as well).
     pub universal_control_off: bool,
+    /// Keep the system from going to sleep while TableCross runs (the display may still turn off).
+    pub stay_awake: bool,
+    /// With `stay_awake`: keep the display on as well.
+    pub screen_stays_on: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +74,8 @@ impl Default for Settings {
             update_with_peers: true,
             collect_logs: false,
             universal_control_off: true,
+            stay_awake: false,
+            screen_stays_on: false,
         }
     }
 }
@@ -113,6 +119,8 @@ impl Settings {
             update_with_peers: field(&fields, "update_with_peers", d.update_with_peers),
             collect_logs: field(&fields, "collect_logs", d.collect_logs),
             universal_control_off: field(&fields, "universal_control_off", d.universal_control_off),
+            stay_awake: field(&fields, "stay_awake", d.stay_awake),
+            screen_stays_on: field(&fields, "screen_stays_on", d.screen_stays_on),
         }
     }
 

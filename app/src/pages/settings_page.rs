@@ -97,6 +97,35 @@ impl App {
                     }
                     ui.end_row();
 
+                    ui.label(tr("Sleep"));
+                    if ui
+                        .checkbox(
+                            &mut self.settings.stay_awake,
+                            tr("Keep this computer from going to sleep"),
+                        )
+                        .on_hover_text(tr(
+                            "While TableCross runs. A computer that sleeps drops out, and with it the way over \
+                             it to the computers behind.",
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        self.apply_stay_awake();
+                    }
+                    ui.end_row();
+                    ui.label("");
+                    if ui
+                        .add_enabled(
+                            self.settings.stay_awake,
+                            egui::Checkbox::new(&mut self.settings.screen_stays_on, tr("Keep the screen on as well")),
+                        )
+                        .changed()
+                    {
+                        changed = true;
+                        self.apply_stay_awake();
+                    }
+                    ui.end_row();
+
                     #[cfg(target_os = "macos")]
                     {
                         ui.label(tr("Universal Control"));

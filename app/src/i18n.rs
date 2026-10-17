@@ -285,6 +285,12 @@ fn de(en: &str) -> Option<&'static str> {
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
         "Troubleshooting" => "Fehlersuche",
+        "Sleep" => "Ruhezustand",
+        "Keep this computer from going to sleep" => "Diesen Rechner nicht in den Ruhezustand gehen lassen",
+        "While TableCross runs. A computer that sleeps drops out, and with it the way over it to the computers behind." => {
+            "Solange TableCross läuft. Ein schlafender Rechner fällt weg und mit ihm der Weg über ihn zu den Rechnern dahinter."
+        }
+        "Keep the screen on as well" => "Auch den Bildschirm anlassen",
         "Universal Control" => "Universelle Steuerung",
         "Switch off Universal Control of macOS" => "Universelle Steuerung von macOS ausschalten",
         "Switch off Universal Control" => "Universelle Steuerung ausschalten",
