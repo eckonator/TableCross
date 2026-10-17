@@ -203,12 +203,33 @@ pub fn card<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui) -
 
 /// A small rounded label, e.g. "connected".
 pub fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) {
+    let text = RichText::new(text).size(12.0).color(fg);
+    // A chip never breaks inside: where the line has no room left it starts a new one
+    let galley = egui::WidgetText::from(text.clone()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
+    let width = galley.size().x + 18.0 + ui.spacing().item_spacing.x;
+    let wraps = ui.layout().main_wrap;
+    // In a wrapping line the available width is that of the whole line, not of what is left of it
+    if wraps && ui.max_rect().right() - ui.cursor().min.x < width {
+        ui.end_row();
+    }
+    let room = ui.available_width() - 18.0;
     egui::Frame::new()
         .fill(bg)
         .corner_radius(10.0)
         .inner_margin(Margin::symmetric(9, 3))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).size(12.0).color(fg));
+            if wraps {
+                ui.add(egui::Label::new(text).extend());
+            } else {
+                // In a line that cannot wrap, a long chip ends in "…" instead of widening the page
+                ui.set_max_width(room.max(24.0));
+                ui.add(egui::Label::new(text).truncate());
+            }
         });
 }
 

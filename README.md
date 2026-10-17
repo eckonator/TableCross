@@ -6,7 +6,7 @@ on the next computer.
 
 ![TableCross status page: this computer, the paired computers, file transfers](docs/screenshot-status.png)
 
-![Arranging the computers on a grid by dragging (dark mode)](docs/screenshot-computers.png)
+![Arranging the computers by dragging, one of them half below the others (dark mode)](docs/screenshot-arrangement.png)
 
 ![Setup in three steps: permissions, pairing with a code, arrangement](docs/screenshot-setup.png)
 
@@ -78,7 +78,14 @@ out, recent messages, “copy diagnostics”). Closing the window keeps TableCro
 bar (macOS) or notification area (Windows). The interface is in English and German.
 
 Any number of computers can share one desk. The arrangement is shared between all paired computers,
-and the Computers page shows the whole desk.
+and the Arrangement page shows the whole desk: drag each computer to where it stands. Computers may
+stand offset, half beside or below another one, and one side may have several neighbors; the pointer
+crosses only where the edges touch (shown green). New computers are paired on the Pairing page.
+
+Settings worth knowing: *Keep this computer from going to sleep* (with the screen on as well, if
+wanted) for a computer in the middle of the desk, so the way over it to the others stays open. On
+macOS, TableCross switches off Universal Control at start, which also takes the pointer at screen
+edges; the status page warns while it is on.
 
 Removing it: Settings → *Remove TableCross* takes away everything TableCross set up (system helper,
 permissions, starting with the system, the program; optionally settings and pairings).
@@ -138,7 +145,7 @@ tablecross-cli run                     # on both
 The arrangement is shared between all paired computers, so placing a computer once is enough. With
 three or more computers, pair each one with every other one; then every keyboard reaches every
 screen, for example from the Linux computer through the Mac on to the Windows PC. Computers used in
-turn at the same place (two laptops on the same monitors, say) share a field in the arrangement; the
+turn at the same place (two laptops on the same monitors, say) share a tile in the arrangement; the
 edge leads to the one that is connected.
 
 Move the pointer over the edge to control the other computer; moving a computer's own mouse takes

@@ -67,6 +67,19 @@ pub struct Placement {
     pub of: String,
 }
 
+/// Where `machine` stands on the desk, in tiles: every computer is one tile of 1 × 1, `(0, 0)` is
+/// arbitrary. Computers whose tiles touch are neighbors where the edges overlap; computers used
+/// in turn at the same place have the same position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tile {
+    pub machine: String,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Positions of tiles stay within this distance from `(0, 0)`.
+pub const MAX_TILE_POS: f32 = 1024.0;
+
 /// Most placements and names in one `Message::Layout`.
 pub const MAX_PLACEMENTS: usize = 64;
 
@@ -202,6 +215,14 @@ pub enum Message {
     LogLines {
         text: String,
     },
+    /// The arrangement as tiles (from version 0.4.0 on; older versions only know `Layout` and end
+    /// the connection on this message, so it only goes to peers that announced 0.4.0 or later).
+    Tiles {
+        revision: u64,
+        editor: String,
+        tiles: Vec<Tile>,
+        names: Vec<(String, String)>,
+    },
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -225,6 +246,9 @@ impl Message {
             Message::Enter { x, y } => x.is_finite() && y.is_finite(),
             Message::MouseMove { x, y, dx, dy, .. } => [x, y, dx, dy].iter().all(|v| v.is_finite()),
             Message::Wheel { dx, dy, .. } => dx.is_finite() && dy.is_finite(),
+            Message::Tiles { tiles, .. } => tiles
+                .iter()
+                .all(|t| [t.x, t.y].iter().all(|v| v.is_finite() && v.abs() <= MAX_TILE_POS)),
             _ => true,
         }
     }
@@ -234,6 +258,7 @@ impl Message {
             Message::Layout { placements, names, .. } => {
                 placements.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS
             }
+            Message::Tiles { tiles, names, .. } => tiles.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS,
             Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
             _ => true,
         }
@@ -362,6 +387,23 @@ mod tests {
                 }],
                 names: vec![("fedcba9876543210".into(), "Office PC".into())],
             },
+            Message::Tiles {
+                revision: 1_792_234_331_001,
+                editor: "0123456789abcdef".into(),
+                tiles: vec![
+                    Tile {
+                        machine: "0123456789abcdef".into(),
+                        x: 0.0,
+                        y: 0.0,
+                    },
+                    Tile {
+                        machine: "fedcba9876543210".into(),
+                        x: 0.5,
+                        y: 1.0,
+                    },
+                ],
+                names: vec![("fedcba9876543210".into(), "Office PC".into())],
+            },
         ]
     }
 
@@ -423,6 +465,23 @@ mod tests {
             },
         ] {
             assert_eq!(decode(&encode(&m)), Err(DecodeError::NotFinite), "{m:?}");
+        }
+    }
+
+    #[test]
+    fn tiles_far_away_or_not_finite_are_rejected() {
+        for x in [f32::NAN, f32::INFINITY, MAX_TILE_POS * 2.0] {
+            let m = Message::Tiles {
+                revision: 1,
+                editor: "a".into(),
+                tiles: vec![Tile {
+                    machine: "a".into(),
+                    x,
+                    y: 0.0,
+                }],
+                names: Vec::new(),
+            };
+            assert_eq!(decode(&encode(&m)), Err(DecodeError::NotFinite), "{x}");
         }
     }
 

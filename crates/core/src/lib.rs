@@ -10,4 +10,6 @@ mod sim;
 
 pub use engine::{Action, Captured, CornerBlock, EDGE_DWELL, Engine, MachineId, Role, is_modifier};
 pub use geometry::{Point, Rect, Screens, Side};
-pub use layout::{Layout, LayoutError, LayoutFile, Neighbor};
+pub use layout::{
+    Layout, LayoutError, LayoutFile, Neighbor, Tile, neighbors_from_tiles, tile_side, tiles_from_neighbors,
+};

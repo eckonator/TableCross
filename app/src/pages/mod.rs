@@ -1,7 +1,8 @@
 //! The pages of the window.
 
 mod about;
-mod computers;
+mod arrangement;
+mod pairing;
 mod settings_page;
 mod setup;
 mod status;

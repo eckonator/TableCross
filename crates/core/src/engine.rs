@@ -469,10 +469,7 @@ impl Engine {
             _ => self.me.clone(),
         };
         match self.online_neighbor(&current, side) {
-            Some(next) => {
-                let next = next.to_string();
-                self.switch_to(&next)
-            }
+            Some(next) => self.switch_to(&next),
             None => Vec::new(),
         }
     }
@@ -574,7 +571,7 @@ impl Engine {
                     return;
                 };
                 if self.corner_blocks(side) && mine.corner_distance(side, p) < self.layout.corner {
-                    if self.online_neighbor(&self.me, side).is_some() {
+                    if self.neighbor_entry(&self.me, side, p).is_some() {
                         let me = self.me.clone();
                         self.note_corner_block(&me, side, p);
                     }
@@ -626,7 +623,7 @@ impl Engine {
                 };
                 let clamped = here.clamp(to);
                 if self.corner_blocks(side) && screens.corner_distance(side, pos) < self.layout.corner {
-                    if self.online_neighbor(&target, side).is_some() {
+                    if self.neighbor_entry(&target, side, pos).is_some() {
                         self.note_corner_block(&target, side, pos);
                     }
                     self.set_position(&target, clamped, lx, ly, actions);
@@ -734,22 +731,29 @@ impl Engine {
         }
     }
 
-    /// The first machine beyond `side` of `machine` that is online (several may share a place).
-    fn online_neighbor(&self, machine: &str, side: Side) -> Option<&str> {
+    /// A machine beyond `side` of `machine` that is online: the one in the middle of the edge if
+    /// there is one, else any.
+    fn online_neighbor(&self, machine: &str, side: Side) -> Option<String> {
+        let online = |m: &String| self.machines.contains_key(m);
         self.layout
-            .neighbors(machine, side)
-            .iter()
-            .map(String::as_str)
-            .find(|m| self.machines.contains_key(*m))
+            .across(machine, side, 0.5)
+            .into_iter()
+            .map(|(m, _)| m)
+            .find(online)
+            .or_else(|| self.layout.neighbors(machine, side).into_iter().find(online))
     }
 
-    /// The machine beyond `side` of `machine` and where the pointer enters it.
+    /// The machine beyond `side` of `machine` where `p` crosses it, and where the pointer enters
+    /// it. Of machines sharing a place, the first one online.
     fn neighbor_entry(&self, machine: &str, side: Side, p: Point) -> Option<(MachineId, Point)> {
-        let next = self.online_neighbor(machine, side)?;
         let from = self.machines.get(machine)?;
-        let to = self.machines.get(next)?;
-        let entry = to.entry(side.opposite(), from.along(side, p));
-        Some((next.to_string(), entry))
+        let (next, along) = self
+            .layout
+            .across(machine, side, from.along(side, p))
+            .into_iter()
+            .find(|(m, _)| self.machines.contains_key(m))?;
+        let entry = self.machines.get(&next)?.entry(side.opposite(), along);
+        Some((next, entry))
     }
 
     fn set_position(&mut self, target: &str, pos: Point, lx: f64, ly: f64, actions: &mut Vec<Action>) {

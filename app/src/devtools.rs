@@ -2,7 +2,7 @@
 //!
 //! - `TC_SCREENSHOT=/path/shot.bmp` saves a picture of the window shortly after start and quits.
 //! - `TC_DEMO=1` shows made-up computers instead of starting the network and input (nothing is saved).
-//! - `TC_PAGE=status|computers|settings|about` opens that page; `TC_SETUP=1|2|3` the setup step.
+//! - `TC_PAGE=status|arrangement|pairing|settings|about` opens that page; `TC_SETUP=1|2|3` the setup step.
 //! - `TC_LANG=de|en` and `TC_THEME=light|dark` override the settings without saving them.
 //! - `TC_SIZE=900x640` sets the window size.
 

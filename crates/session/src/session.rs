@@ -66,9 +66,9 @@ pub enum Command {
         target: PairTarget,
     },
     Unpair(Fingerprint),
-    /// The whole desk as grid cells `(machine id, column, row)`; computers in neighboring cells
-    /// become neighbors. Replaces the arrangement.
-    Arrange(Vec<(String, i32, i32)>),
+    /// The whole desk as tiles `(machine id, x, y)`; computers whose tiles touch become neighbors
+    /// where the edges overlap. Replaces the arrangement.
+    Arrange(Vec<(String, f32, f32)>),
     /// Lock the screens of all connected computers and of this one.
     LockAll,
     /// Shut down all connected computers, and this one as well with `this_one`.
@@ -339,8 +339,7 @@ impl Shared {
     fn numbered(&self, index: usize) -> Option<String> {
         let file = self.status.lock().expect("status lock").layout.clone();
         let resolve = self.resolver();
-        let me = layout_file::machine_id(&self.node.fingerprint());
-        let desk = layout_file::desk(&file, &me, |entry| {
+        let desk = layout_file::desk(&file, |entry| {
             resolve(entry).map_or_else(|| entry.to_string(), |fp| layout_file::machine_id(&fp))
         });
         let id = layout_file::reading_order(&desk).into_iter().nth(index)?;
@@ -378,12 +377,19 @@ impl Shared {
         self.share_layout(None);
     }
 
-    /// Our arrangement for other computers.
-    fn layout_message(&self) -> Option<Message> {
+    /// Our arrangement for `to`: tiles if it runs a version that knows them, else neighbors.
+    fn layout_message(&self, to: &Fingerprint) -> Option<Message> {
         let file = layout_file::load(&self.dir).ok()?;
+        let tiles = self
+            .node
+            .status()
+            .into_iter()
+            .find(|p| p.peer.fingerprint == *to)
+            .and_then(|p| p.link)
+            .is_some_and(|link| layout_file::knows_tiles(&link.app_version));
         let me = (self.node.fingerprint(), self.node.name().to_string());
         let paired = self.node.paired();
-        Some(layout_file::message(&file, self.resolver(), |fp| {
+        Some(layout_file::message(&file, tiles, self.resolver(), |fp| {
             if *fp == me.0 {
                 return Some(me.1.clone());
             }
@@ -391,35 +397,41 @@ impl Shared {
         }))
     }
 
-    /// Sends the arrangement to `to`, or to every connected computer except `except`.
+    /// Sends the arrangement to `to`.
     fn share_layout_with(&self, to: &Fingerprint) {
-        if let Some(message) = self.layout_message() {
+        if let Some(message) = self.layout_message(to) {
             self.node.send(to, message);
         }
     }
 
+    /// Sends the arrangement to every connected computer except `except`.
     fn share_layout(&self, except: Option<Fingerprint>) {
-        let Some(message) = self.layout_message() else { return };
         for peer in self.node.status().into_iter().filter(|p| p.link.is_some()) {
             if Some(peer.peer.fingerprint) != except {
-                self.node.send(&peer.peer.fingerprint, message.clone());
+                self.share_layout_with(&peer.peer.fingerprint);
             }
         }
     }
 
     /// An arrangement from `from`: taken over if newer, then passed on.
     fn layout_received(&self, from: Fingerprint, message: Message) {
-        let Message::Layout {
-            revision,
-            editor,
-            placements,
-            names,
-        } = message
-        else {
-            return;
+        let (revision, editor, arrangement, names) = match message {
+            Message::Layout {
+                revision,
+                editor,
+                placements,
+                names,
+            } => (revision, editor, Err(placements), names),
+            Message::Tiles {
+                revision,
+                editor,
+                tiles,
+                names,
+            } => (revision, editor, Ok(tiles), names),
+            _ => return,
         };
         let result = layout_file::load(&self.dir).and_then(|mut file| {
-            let newer = layout_file::adopt(&mut file, revision, editor, placements, names);
+            let newer = layout_file::adopt(&mut file, revision, editor, arrangement, names);
             if newer {
                 layout_file::save(&self.dir, &file)?;
             }
@@ -1306,7 +1318,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
         }
         Event::Message {
             peer,
-            message: message @ Message::Layout { .. },
+            message: message @ (Message::Layout { .. } | Message::Tiles { .. }),
         } => shared.layout_received(peer, message),
         Event::Message {
             peer,
@@ -1427,10 +1439,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             }
         }
         Command::Place { peer, side } => shared.edit_layout(|file| layout_file::place(file, &me, &peer, side)),
-        Command::Arrange(cells) => {
-            let me = layout_file::machine_id(&me);
-            shared.edit_layout(|file| file.neighbors = layout_file::from_grid(&cells, &me));
-        }
+        Command::Arrange(tiles) => shared.edit_layout(|file| file.set_tiles(layout_file::from_desk(&tiles))),
         Command::SwapCmdCtrl { peer, swap } => shared.edit_layout(|file| layout_file::set_swap(file, &peer, swap)),
         Command::AddAddress { peer, address } => {
             if let Err(e) = shared.node.add_address(&peer, address) {

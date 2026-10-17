@@ -83,22 +83,11 @@ pub fn status() -> Status {
         ]
         .into(),
         layout: tc_core::LayoutFile {
-            neighbors: vec![
-                tc_core::Neighbor {
-                    machine: "1111111111111111".into(),
-                    side: Side::Right,
-                    of: "5a5a5a5a5a5a5a5a".into(),
-                },
-                tc_core::Neighbor {
-                    machine: "2222222222222222".into(),
-                    side: Side::Right,
-                    of: "5a5a5a5a5a5a5a5a".into(),
-                },
-                tc_core::Neighbor {
-                    machine: "3333333333333333".into(),
-                    side: Side::Right,
-                    of: "1111111111111111".into(),
-                },
+            tiles: vec![
+                tile("5a5a5a5a5a5a5a5a", 0.0, 0.0),
+                tile("1111111111111111", 1.0, 0.0),
+                tile("2222222222222222", 1.0, 0.0),
+                tile("3333333333333333", 1.5, 1.0),
             ],
             names: [("3333333333333333".to_string(), "Studio-Mac".to_string())].into(),
             ..Default::default()
@@ -126,5 +115,13 @@ pub fn status() -> Status {
             },
         ],
         files_waiting: None,
+    }
+}
+
+fn tile(machine: &str, x: f32, y: f32) -> tc_core::Tile {
+    tc_core::Tile {
+        machine: machine.into(),
+        x,
+        y,
     }
 }

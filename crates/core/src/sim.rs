@@ -700,6 +700,42 @@ fn a_corner_that_keeps_the_pointer_is_reported() {
 }
 
 #[test]
+fn a_laptop_half_below_the_imac() {
+    // The laptop leads and stands below the left half of the iMac; the other laptop is to the left
+    let mut sim = Sim::new(
+        &[
+            ("laptop", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("imac", vec![screen(0, 0, 2000, 1000, 1.0)]),
+            ("left", vec![screen(0, 0, 1000, 800, 1.0)]),
+        ],
+        Layout::default()
+            .at("imac", 0.0, 0.0)
+            .at("laptop", -0.5, 1.0)
+            .at("left", -1.0, 0.0),
+    );
+    // The left half of the laptop's top edge lies below the other laptop
+    sim.machines.get_mut("laptop").unwrap().os.pointer = Point::new(250.0, 20.0);
+    sim.glide("laptop", 0.0, -600.0);
+    assert_eq!(sim.role("laptop"), Role::Controlling("left".into()));
+    sim.glide("laptop", 0.0, 2000.0);
+    assert_eq!(sim.role("laptop"), Role::Idle);
+    // The right half leads to the left half of the iMac, at the matching place
+    sim.machines.get_mut("laptop").unwrap().os.pointer = Point::new(750.0, 20.0);
+    sim.glide("laptop", 0.0, -600.0);
+    assert_eq!(sim.role("laptop"), Role::Controlling("imac".into()));
+    let x = sim.os("imac").pointer.x;
+    assert!((450.0..=550.0).contains(&x), "entered at {x}");
+    // Nothing below the right half of the iMac: the pointer stays there
+    sim.glide("laptop", 1000.0, 0.0);
+    sim.glide("laptop", 0.0, 2000.0);
+    assert_eq!(sim.role("laptop"), Role::Controlling("imac".into()));
+    // From the left half down again
+    sim.glide("laptop", -1000.0, 0.0);
+    sim.glide("laptop", 0.0, 2000.0);
+    assert_eq!(sim.role("laptop"), Role::Idle);
+}
+
+#[test]
 fn wheel_goes_to_the_target() {
     let mut sim = Sim::mac_pc();
     sim.feed(

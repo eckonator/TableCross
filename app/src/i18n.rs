@@ -79,23 +79,35 @@ pub fn trf(en: &'static str, args: &[&dyn Display]) -> String {
 
 fn de(en: &str) -> Option<&'static str> {
     Some(match en {
-        "(this computer)" => "(dieser Rechner)",
+        "(this computer)" => "(dieser Computer)",
         "A program holds Secure Input (password field): typing does not reach other computers right now. The system helper solves this." => {
-            "Ein Programm hält die sichere Eingabe (Passwortfeld): Tastatureingaben erreichen andere Rechner gerade nicht. Der Systemhelfer löst das."
+            "Ein Programm hält die sichere Eingabe (Passwortfeld): Tastatureingaben erreichen andere Computer gerade nicht. Der Systemhelfer löst das."
         }
         "A wrong code was entered ({} attempts left)" => "Ein falscher Code wurde eingegeben (noch {} Versuche)",
         "About" => "Über",
-        "above this computer" => "über diesem Rechner",
+        "above this computer" => "über diesem Computer",
         "All keys up, mouse and keyboard back to this computer (Ctrl+Shift+Alt+Esc)" => {
-            "Alle Tasten los, Maus und Tastatur zurück an diesen Rechner (Strg+Umschalt+Alt+Esc)"
+            "Alle Tasten los, Maus und Tastatur zurück an diesen Computer (Strg+Umschalt+Alt+Esc)"
         }
         "another device answered at the known address" => "unter der bekannten Adresse antwortete ein anderes Gerät",
         "Appearance" => "Aussehen",
         "Arrange" => "Anordnen",
         "Arrangement" => "Anordnung",
+        "Arrange the computers like they stand on your desk." => {
+            "Ordne die Computer so an, wie sie auf deinem Schreibtisch stehen."
+        }
+        "Desk" => "Schreibtisch",
+        "Drag the computers to where they stand on your desk. Where two touch, the pointer crosses (green); a computer may also stand half beside another. Drop a computer onto another one if both are used in turn at the same place." => {
+            "Zieh die Computer dorthin, wo sie auf deinem Schreibtisch stehen. Wo sich zwei berühren, wechselt der Zeiger (grün); ein Computer darf auch halb versetzt neben einem anderen stehen. Zieh einen Computer auf einen anderen, wenn beide abwechselnd am selben Platz stehen."
+        }
+        "No computer is paired yet." => "Noch kein Computer gekoppelt.",
+        "Pair new computers and manage the paired ones." => "Neue Computer koppeln und gekoppelte verwalten.",
+        "Pairing" => "Kopplung",
+        "Take off the desk" => "Vom Schreibtisch nehmen",
+        "no neighbor" => "ohne Nachbarn",
         "Author" => "Autor",
         "Back" => "Zurück",
-        "below this computer" => "unter diesem Rechner",
+        "below this computer" => "unter diesem Computer",
         "Cancel" => "Abbrechen",
         "cannot save the pairing ({})" => "Kopplung lässt sich nicht speichern ({})",
         "captured" => "erfasst",
@@ -103,7 +115,6 @@ fn de(en: &str) -> Option<&'static str> {
         "Clipboard" => "Zwischenablage",
         "Clipboard taken over from {}" => "Zwischenablage von {} übernommen",
         "Code" => "Code",
-        "Computers" => "Rechner",
         "Connected at {} · round trip {} · lost {} of {} · reconnects {}" => {
             "Verbunden über {} · Laufzeit {} · verloren {} von {} · Neuverbindungen {}"
         }
@@ -116,36 +127,35 @@ fn de(en: &str) -> Option<&'static str> {
         "Ctrl + Shift + Alt + arrow key" => "Strg + Umschalt + Alt + Pfeiltaste",
         "Ctrl + Shift + Alt + Esc" => "Strg + Umschalt + Alt + Esc",
         "Copied content stays on this computer: {} MB is more than allowed" => {
-            "Kopierter Inhalt bleibt auf diesem Rechner: {} MB sind mehr als erlaubt"
+            "Kopierter Inhalt bleibt auf diesem Computer: {} MB sind mehr als erlaubt"
         }
         "Copied password stays on this computer (marked as private)" => {
-            "Kopiertes Passwort bleibt auf diesem Rechner (als privat markiert)"
+            "Kopiertes Passwort bleibt auf diesem Computer (als privat markiert)"
         }
         "Dark" => "Dunkel",
         "Diagnostics copied to the clipboard." => "Diagnose in die Zwischenablage kopiert.",
         "Done" => "Fertig",
         "Done." => "Erledigt.",
         "Drag each computer to the side where it stands on your desk." => {
-            "Zieh jeden Rechner auf die Seite, auf der er auf deinem Schreibtisch steht."
+            "Zieh jeden Computer auf die Seite, auf der er auf deinem Schreibtisch steht."
         }
-        "drop here" => "hier ablegen",
-        "Enter a code from another computer" => "Code eines anderen Rechners eingeben",
+        "Enter a code from another computer" => "Code eines anderen Computers eingeben",
         "Everything TableCross needs is in place." => "Alles, was TableCross braucht, ist eingerichtet.",
         "Everything was released" => "Alles wurde losgelassen",
         "Files" => "Dateien",
-        "Find computers on the network automatically" => "Rechner im Netz automatisch finden",
+        "Find computers on the network automatically" => "Computer im Netz automatisch finden",
         "Fingerprint" => "Fingerabdruck",
         "Free software under the GNU General Public License, version 3 or later. It comes without any warranty." => {
             "Freie Software unter der GNU General Public License, Version 3 oder neuer. Ohne jede Gewährleistung."
         }
         "General" => "Allgemein",
         "Go there" => "Dorthin wechseln",
-        "Go to the computer on that side" => "Zum Rechner auf dieser Seite wechseln",
+        "Go to the computer on that side" => "Zum Computer auf dieser Seite wechseln",
         "Install system helper …" => "Systemhelfer installieren …",
         "Keyboard shortcuts" => "Tastenkürzel",
         "Largest content" => "Größter Inhalt",
         "Language" => "Sprache",
-        "left of this computer" => "links von diesem Rechner",
+        "left of this computer" => "links von diesem Computer",
         "License" => "Lizenz",
         "Light" => "Hell",
         "Like the system" => "Wie das System",
@@ -153,29 +163,29 @@ fn de(en: &str) -> Option<&'static str> {
         "Mouse and keyboard are not captured right now." => "Maus und Tastatur werden gerade nicht erfasst.",
         "Mouse and keyboard cannot be captured: {}" => "Maus und Tastatur lassen sich nicht erfassen: {}",
         "Mouse and keyboard now control {}" => "Maus und Tastatur steuern jetzt {}",
-        "Mouse and keyboard work on this computer" => "Maus und Tastatur arbeiten an diesem Rechner",
+        "Mouse and keyboard work on this computer" => "Maus und Tastatur arbeiten an diesem Computer",
         "Name" => "Name",
-        "Name of this computer" => "Name dieses Rechners",
+        "Name of this computer" => "Name dieses Computers",
         "Network" => "Netzwerk",
         "network error ({})" => "Netzwerkfehler ({})",
         "Next" => "Weiter",
         "no answer for 2 seconds" => "2 Sekunden keine Antwort",
-        "No computer on the network shows a code right now." => "Gerade zeigt kein Rechner im Netz einen Code.",
+        "No computer on the network shows a code right now." => "Gerade zeigt kein Computer im Netz einen Code.",
         "none" => "keiner",
         "None yet. Pair a computer on the page “Computers”." => {
-            "Noch keiner. Kopple einen Rechner auf der Seite „Rechner“."
+            "Noch keiner. Kopple einen Computer auf der Seite „Computer“."
         }
         "not available: {}" => "nicht verfügbar: {}",
         "Not connected (searching …)" => "Nicht verbunden (suche …)",
         "Not connected: {}" => "Nicht verbunden: {}",
         "Not found? Enter the address" => "Nicht gefunden? Adresse eingeben",
-        "not paired with this computer" => "nicht mit diesem Rechner gekoppelt",
+        "not paired with this computer" => "nicht mit diesem Computer gekoppelt",
         "not placed" => "nicht platziert",
         "Not placed:" => "Nicht platziert:",
         "Whole desk" => "Ganzer Schreibtisch",
-        "Update together with paired computers" => "Mit gekoppelten Rechnern aktualisieren",
+        "Update together with paired computers" => "Mit gekoppelten Computern aktualisieren",
         "When a paired computer runs a newer version, this one fetches the same version from GitHub and installs it." => {
-            "Hat ein gekoppelter Rechner eine neuere Version, holt dieser Rechner dieselbe Version von GitHub und installiert sie."
+            "Hat ein gekoppelter Computer eine neuere Version, holt dieser Computer dieselbe Version von GitHub und installiert sie."
         }
         "Check for updates" => "Nach Updates suchen",
         "TableCross {} is up to date." => "TableCross {} ist aktuell.",
@@ -188,43 +198,40 @@ fn de(en: &str) -> Option<&'static str> {
         "Remove TableCross" => "TableCross entfernen",
         "Remove TableCross …" => "TableCross entfernen …",
         "Removes TableCross from this computer with everything it set up: the system helper, the permissions, starting with the system and the program itself." => {
-            "Entfernt TableCross von diesem Rechner mit allem, was es eingerichtet hat: Systemhelfer, Berechtigungen, Start mit dem System und das Programm selbst."
+            "Entfernt TableCross von diesem Computer mit allem, was es eingerichtet hat: Systemhelfer, Berechtigungen, Start mit dem System und das Programm selbst."
         }
         "Also delete settings and pairings (the other computers forget this one)" => {
-            "Auch Einstellungen und Kopplungen löschen (die anderen Rechner vergessen diesen)"
+            "Auch Einstellungen und Kopplungen löschen (die anderen Computer vergessen diesen)"
         }
         "Removing TableCross …" => "TableCross wird entfernt …",
         "Really remove TableCross?" => "TableCross wirklich entfernen?",
         "Yes, remove" => "Ja, entfernen",
         "All screens were locked" => "Alle Bildschirme wurden gesperrt",
         "Lock all screens" => "Alle Bildschirme sperren",
-        "Shut down other computers …" => "Andere Rechner herunterfahren …",
-        "Shut down all computers …" => "Alle Rechner herunterfahren …",
-        "Shut down all computers?" => "Alle Rechner herunterfahren?",
-        "Shut down the other computers?" => "Die anderen Rechner herunterfahren?",
-        "No other computer is connected." => "Kein anderer Rechner ist verbunden.",
-        "Only this computer is connected." => "Nur dieser Rechner ist verbunden.",
-        "This computer and {}" => "Dieser Rechner und {}",
+        "Shut down other computers …" => "Andere Computer herunterfahren …",
+        "Shut down all computers …" => "Alle Computer herunterfahren …",
+        "Shut down all computers?" => "Alle Computer herunterfahren?",
+        "Shut down the other computers?" => "Die anderen Computer herunterfahren?",
+        "No other computer is connected." => "Kein anderer Computer ist verbunden.",
+        "Only this computer is connected." => "Nur dieser Computer ist verbunden.",
+        "This computer and {}" => "Dieser Computer und {}",
         "Programs with unsaved documents may still ask before they quit." => {
             "Programme mit ungesicherten Dokumenten können vor dem Beenden noch nachfragen."
         }
         "Shut down" => "Herunterfahren",
-        "This computer is shutting down" => "Dieser Rechner wird heruntergefahren",
+        "This computer is shutting down" => "Dieser Computer wird heruntergefahren",
         "Shutting down: {}" => "Wird heruntergefahren: {}",
         "Ctrl + Shift + Alt + L" => "Strg + Umschalt + Alt + L",
         "Ctrl + Shift + Alt + 1 … 9" => "Strg + Umschalt + Alt + 1 … 9",
         "Go to the computer with that number (see Computers)" => {
-            "Zum Rechner mit dieser Nummer wechseln (siehe Rechner)"
+            "Zum Computer mit dieser Nummer wechseln (siehe Computer)"
         }
-        "Lock the screens of all computers" => "Die Bildschirme aller Rechner sperren",
+        "Lock the screens of all computers" => "Die Bildschirme aller Computer sperren",
         "The button opens the settings and a Finder window with the helper file: switch it on there, or drag the file into the list." => {
             "Der Knopf öffnet die Einstellungen und ein Finder-Fenster mit der Datei des Systemhelfers: dort einschalten oder die Datei in die Liste ziehen."
         }
         "Test build {} ({})" => "Testversion {} ({})",
         "Update system helper …" => "Systemhelfer aktualisieren …",
-        "Drag the computers to where they stand on your desk. Computers side by side share that edge; computers used in turn at the same place share a field." => {
-            "Zieh die Rechner dorthin, wo sie auf deinem Schreibtisch stehen. Nebeneinanderliegende Rechner teilen sich diese Kante; Rechner, die abwechselnd am selben Platz stehen, teilen sich ein Feld."
-        }
         "Already switched on and still shown here (often after an update)? Select {} in the list, remove it with “–” and add it again with “+”." => {
             "Schon eingeschaltet und trotzdem hier aufgeführt (oft nach einem Update)? {} in der Liste auswählen, mit „–“ entfernen und mit „+“ neu hinzufügen."
         }
@@ -236,14 +243,14 @@ fn de(en: &str) -> Option<&'static str> {
         "The update did not work: {}" => "Die Aktualisierung hat nicht geklappt: {}",
         "version {}" => "Version {}",
         "This computer runs version {}. Install the same version everywhere." => {
-            "Dieser Rechner hat Version {}. Installiere überall dieselbe Version."
+            "Dieser Computer hat Version {}. Installiere überall dieselbe Version."
         }
         "The arrangement is shared with all paired computers, so every keyboard reaches every screen." => {
-            "Die Anordnung gilt für alle gekoppelten Rechner, so erreicht jede Tastatur jeden Bildschirm."
+            "Die Anordnung gilt für alle gekoppelten Computer, so erreicht jede Tastatur jeden Bildschirm."
         }
         "not paired here" => "nicht gekoppelt",
         "To control {} with this keyboard, pair it with this computer as well." => {
-            "Um {} mit dieser Tastatur zu steuern, kopple ihn auch mit diesem Rechner."
+            "Um {} mit dieser Tastatur zu steuern, kopple ihn auch mit diesem Computer."
         }
         "Nothing yet." => "Noch nichts.",
         "now" => "jetzt",
@@ -252,8 +259,8 @@ fn de(en: &str) -> Option<&'static str> {
         "Open Input Monitoring settings" => "Einstellungen für Eingabeüberwachung öffnen",
         "Open settings folder" => "Einstellungsordner öffnen",
         "Pair" => "Koppeln",
-        "Pair a computer" => "Rechner koppeln",
-        "Paired computers" => "Gekoppelte Rechner",
+        "Pair a computer" => "Computer koppeln",
+        "Paired computers" => "Gekoppelte Computer",
         "Paired with {}" => "Gekoppelt mit {}",
         "Paired: {}" => "Gekoppelt: {}",
         "Pairing failed: {}" => "Koppeln fehlgeschlagen: {}",
@@ -268,27 +275,27 @@ fn de(en: &str) -> Option<&'static str> {
         "Recent messages" => "Letzte Meldungen",
         "Release everything" => "Alles loslassen",
         "Release everything: all keys up, mouse and keyboard back to this computer" => {
-            "Alles loslassen: alle Tasten los, Maus und Tastatur zurück an diesen Rechner"
+            "Alles loslassen: alle Tasten los, Maus und Tastatur zurück an diesen Computer"
         }
         "Remove" => "Entfernen",
         "Remove pairing …" => "Kopplung entfernen …",
         "replaced by a newer connection" => "durch eine neuere Verbindung ersetzt",
         "Restart now" => "Jetzt neu starten",
-        "right of this computer" => "rechts von diesem Rechner",
+        "right of this computer" => "rechts von diesem Computer",
         "Screens" => "Bildschirme",
         "Search" => "Suche",
         "Settings" => "Einstellungen",
         "Setup …" => "Einrichtung …",
         "Shares one mouse, keyboard and clipboard between the computers on your desk, on the local network only." => {
-            "Teilt eine Maus, eine Tastatur und die Zwischenablage zwischen den Rechnern auf deinem Schreibtisch, nur im lokalen Netz."
+            "Teilt eine Maus, eine Tastatur und die Zwischenablage zwischen den Computern auf deinem Schreibtisch, nur im lokalen Netz."
         }
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
         "Troubleshooting" => "Fehlersuche",
         "Sleep" => "Ruhezustand",
-        "Keep this computer from going to sleep" => "Diesen Rechner nicht in den Ruhezustand gehen lassen",
+        "Keep this computer from going to sleep" => "Diesen Computer nicht in den Ruhezustand gehen lassen",
         "While TableCross runs. A computer that sleeps drops out, and with it the way over it to the computers behind." => {
-            "Solange TableCross läuft. Ein schlafender Rechner fällt weg und mit ihm der Weg über ihn zu den Rechnern dahinter."
+            "Solange TableCross läuft. Ein schlafender Computer fällt weg und mit ihm der Weg über ihn zu den Computern dahinter."
         }
         "Keep the screen on as well" => "Auch den Bildschirm anlassen",
         "Universal Control" => "Universelle Steuerung",
@@ -301,19 +308,19 @@ fn de(en: &str) -> Option<&'static str> {
         "Universal Control of macOS is switched on. It also moves the pointer to other Macs at the screen edges, gets in the way of TableCross and takes the pointer over even when TableCross is quit." => {
             "Die Universelle Steuerung von macOS ist eingeschaltet. Sie schiebt den Zeiger an den Bildschirmrändern ebenfalls zu anderen Macs, kommt TableCross in die Quere und übernimmt den Zeiger sogar, wenn TableCross beendet ist."
         }
-        "Collect the logs of the other computers here" => "Protokolle der anderen Rechner hier sammeln",
+        "Collect the logs of the other computers here" => "Protokolle der anderen Computer hier sammeln",
         "The connected computers send their log to this one while it is on, so a problem can be looked at in one place. Only on paired computers, over the encrypted connection; the logs contain no typed text." => {
-            "Solange das an ist, schicken die verbundenen Rechner ihr Protokoll an diesen, damit sich ein Problem an einer Stelle untersuchen lässt. Nur unter gekoppelten Rechnern und über die verschlüsselte Verbindung; die Protokolle enthalten keinen getippten Text."
+            "Solange das an ist, schicken die verbundenen Computer ihr Protokoll an diesen, damit sich ein Problem an einer Stelle untersuchen lässt. Nur unter gekoppelten Computern und über die verschlüsselte Verbindung; die Protokolle enthalten keinen getippten Text."
         }
         "Open the folder with the collected logs" => "Ordner mit den gesammelten Protokollen öffnen",
         "Show pairing code" => "Kopplungscode zeigen",
-        "Share the clipboard with the other computers" => "Zwischenablage mit den anderen Rechnern teilen",
+        "Share the clipboard with the other computers" => "Zwischenablage mit den anderen Computern teilen",
         "Show TableCross" => "TableCross zeigen",
         "Skip setup" => "Einrichtung überspringen",
         "Source code" => "Quellcode",
         "Start" => "Start",
         "Start TableCross on the other computer as well. Show a code on one of them and type it on the other." => {
-            "Starte TableCross auch auf dem anderen Rechner. Lass dir auf einem einen Code zeigen und tippe ihn auf dem anderen ein."
+            "Starte TableCross auch auf dem anderen Computer. Lass dir auf einem einen Code zeigen und tippe ihn auf dem anderen ein."
         }
         "Start TableCross with the system" => "TableCross mit dem System starten",
         "Status" => "Status",
@@ -328,25 +335,25 @@ fn de(en: &str) -> Option<&'static str> {
             "TableCross braucht die Berechtigung „Bedienungshilfen“, um Maus und Tastatur zu nutzen."
         }
         "TableCross talks only to the computers you paired, encrypted, on your local network. No account, no cloud, no telemetry. If you allow it, it asks GitHub for new versions." => {
-            "TableCross spricht nur mit den Rechnern, die du gekoppelt hast, verschlüsselt und nur im lokalen Netz. Kein Konto, keine Cloud, keine Telemetrie. Wenn du es erlaubst, fragt es bei GitHub nach neuen Versionen."
+            "TableCross spricht nur mit den Computern, die du gekoppelt hast, verschlüsselt und nur im lokalen Netz. Kein Konto, keine Cloud, keine Telemetrie. Wenn du es erlaubst, fragt es bei GitHub nach neuen Versionen."
         }
         "Takes effect after a restart of the connection." => "Wirkt nach einem Neustart der Verbindung.",
         "That did not work: {}" => "Das hat nicht geklappt: {}",
-        "the other computer cannot be reached" => "der andere Rechner ist nicht erreichbar",
+        "the other computer cannot be reached" => "der andere Computer ist nicht erreichbar",
         "the other computer cannot be reached: its address {} is not in this computer's network (a virtual machine needs a bridged network adapter instead of NAT)" => {
-            "der andere Rechner ist nicht erreichbar: seine Adresse {} liegt nicht im Netz dieses Rechners (eine virtuelle Maschine braucht eine Netzwerkbrücke statt NAT)"
+            "der andere Computer ist nicht erreichbar: seine Adresse {} liegt nicht im Netz dieses Computers (eine virtuelle Maschine braucht eine Netzwerkbrücke statt NAT)"
         }
         "the other computer is not showing a code (expired or too many attempts)" => {
-            "der andere Rechner zeigt keinen Code (abgelaufen oder zu viele Versuche)"
+            "der andere Computer zeigt keinen Code (abgelaufen oder zu viele Versuche)"
         }
-        "the other computer quit TableCross" => "der andere Rechner hat TableCross beendet",
+        "the other computer quit TableCross" => "der andere Computer hat TableCross beendet",
         "the other computer uses version {} of the protocol, this one {}: please update the older one" => {
-            "der andere Rechner nutzt Version {} des Protokolls, dieser {}: bitte den älteren aktualisieren"
+            "der andere Computer nutzt Version {} des Protokolls, dieser {}: bitte den älteren aktualisieren"
         }
-        "the other computer was not found on the network" => "der andere Rechner wurde im Netz nicht gefunden",
-        "the other computer went to sleep" => "der andere Rechner ist in den Ruhezustand gegangen",
+        "the other computer was not found on the network" => "der andere Computer wurde im Netz nicht gefunden",
+        "the other computer went to sleep" => "der andere Computer ist in den Ruhezustand gegangen",
         "Text, formatted text and images. Passwords copied from a password manager stay on this computer." => {
-            "Text, formatierter Text und Bilder. Aus einem Passwortmanager kopierte Passwörter bleiben auf diesem Rechner."
+            "Text, formatierter Text und Bilder. Aus einem Passwortmanager kopierte Passwörter bleiben auf diesem Computer."
         }
         "The pairing code is no longer valid after too many attempts" => {
             "Der Kopplungscode gilt nach zu vielen Versuchen nicht mehr"
@@ -355,7 +362,7 @@ fn de(en: &str) -> Option<&'static str> {
             "Der Systemhelfer konnte {} Tastatur(en) nicht übernehmen; ihre Tasten kommen auch an diesem Mac an."
         }
         "The system helper is not installed. Without it, typing on other computers stops while a password field is active on this Mac." => {
-            "Der Systemhelfer ist nicht installiert. Ohne ihn kommen Tastatureingaben auf anderen Rechnern nicht an, solange an diesem Mac ein Passwortfeld aktiv ist."
+            "Der Systemhelfer ist nicht installiert. Ohne ihn kommen Tastatureingaben auf anderen Computern nicht an, solange an diesem Mac ein Passwortfeld aktiv ist."
         }
         "The system helper is older than the app; please update it." => {
             "Der Systemhelfer ist älter als die App; bitte aktualisieren."
@@ -363,29 +370,29 @@ fn de(en: &str) -> Option<&'static str> {
         "The system helper still needs the Input Monitoring permission." => {
             "Der Systemhelfer braucht noch die Berechtigung „Eingabeüberwachung“."
         }
-        "Then type it on the other computer." => "Dann am anderen Rechner eintippen.",
-        "This computer" => "Dieser Rechner",
-        "this computer was asleep" => "dieser Rechner war im Ruhezustand",
+        "Then type it on the other computer." => "Dann am anderen Computer eintippen.",
+        "This computer" => "Dieser Computer",
+        "this computer was asleep" => "dieser Computer war im Ruhezustand",
         "UDP port" => "UDP-Port",
         "unknown" => "unbekannt",
         "valid for {} min" => "gültig für {} min",
         "Version {} ({})" => "Version {} ({})",
         "While controlling this computer from here, ⌘ acts as Ctrl and the other way round" => {
-            "Solange dieser Rechner von hier aus gesteuert wird, wirkt ⌘ wie Strg und umgekehrt"
+            "Solange dieser Computer von hier aus gesteuert wird, wirkt ⌘ wie Strg und umgekehrt"
         }
         "Windows switched off the input capture {} times; it was restarted." => {
             "Windows hat die Eingabeerfassung {}-mal abgeschaltet; sie wurde neu gestartet."
         }
         "Woke from sleep, connecting again" => "Aus dem Ruhezustand aufgewacht, verbinde neu",
         "wrong code" => "falscher Code",
-        "{} controls this computer" => "{} steuert diesen Rechner",
+        "{} controls this computer" => "{} steuert diesen Computer",
         "{} h ago" => "vor {} h",
         "{} min ago" => "vor {} min",
         "{} removed the pairing" => "{} hat die Kopplung entfernt",
         "{} s ago" => "vor {} s",
         "{} was refused: {}" => "{} wurde abgewiesen: {}",
         "Copied on another computer: {}. They come over when the pointer arrives here." => {
-            "Auf einem anderen Rechner kopiert: {}. Die Dateien kommen, sobald der Zeiger hierher wechselt."
+            "Auf einem anderen Computer kopiert: {}. Die Dateien kommen, sobald der Zeiger hierher wechselt."
         }
         "from {}" => "von {}",
         "to {}" => "an {}",
@@ -399,30 +406,27 @@ fn de(en: &str) -> Option<&'static str> {
         "Download" => "Herunterladen",
         "New versions" => "Neue Versionen",
         "May TableCross look for new versions on GitHub now and then? Only the question for the newest release is sent, nothing about you or your computers." => {
-            "Darf TableCross ab und zu bei GitHub nach neuen Versionen schauen? Gesendet wird nur die Frage nach der neuesten Version, nichts über dich oder deine Rechner."
+            "Darf TableCross ab und zu bei GitHub nach neuen Versionen schauen? Gesendet wird nur die Frage nach der neuesten Version, nichts über dich oder deine Computer."
         }
         "Yes, look for new versions" => "Ja, nach neuen Versionen schauen",
         "No" => "Nein",
         "Updates" => "Updates",
         "Look for new versions on GitHub" => "Bei GitHub nach neuen Versionen schauen",
         "About TableCross" => "Über TableCross",
-        "Arrange the computers on your desk and pair new ones." => {
-            "Ordne die Rechner auf deinem Schreibtisch an und kopple neue."
-        }
-        "How TableCross behaves on this computer." => "Wie sich TableCross auf diesem Rechner verhält.",
+        "How TableCross behaves on this computer." => "Wie sich TableCross auf diesem Computer verhält.",
         "ID {}" => "ID {}",
         "Setup" => "Einrichtung",
         "This computer, its connections and what happened recently." => {
-            "Dieser Rechner, seine Verbindungen und was zuletzt passiert ist."
+            "Dieser Computer, seine Verbindungen und was zuletzt passiert ist."
         }
         "Three short steps, then TableCross is ready." => "Drei kurze Schritte, dann ist TableCross bereit.",
-        "Working on this computer" => "Arbeitet an diesem Rechner",
+        "Working on this computer" => "Arbeitet an diesem Computer",
         "connected" => "verbunden",
         "mouse and keyboard captured" => "Maus und Tastatur erfasst",
         "mouse and keyboard not available" => "Maus und Tastatur nicht verfügbar",
         "mouse and keyboard off" => "Maus und Tastatur aus",
         "not connected" => "nicht verbunden",
-        "this computer" => "dieser Rechner",
+        "this computer" => "dieser Computer",
         "{} screen(s)" => "{} Bildschirm(e)",
         _ => return None,
     })

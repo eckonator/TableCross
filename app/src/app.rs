@@ -17,7 +17,8 @@ use crate::theme;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Status,
-    Computers,
+    Arrangement,
+    Pairing,
     Settings,
     About,
 }
@@ -159,7 +160,8 @@ impl App {
             app.start_session(&ctx);
         }
         app.page = match app.dev.page.as_deref() {
-            Some("computers") => Page::Computers,
+            Some("arrangement" | "computers") => Page::Arrangement,
+            Some("pairing") => Page::Pairing,
             Some("settings") => Page::Settings,
             Some("about") => Page::About,
             _ => Page::Status,
@@ -383,14 +385,25 @@ impl App {
             (_, Some(name)) => (i18n::trf("Controlled by {}", &[name]), p.text, p.warn_soft),
             _ => (tr("Working on this computer").to_string(), p.muted, p.window),
         };
+        // Long computer names end in "…", else the column grows wider than it is shown
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            theme::chip(ui, &text, fg, bg);
+            let room = ui.available_width() - 6.0 - 18.0;
+            egui::Frame::new()
+                .fill(bg)
+                .corner_radius(10.0)
+                .inner_margin(egui::Margin::symmetric(9, 3))
+                .show(ui, |ui| {
+                    ui.set_max_width(room);
+                    ui.add(egui::Label::new(RichText::new(&text).size(12.0).color(fg)).truncate())
+                        .on_hover_text(&text);
+                });
         });
         ui.add_space(18.0);
         for (page, symbol, label) in [
             (Page::Status, "◉", tr("Status")),
-            (Page::Computers, "▣", tr("Computers")),
+            (Page::Arrangement, "▣", tr("Arrangement")),
+            (Page::Pairing, "⇄", tr("Pairing")),
             (Page::Settings, "⚙", tr("Settings")),
             (Page::About, "ℹ", tr("About")),
         ] {
@@ -820,7 +833,8 @@ impl eframe::App for App {
                     } else {
                         match self.page {
                             Page::Status => self.status_page(ui),
-                            Page::Computers => self.computers_page(ui),
+                            Page::Arrangement => self.arrangement_page(ui),
+                            Page::Pairing => self.pairing_page(ui),
                             Page::Settings => self.settings_page(ui),
                             Page::About => self.about_page(ui),
                         }
