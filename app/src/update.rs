@@ -12,11 +12,10 @@ use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui;
 
-/// Releases look only for releases; test builds also for newer test builds (the newest of both).
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases/latest";
-/// GitHub does not list releases by date (the test build often comes last), so the newest is picked
-/// from the first page by its publishing time.
-const NEWEST_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=20";
+/// All releases, the test build among them. GitHub lists them neither by version nor by date, and its
+/// "latest" release is the one published last, which is an older version when two versions were
+/// built together. So the highest version is picked from the list.
+const RELEASES_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=30";
 
 /// Built from a release tag (not a test build from main).
 pub fn is_release() -> bool {
@@ -55,7 +54,7 @@ fn check() -> Result<Option<NewVersion>, ()> {
     let url = std::env::var("TC_UPDATE_URL")
         .ok()
         .filter(|_| cfg!(debug_assertions))
-        .unwrap_or_else(|| if is_release() { LATEST_RELEASE_URL } else { NEWEST_URL }.into());
+        .unwrap_or_else(|| RELEASES_URL.into());
     let mut cmd = Command::new("curl");
     cmd.args([
         "-fsSL",
@@ -75,15 +74,30 @@ fn check() -> Result<Option<NewVersion>, ()> {
     }
     let out = cmd.output().ok().filter(|o| o.status.success()).ok_or(())?;
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| ())?;
-    let release = json.as_array().and_then(|a| newest(a)).unwrap_or(&json);
-    Ok(newer_release(
-        release,
-        env!("CARGO_PKG_VERSION"),
-        // A release is new only with a higher version
-        if is_release() { "" } else { env!("TC_GIT_HASH") },
-        env!("TC_GIT_TIME"),
-        crate::self_update::asset_suffix(),
-    ))
+    let releases = json.as_array().cloned().unwrap_or_else(|| vec![json.clone()]);
+    let suffix = crate::self_update::asset_suffix();
+    let version = env!("CARGO_PKG_VERSION");
+    // A higher version first; a test build also takes a younger test build of the same version
+    let higher = highest(&releases).and_then(|r| newer_release(r, version, "", "", suffix));
+    Ok(higher.or_else(|| {
+        if is_release() {
+            return None;
+        }
+        newest(&releases).and_then(|r| newer_release(r, version, env!("TC_GIT_HASH"), env!("TC_GIT_TIME"), suffix))
+    }))
+}
+
+/// The release with the highest version ("v1.2.3" tags; the test build and drafts do not count).
+fn highest(releases: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    releases
+        .iter()
+        .filter(|r| !r.get("draft").and_then(|d| d.as_bool()).unwrap_or(false))
+        .filter_map(|r| {
+            let tag = r.get("tag_name")?.as_str()?.strip_prefix('v')?;
+            tag.split('.').all(|p| p.parse::<u64>().is_ok()).then_some((tag, r))
+        })
+        .reduce(|a, b| if newer(b.0, a.0) { b } else { a })
+        .map(|(_, r)| r)
 }
 
 /// The release published last ("2026-…" times sort as text).
@@ -210,6 +224,20 @@ mod tests {
         ]);
         let found = newest(list.as_array().unwrap()).unwrap();
         assert_eq!(found["tag_name"], "testing");
+    }
+
+    #[test]
+    fn the_highest_version_wins_over_the_one_published_last() {
+        // 0.3.10 and 0.4.0 pushed together: 0.3.10 was published a few seconds later
+        let list = serde_json::json!([
+            {"tag_name": "v0.4.0", "published_at": "2026-10-19T12:06:09Z"},
+            {"tag_name": "v0.3.10", "published_at": "2026-10-19T12:06:22Z"},
+            {"tag_name": "testing", "published_at": "2026-10-19T12:07:00Z"},
+            {"tag_name": "v9.0.0", "draft": true},
+            {"tag_name": "v0.3.9", "published_at": "2026-10-19T11:22:39Z"},
+        ]);
+        let found = highest(list.as_array().unwrap()).unwrap();
+        assert_eq!(found["tag_name"], "v0.4.0");
     }
 
     #[test]
