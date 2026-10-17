@@ -98,7 +98,12 @@ impl App {
                 egui::TextEdit::singleline(&mut self.code_input)
                     .desired_width(150.0)
                     .font(egui::FontId::new(22.0, theme::semibold()))
-                    .hint_text("123 456")
+                    // In the same font as the code, else it sits small at the top of the tall field
+                    .hint_text(
+                        RichText::new("123 456")
+                            .font(egui::FontId::new(22.0, theme::semibold()))
+                            .color(p.muted.gamma_multiply(0.6)),
+                    )
                     .margin(egui::Margin::symmetric(10, 6)),
             );
             ui.collapsing(tr("Not found? Enter the address"), |ui| {
