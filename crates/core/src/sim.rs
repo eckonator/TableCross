@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use tc_protocol::{MediaKey, Message, MouseButton, Screen};
 
-use crate::engine::{Action, Captured, Engine, Role};
+use crate::engine::{Action, Captured, EDGE_DWELL, Engine, Role};
 use crate::geometry::{Point, Screens, Side};
 use crate::layout::Layout;
 
@@ -61,6 +61,7 @@ impl Sim {
         };
         for (name, screens) in machines {
             let mut engine = Engine::new(*name, screens, layout.clone());
+            engine.set_edge_dwell(EDGE_DWELL);
             let now = sim.now.clone();
             engine.set_clock(move || *now.lock().unwrap());
             for (other, other_screens) in machines {
@@ -733,6 +734,29 @@ fn a_laptop_half_below_the_imac() {
     sim.glide("laptop", -1000.0, 0.0);
     sim.glide("laptop", 0.0, 2000.0);
     assert_eq!(sim.role("laptop"), Role::Idle);
+}
+
+#[test]
+fn without_pushing_top_and_bottom_switch_like_the_sides() {
+    let mut sim = Sim::new(
+        &[
+            ("imac", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("below", vec![screen(0, 0, 1000, 800, 1.0)]),
+        ],
+        Layout::default().with("below", Side::Bottom, "imac"),
+    );
+    sim.machines
+        .get_mut("imac")
+        .unwrap()
+        .engine
+        .set_edge_dwell(Duration::ZERO);
+    // One short trackpad stroke over the edge is enough
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(500.0, 790.0);
+    sim.mouse("imac", 0.0, 6.0);
+    sim.mouse("imac", 0.0, 6.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
+    sim.mouse("imac", 0.0, -900.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
 }
 
 #[test]

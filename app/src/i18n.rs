@@ -97,8 +97,12 @@ fn de(en: &str) -> Option<&'static str> {
             "Ordne die Computer so an, wie sie auf deinem Schreibtisch stehen."
         }
         "Desk" => "Schreibtisch",
-        "Drag the computers to where they stand on your desk. Where two touch, the pointer crosses (green); a computer may also stand half beside another. Drop a computer onto another one if both are used in turn at the same place." => {
-            "Zieh die Computer dorthin, wo sie auf deinem Schreibtisch stehen. Wo sich zwei berühren, wechselt der Zeiger (grün); ein Computer darf auch halb versetzt neben einem anderen stehen. Zieh einen Computer auf einen anderen, wenn beide abwechselnd am selben Platz stehen."
+        "Drag the computers to where they stand on your desk, in their real size. Where two touch, the pointer crosses (green); while dragging, the screens show it at their edges as well. Drop a computer onto another one if both are used in turn at the same place." => {
+            "Zieh die Computer dorthin, wo sie auf deinem Schreibtisch stehen, in ihrer echten Größe. Wo sich zwei berühren, wechselt der Zeiger (grün); beim Ziehen zeigen das auch die Bildschirme an ihren Kanten. Zieh einen Computer auf einen anderen, wenn beide abwechselnd am selben Platz stehen."
+        }
+        "Take over the current size" => "Aktuelle Größe übernehmen",
+        "The size is kept when screens are switched off or on; this takes the screens it has now." => {
+            "Die Größe bleibt, wenn Bildschirme ab- oder angeschaltet werden; das hier übernimmt die Bildschirme, die er gerade hat."
         }
         "No computer is paired yet." => "Noch kein Computer gekoppelt.",
         "Pair new computers and manage the paired ones." => "Neue Computer koppeln und gekoppelte verwalten.",
@@ -292,6 +296,11 @@ fn de(en: &str) -> Option<&'static str> {
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
         "Troubleshooting" => "Fehlersuche",
+        "Edges" => "Kanten",
+        "Top and bottom: switch only after a moment of pushing" => "Oben und unten: erst nach kurzem Drücken wechseln",
+        "Protects the Dock and the menu bar from switching by accident. Off: top and bottom switch at once, like left and right." => {
+            "Schützt Dock und Menüleiste vor versehentlichem Wechseln. Aus: oben und unten wechselt der Zeiger sofort, wie links und rechts."
+        }
         "Sleep" => "Ruhezustand",
         "Keep this computer from going to sleep" => "Diesen Computer nicht in den Ruhezustand gehen lassen",
         "While TableCross runs. A computer that sleeps drops out, and with it the way over it to the computers behind." => {

@@ -14,6 +14,9 @@ use crate::i18n::{self, tr};
 use crate::settings::{Settings, ThemeSetting};
 use crate::theme;
 
+/// How long bars sent by another computer stay after its last message.
+const EDGES_SHOWN: Duration = Duration::from_millis(1200);
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Status,
@@ -247,6 +250,7 @@ impl App {
                 if self.settings.collect_logs {
                     handle.send(Command::CollectLogs(true));
                 }
+                handle.send(Command::EdgePush(self.settings.edge_push));
                 self.session = Some(handle);
                 self.task = Some(task);
             }
@@ -776,6 +780,13 @@ impl eframe::App for App {
         self.poll_job();
         self.update_check(&ctx);
         self.status = self.current_status();
+        // Another computer changes the arrangement: its bars at the edges here, for a moment
+        if let Some((marks, at)) = &self.status.edge_marks
+            && at.elapsed() < EDGES_SHOWN
+        {
+            crate::edges::show(&ctx, &self.status.screens, marks, theme::palette(&ctx).ok);
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
         self.helper_prompt();
         self.poll_removal(&ctx);
 
@@ -794,7 +805,7 @@ impl eframe::App for App {
 
         let p = theme::palette(&ctx);
         egui::Panel::left("nav")
-            .exact_size(212.0)
+            .exact_size(232.0)
             .resizable(false)
             .frame(
                 egui::Frame::new()

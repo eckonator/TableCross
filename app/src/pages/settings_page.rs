@@ -97,6 +97,23 @@ impl App {
                     }
                     ui.end_row();
 
+                    ui.label(tr("Edges"));
+                    if ui
+                        .checkbox(
+                            &mut self.settings.edge_push,
+                            tr("Top and bottom: switch only after a moment of pushing"),
+                        )
+                        .on_hover_text(tr(
+                            "Protects the Dock and the menu bar from switching by accident. Off: top and bottom \
+                             switch at once, like left and right.",
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        self.send(Command::EdgePush(self.settings.edge_push));
+                    }
+                    ui.end_row();
+
                     ui.label(tr("Sleep"));
                     if ui
                         .checkbox(

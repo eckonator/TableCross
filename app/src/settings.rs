@@ -56,6 +56,8 @@ pub struct Settings {
     pub stay_awake: bool,
     /// With `stay_awake`: keep the display on as well.
     pub screen_stays_on: bool,
+    /// Top and bottom edges switch only after a moment of pushing (Dock, menu bar); off: at once.
+    pub edge_push: bool,
 }
 
 impl Default for Settings {
@@ -76,6 +78,7 @@ impl Default for Settings {
             universal_control_off: true,
             stay_awake: false,
             screen_stays_on: false,
+            edge_push: false,
         }
     }
 }
@@ -121,6 +124,7 @@ impl Settings {
             universal_control_off: field(&fields, "universal_control_off", d.universal_control_off),
             stay_awake: field(&fields, "stay_awake", d.stay_awake),
             screen_stays_on: field(&fields, "screen_stays_on", d.screen_stays_on),
+            edge_push: field(&fields, "edge_push", d.edge_push),
         }
     }
 

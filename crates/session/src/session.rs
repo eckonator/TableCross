@@ -8,13 +8,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use tc_core::{Action, Captured, Engine, Layout, LayoutFile, Role, Side};
+use tc_core::{Action, Area, Captured, Engine, Layout, LayoutFile, Role, Side};
 use tc_input::{Backend, Capture, Inject, Problem};
 use tc_net::{
     Disconnect, Discovered, Event, Fingerprint, Identity, LinkInfo, Node, NodeConfig, PairError, PairingCode,
     PeerStore, Refusal,
 };
-use tc_protocol::{Message, MouseButton, Screen};
+use tc_protocol::{EdgeMark, Message, MouseButton, Screen};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
@@ -66,9 +66,15 @@ pub enum Command {
         target: PairTarget,
     },
     Unpair(Fingerprint),
-    /// The whole desk as tiles `(machine id, x, y)`; computers whose tiles touch become neighbors
-    /// where the edges overlap. Replaces the arrangement.
-    Arrange(Vec<(String, f32, f32)>),
+    /// The whole desk as areas by machine id; computers whose areas touch become neighbors where
+    /// the edges overlap. Replaces the arrangement.
+    Arrange(Vec<Area>),
+    /// Top and bottom edges switch only after a moment of pushing (the Dock and the menu bar are
+    /// there); off: at once, like left and right.
+    EdgePush(bool),
+    /// While the arrangement is being changed here: where the pointer would cross, per connected
+    /// computer (empty: nowhere), shown on their screens.
+    ShowEdges(Vec<(Fingerprint, Vec<EdgeMark>)>),
     /// Lock the screens of all connected computers and of this one.
     LockAll,
     /// Shut down all connected computers, and this one as well with `this_one`.
@@ -210,6 +216,9 @@ pub struct Status {
     pub transfers: Vec<TransferView>,
     /// Files copied on another computer that come over when the pointer arrives here.
     pub files_waiting: Option<String>,
+    /// Where the pointer crosses on this computer's screens, while another computer changes the
+    /// arrangement, and when that came (shown for a moment).
+    pub edge_marks: Option<(Vec<EdgeMark>, Instant)>,
 }
 
 /// Talks to a running session; cheap to clone.
@@ -380,16 +389,16 @@ impl Shared {
     /// Our arrangement for `to`: tiles if it runs a version that knows them, else neighbors.
     fn layout_message(&self, to: &Fingerprint) -> Option<Message> {
         let file = layout_file::load(&self.dir).ok()?;
-        let tiles = self
+        let desk = self
             .node
             .status()
             .into_iter()
             .find(|p| p.peer.fingerprint == *to)
             .and_then(|p| p.link)
-            .is_some_and(|link| layout_file::knows_tiles(&link.app_version));
+            .is_some_and(|link| layout_file::knows_desk(&link.app_version));
         let me = (self.node.fingerprint(), self.node.name().to_string());
         let paired = self.node.paired();
-        Some(layout_file::message(&file, tiles, self.resolver(), |fp| {
+        Some(layout_file::message(&file, desk, self.resolver(), |fp| {
             if *fp == me.0 {
                 return Some(me.1.clone());
             }
@@ -421,13 +430,19 @@ impl Shared {
                 editor,
                 placements,
                 names,
-            } => (revision, editor, Err(placements), names),
+            } => (revision, editor, layout_file::Arrangement::Neighbors(placements), names),
             Message::Tiles {
                 revision,
                 editor,
                 tiles,
                 names,
-            } => (revision, editor, Ok(tiles), names),
+            } => (revision, editor, layout_file::Arrangement::Tiles(tiles), names),
+            Message::Desk {
+                revision,
+                editor,
+                areas,
+                names,
+            } => (revision, editor, layout_file::Arrangement::Areas(areas), names),
             _ => return,
         };
         let result = layout_file::load(&self.dir).and_then(|mut file| {
@@ -704,11 +719,7 @@ fn start_capture(shared: &Arc<Shared>, capture: &mut Option<Box<dyn Capture>>) {
         return;
     };
     if capture.single_push_at_edges() {
-        shared
-            .engine
-            .lock()
-            .expect("engine lock")
-            .set_edge_dwell(Duration::ZERO);
+        shared.engine.lock().expect("engine lock").set_single_push();
     }
     let state = match capture.start(handler(shared.clone())) {
         Ok(()) => InputState::Running,
@@ -1318,8 +1329,16 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
         }
         Event::Message {
             peer,
-            message: message @ (Message::Layout { .. } | Message::Tiles { .. }),
+            message: message @ (Message::Layout { .. } | Message::Tiles { .. } | Message::Desk { .. }),
         } => shared.layout_received(peer, message),
+        Event::Message {
+            message: Message::ShowEdges { marks },
+            ..
+        } => {
+            shared.status.lock().expect("status lock").edge_marks =
+                (!marks.is_empty()).then(|| (marks, Instant::now()));
+            shared.changed();
+        }
         Event::Message {
             peer,
             message: Message::LockScreen,
@@ -1439,7 +1458,31 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             }
         }
         Command::Place { peer, side } => shared.edit_layout(|file| layout_file::place(file, &me, &peer, side)),
-        Command::Arrange(tiles) => shared.edit_layout(|file| file.set_tiles(layout_file::from_desk(&tiles))),
+        Command::Arrange(areas) => shared.edit_layout(|file| file.set_areas(areas)),
+        Command::EdgePush(on) => {
+            let dwell = if on { tc_core::EDGE_DWELL } else { Duration::ZERO };
+            shared.engine.lock().expect("engine lock").set_edge_dwell(dwell);
+            tracing::info!(
+                "top and bottom edges: {}",
+                if on { "after a moment of pushing" } else { "at once" }
+            );
+        }
+        Command::ShowEdges(marks) => {
+            let knows = |peer: &Fingerprint| {
+                shared
+                    .node
+                    .status()
+                    .into_iter()
+                    .find(|p| p.peer.fingerprint == *peer)
+                    .and_then(|p| p.link)
+                    .is_some_and(|link| layout_file::knows_desk(&link.app_version))
+            };
+            for (peer, marks) in marks {
+                if knows(&peer) {
+                    shared.node.send(&peer, Message::ShowEdges { marks });
+                }
+            }
+        }
         Command::SwapCmdCtrl { peer, swap } => shared.edit_layout(|file| layout_file::set_swap(file, &peer, swap)),
         Command::AddAddress { peer, address } => {
             if let Err(e) = shared.node.add_address(&peer, address) {

@@ -80,6 +80,32 @@ pub struct Tile {
 /// Positions of tiles stay within this distance from `(0, 0)`.
 pub const MAX_TILE_POS: f32 = 1024.0;
 
+/// Where `machine` stands on the desk and how large it is, in thousands of logical points: an
+/// area as large as the screens of the computer (from 0.4.2 on). Areas that touch are neighbors
+/// where their edges overlap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Area {
+    pub machine: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    /// The size was taken from the computer's screens (else a stand-in until they are known).
+    pub measured: bool,
+}
+
+/// A part of one side of a computer, `from` to `to` along it (0.0 to 1.0), where the pointer
+/// crosses to a neighbor.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct EdgeMark {
+    pub side: Side,
+    pub from: f32,
+    pub to: f32,
+}
+
+/// Largest area side, in thousands of logical points.
+pub const MAX_AREA_SIZE: f32 = 100.0;
+
 /// Most placements and names in one `Message::Layout`.
 pub const MAX_PLACEMENTS: usize = 64;
 
@@ -223,6 +249,18 @@ pub enum Message {
         tiles: Vec<Tile>,
         names: Vec<(String, String)>,
     },
+    /// The arrangement as areas of real size (from 0.4.2 on, only to peers that announced it).
+    Desk {
+        revision: u64,
+        editor: String,
+        areas: Vec<Area>,
+        names: Vec<(String, String)>,
+    },
+    /// Show where the pointer crosses on the receiver's screens while the arrangement is being
+    /// changed elsewhere (from 0.4.2 on). Empty: hide them. Shown for a moment after the last one.
+    ShowEdges {
+        marks: Vec<EdgeMark>,
+    },
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -246,6 +284,15 @@ impl Message {
             Message::Enter { x, y } => x.is_finite() && y.is_finite(),
             Message::MouseMove { x, y, dx, dy, .. } => [x, y, dx, dy].iter().all(|v| v.is_finite()),
             Message::Wheel { dx, dy, .. } => dx.is_finite() && dy.is_finite(),
+            Message::Desk { areas, .. } => areas.iter().all(|a| {
+                [a.x, a.y].iter().all(|v| v.is_finite() && v.abs() <= MAX_TILE_POS)
+                    && [a.w, a.h]
+                        .iter()
+                        .all(|v| v.is_finite() && *v > 0.0 && *v <= MAX_AREA_SIZE)
+            }),
+            Message::ShowEdges { marks } => marks
+                .iter()
+                .all(|m| [m.from, m.to].iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))),
             Message::Tiles { tiles, .. } => tiles
                 .iter()
                 .all(|t| [t.x, t.y].iter().all(|v| v.is_finite() && v.abs() <= MAX_TILE_POS)),
@@ -259,6 +306,8 @@ impl Message {
                 placements.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS
             }
             Message::Tiles { tiles, names, .. } => tiles.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS,
+            Message::Desk { areas, names, .. } => areas.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS,
+            Message::ShowEdges { marks } => marks.len() <= MAX_PLACEMENTS,
             Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
             _ => true,
         }
@@ -404,6 +453,26 @@ mod tests {
                 ],
                 names: vec![("fedcba9876543210".into(), "Office PC".into())],
             },
+            Message::Desk {
+                revision: 1_792_234_331_002,
+                editor: "0123456789abcdef".into(),
+                areas: vec![Area {
+                    machine: "0123456789abcdef".into(),
+                    x: -0.864,
+                    y: 1.152,
+                    w: 1.728,
+                    h: 1.117,
+                    measured: true,
+                }],
+                names: vec![("0123456789abcdef".into(), "MacBook".into())],
+            },
+            Message::ShowEdges {
+                marks: vec![EdgeMark {
+                    side: Side::Top,
+                    from: 0.5,
+                    to: 1.0,
+                }],
+            },
         ]
     }
 
@@ -483,6 +552,41 @@ mod tests {
             };
             assert_eq!(decode(&encode(&m)), Err(DecodeError::NotFinite), "{x}");
         }
+    }
+
+    #[test]
+    fn areas_without_size_or_far_away_are_rejected() {
+        let area = |x: f32, w: f32| Message::Desk {
+            revision: 1,
+            editor: "a".into(),
+            areas: vec![Area {
+                machine: "a".into(),
+                x,
+                y: 0.0,
+                w,
+                h: 1.0,
+                measured: false,
+            }],
+            names: Vec::new(),
+        };
+        for (x, w) in [
+            (0.0, 0.0),
+            (0.0, -1.0),
+            (0.0, f32::NAN),
+            (MAX_TILE_POS * 2.0, 1.0),
+            (0.0, 1000.0),
+        ] {
+            assert_eq!(decode(&encode(&area(x, w))), Err(DecodeError::NotFinite), "{x} {w}");
+        }
+        assert!(decode(&encode(&area(1.5, 5.12))).is_ok());
+        let mark = Message::ShowEdges {
+            marks: vec![EdgeMark {
+                side: Side::Left,
+                from: 0.0,
+                to: 1.5,
+            }],
+        };
+        assert_eq!(decode(&encode(&mark)), Err(DecodeError::NotFinite));
     }
 
     #[test]

@@ -83,15 +83,16 @@ pub fn status() -> Status {
         ]
         .into(),
         layout: tc_core::LayoutFile {
-            tiles: vec![
-                tile("5a5a5a5a5a5a5a5a", 0.0, 0.0),
-                tile("1111111111111111", 1.0, 0.0),
-                tile("2222222222222222", 1.0, 0.0),
-                tile("3333333333333333", 1.5, 1.0),
+            areas: vec![
+                area("5a5a5a5a5a5a5a5a", 0.0, -0.022, 1.512, 0.982),
+                area("1111111111111111", 1.512, 0.0, 1.707, 0.96),
+                area("2222222222222222", 1.512, 0.0, 1.707, 0.96),
+                area("3333333333333333", 2.412, 0.96, 1.92, 1.08),
             ],
             names: [("3333333333333333".to_string(), "Studio-Mac".to_string())].into(),
             ..Default::default()
         },
+        edge_marks: None,
         transfers: vec![
             tc_session::TransferView {
                 id: 1,
@@ -118,10 +119,13 @@ pub fn status() -> Status {
     }
 }
 
-fn tile(machine: &str, x: f32, y: f32) -> tc_core::Tile {
-    tc_core::Tile {
+fn area(machine: &str, x: f32, y: f32, w: f32, h: f32) -> tc_core::Area {
+    tc_core::Area {
         machine: machine.into(),
         x,
         y,
+        w,
+        h,
+        measured: true,
     }
 }

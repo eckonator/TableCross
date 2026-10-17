@@ -7,6 +7,7 @@ mod app;
 mod autostart;
 mod demo;
 mod devtools;
+mod edges;
 mod i18n;
 mod icon;
 mod logging;

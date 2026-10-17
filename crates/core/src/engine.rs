@@ -27,9 +27,9 @@ use crate::layout::Layout;
 
 pub type MachineId = String;
 
-/// How long the pointer must be pushed against a top or bottom edge before it moves over. The Dock
-/// and the menu bar sit at these edges; reaching for them must not switch computers. Left and
-/// right edges switch at once.
+/// How long the pointer must be pushed against a top or bottom edge before it moves over, when that
+/// is switched on (`set_edge_dwell`): the Dock and the menu bar sit at these edges. By default all
+/// edges switch at once.
 pub const EDGE_DWELL: Duration = Duration::from_millis(250);
 /// A pause in pushing longer than this starts the dwell anew. Long enough for lifting a finger
 /// between strokes on a trackpad, which never pushes a quarter second in one stroke.
@@ -169,6 +169,8 @@ pub struct Engine {
     local_pointer: Point,
     clock: Clock,
     edge_dwell: Duration,
+    /// The system reports only one push at an edge (Wayland): no dwell possible.
+    single_push: bool,
     edge_push: Option<EdgePush>,
     /// A corner kept the pointer from switching and nobody has asked about it yet.
     corner_block: Option<CornerBlock>,
@@ -228,7 +230,8 @@ impl Engine {
             takeover_motion: 0.0,
             local_pointer: Point::default(),
             clock: Clock(Arc::new(Instant::now)),
-            edge_dwell: EDGE_DWELL,
+            edge_dwell: Duration::ZERO,
+            single_push: false,
             edge_push: None,
             corner_block: None,
             corner_reported: None,
@@ -246,7 +249,13 @@ impl Engine {
 
     /// Zero switches at every edge at once (for systems that report only one push, like Wayland).
     pub fn set_edge_dwell(&mut self, dwell: Duration) {
-        self.edge_dwell = dwell;
+        self.edge_dwell = if self.single_push { Duration::ZERO } else { dwell };
+    }
+
+    /// For systems that report only one push at an edge (Wayland): every edge switches at once.
+    pub fn set_single_push(&mut self) {
+        self.single_push = true;
+        self.edge_dwell = Duration::ZERO;
     }
 
     pub fn role(&self) -> Role {
@@ -678,10 +687,10 @@ impl Engine {
     }
 
     /// Corners keep left and right edges from switching, so the pointer can reach them. Top and
-    /// bottom edges need a moment of pushing anyway, which already leaves the corners alone; a
-    /// corner rule there would trap a pointer that runs straight down along a side edge.
+    /// bottom edges have no corner rule: it would trap a pointer that runs straight down along a
+    /// side edge.
     fn corner_blocks(&self, side: Side) -> bool {
-        !matches!(side, Side::Top | Side::Bottom) || self.edge_dwell.is_zero()
+        !matches!(side, Side::Top | Side::Bottom)
     }
 
     fn note_corner_block(&mut self, machine: &str, side: Side, at: Point) {

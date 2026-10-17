@@ -78,11 +78,15 @@ out, recent messages, “copy diagnostics”). Closing the window keeps TableCro
 bar (macOS) or notification area (Windows). The interface is in English and German.
 
 Any number of computers can share one desk. The arrangement is shared between all paired computers,
-and the Arrangement page shows the whole desk: drag each computer to where it stands. Computers may
-stand offset, half beside or below another one, and one side may have several neighbors; the pointer
-crosses only where the edges touch (shown green). New computers are paired on the Pairing page.
+and the Arrangement page shows the whole desk: drag each computer to where it stands, drawn in the
+real size of its screens. Computers may stand offset, half beside or below another one, and one side
+may have several neighbors; the pointer crosses only where the edges touch, at the matching place
+(shown green, and while dragging also as green bars at the real screen edges of every computer). A
+computer keeps its size when screens are switched off or on; *Take over the current size* in its
+menu adopts the screens it has now. New computers are paired on the Pairing page.
 
-Settings worth knowing: *Keep this computer from going to sleep* (with the screen on as well, if
+Settings worth knowing: all edges switch at once; *Top and bottom: switch only after a moment of
+pushing* protects the Dock and the menu bar instead. *Keep this computer from going to sleep* (with the screen on as well, if
 wanted) for a computer in the middle of the desk, so the way over it to the others stays open. On
 macOS, TableCross switches off Universal Control at start, which also takes the pointer at screen
 edges; the status page warns while it is on.
@@ -149,8 +153,8 @@ turn at the same place (two laptops on the same monitors, say) share a tile in t
 edge leads to the one that is connected.
 
 Move the pointer over the edge to control the other computer; moving a computer's own mouse takes
-control back. Left and right edges switch at once; at top and bottom edges, where the Dock and the
-menu bar are, push against the edge for a moment. Its own keyboard simply keeps typing there, so the mouse of one computer and the
+control back. All edges switch at once (optionally top and bottom only after a moment of pushing, see
+the settings). Its own keyboard simply keeps typing there, so the mouse of one computer and the
 keyboard of another work together. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on
 `place` swaps ⌘ and Ctrl while controlling that computer. On macOS the terminal (later the app) needs
 the Accessibility permission.

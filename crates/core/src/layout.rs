@@ -7,13 +7,13 @@
 //!   "corner": 16
 //! }
 //! ```
-//! Every machine is a tile of 1 × 1. Tiles that touch are neighbors where their edges overlap, so a
-//! tile may sit half beside another and one side may have several neighbors. Machines used in turn
-//! at the same place share a position. Machines are named by their name or the start of their
-//! fingerprint.
+//! Since 0.4.2 every machine is an area as large as its screens (`areas`, in thousands of logical
+//! points). Areas that touch are neighbors where their edges overlap, so an area may sit half beside
+//! another and one side may have several neighbors. Machines used in turn at the same place share a
+//! position. Machines are named by their name or the start of their fingerprint.
 //!
-//! Older versions stored `neighbors` ("Gaming-PC is on the right of MacBook", over the whole edge);
-//! a file or a peer with only those is read as tiles on a grid.
+//! Older versions stored tiles of 1 × 1 (0.4.0) or `neighbors` ("Gaming-PC is on the right of
+//! MacBook", over the whole edge); those are read as areas of a stand-in size on a grid.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -21,17 +21,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::geometry::Side;
 
+/// One machine on the desk with its size; the same type travels between computers.
+pub use tc_protocol::Area;
 /// One entry of the old arrangement; the same type travels between computers.
 pub use tc_protocol::Placement as Neighbor;
-/// One machine on the desk; the same type travels between computers.
+/// One machine on the desk (0.4.0, size 1 × 1); the same type travels between computers.
 pub use tc_protocol::Tile;
 
-/// Tile positions closer than this count as the same.
+/// Size of a machine whose screens are not known yet: one full HD screen, in thousands of points.
+pub const STAND_IN: (f32, f32) = (1.92, 1.08);
+
+/// Positions closer than this count as the same (thousands of points: one point).
 const EPS: f64 = 1e-3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayoutFile {
-    /// Where the machines stand. Empty in files of older versions: then `neighbors` counts.
+    /// Where the machines stand and how large they are. Empty in files of older versions: then
+    /// `tiles` or `neighbors` count.
+    #[serde(default)]
+    pub areas: Vec<Area>,
+    /// The arrangement of 0.4.0 (kept empty once there are areas).
     #[serde(default)]
     pub tiles: Vec<Tile>,
     /// The arrangement for older versions, derived from `tiles`.
@@ -61,6 +70,7 @@ fn default_corner() -> f64 {
 impl Default for LayoutFile {
     fn default() -> Self {
         Self {
+            areas: Vec::new(),
             tiles: Vec::new(),
             neighbors: Vec::new(),
             swap_cmd_ctrl: Vec::new(),
@@ -73,19 +83,22 @@ impl Default for LayoutFile {
 }
 
 impl LayoutFile {
-    /// The tiles, or for a file of an older version the tiles of its neighbors.
-    pub fn effective_tiles(&self) -> Vec<Tile> {
-        if self.tiles.is_empty() {
-            tiles_from_neighbors(&self.neighbors)
+    /// The areas, or for a file of an older version those of its tiles or neighbors.
+    pub fn effective_areas(&self) -> Vec<Area> {
+        if !self.areas.is_empty() {
+            self.areas.clone()
+        } else if !self.tiles.is_empty() {
+            areas_from_tiles(&self.tiles)
         } else {
-            self.tiles.clone()
+            areas_from_tiles(&tiles_from_neighbors(&self.neighbors))
         }
     }
 
     /// Sets the arrangement; `neighbors` follow for older versions.
-    pub fn set_tiles(&mut self, tiles: Vec<Tile>) {
-        self.neighbors = neighbors_from_tiles(&tiles);
-        self.tiles = tiles;
+    pub fn set_areas(&mut self, areas: Vec<Area>) {
+        self.neighbors = neighbors_from_areas(&areas);
+        self.tiles.clear();
+        self.areas = areas;
     }
 }
 
@@ -153,17 +166,32 @@ pub fn tiles_from_neighbors(neighbors: &[Neighbor]) -> Vec<Tile> {
         .collect()
 }
 
-/// The neighbors of tiles for older versions: tiles that touch with some overlap, over the whole
+/// Tiles of 0.4.0 as areas of the stand-in size on the same grid.
+pub fn areas_from_tiles(tiles: &[Tile]) -> Vec<Area> {
+    let (w, h) = STAND_IN;
+    tiles
+        .iter()
+        .map(|t| Area {
+            machine: t.machine.clone(),
+            x: t.x * w,
+            y: t.y * h,
+            w,
+            h,
+            measured: false,
+        })
+        .collect()
+}
+
+/// The neighbors of areas for older versions: areas that touch with some overlap, over the whole
 /// edge (older versions know nothing finer).
-pub fn neighbors_from_tiles(tiles: &[Tile]) -> Vec<Neighbor> {
+pub fn neighbors_from_areas(areas: &[Area]) -> Vec<Neighbor> {
     let mut neighbors = Vec::new();
-    for (i, a) in tiles.iter().enumerate() {
-        for b in &tiles[i + 1..] {
+    for (i, a) in areas.iter().enumerate() {
+        for b in &areas[i + 1..] {
             if a.machine == b.machine {
                 continue;
             }
-            let (a_pos, b_pos) = (pos(a), pos(b));
-            if let Some(side) = touching_side(a_pos, b_pos) {
+            if let Some(side) = touching_side(rect(a), rect(b)) {
                 neighbors.push(Neighbor {
                     machine: b.machine.clone(),
                     side,
@@ -175,35 +203,107 @@ pub fn neighbors_from_tiles(tiles: &[Tile]) -> Vec<Neighbor> {
     neighbors
 }
 
-fn pos(t: &Tile) -> (f64, f64) {
-    (f64::from(t.x), f64::from(t.y))
+/// x, y, width, height.
+type R = (f64, f64, f64, f64);
+
+fn rect(a: &Area) -> R {
+    (f64::from(a.x), f64::from(a.y), f64::from(a.w), f64::from(a.h))
 }
 
-/// On which side of tile `a` tile `b` touches it with some overlap.
-pub fn tile_side(a: &Tile, b: &Tile) -> Option<Side> {
-    touching_side(pos(a), pos(b))
+/// On which side of area `a` area `b` touches it with some overlap.
+pub fn area_side(a: &Area, b: &Area) -> Option<Side> {
+    touching_side(rect(a), rect(b))
 }
 
-fn touching_side(a: (f64, f64), b: (f64, f64)) -> Option<Side> {
-    let overlap = |p: f64, q: f64| (p + 1.0).min(q + 1.0) - p.max(q) > EPS;
-    if (b.0 - (a.0 + 1.0)).abs() < EPS && overlap(a.1, b.1) {
+/// On which side of `a` `b` touches it with some overlap.
+fn touching_side(a: R, b: R) -> Option<Side> {
+    let overlap = |p: f64, pl: f64, q: f64, ql: f64| (p + pl).min(q + ql) - p.max(q) > EPS;
+    if (b.0 - (a.0 + a.2)).abs() < EPS && overlap(a.1, a.3, b.1, b.3) {
         Some(Side::Right)
-    } else if (a.0 - (b.0 + 1.0)).abs() < EPS && overlap(a.1, b.1) {
+    } else if (a.0 - (b.0 + b.2)).abs() < EPS && overlap(a.1, a.3, b.1, b.3) {
         Some(Side::Left)
-    } else if (b.1 - (a.1 + 1.0)).abs() < EPS && overlap(a.0, b.0) {
+    } else if (b.1 - (a.1 + a.3)).abs() < EPS && overlap(a.0, a.2, b.0, b.2) {
         Some(Side::Bottom)
-    } else if (a.1 - (b.1 + 1.0)).abs() < EPS && overlap(a.0, b.0) {
+    } else if (a.1 - (b.1 + b.3)).abs() < EPS && overlap(a.0, a.2, b.0, b.2) {
         Some(Side::Top)
     } else {
         None
     }
 }
 
+/// The arrangement after some machines changed size (`size` gives the new one, `None` keeps it):
+/// starting at `anchor`, every machine keeps the side it touches its neighbor on and the place of
+/// its middle along that edge, so the desk keeps its shape. Machines sharing a place stay together;
+/// machines not connected to `anchor` keep their corner.
+pub fn resized(areas: &[Area], size: impl Fn(&Area) -> Option<(f32, f32)>, anchor: &str) -> Vec<Area> {
+    let mut out: Vec<Area> = areas
+        .iter()
+        .map(|a| {
+            let (w, h) = size(a).unwrap_or((a.w, a.h));
+            Area { w, h, ..a.clone() }
+        })
+        .collect();
+    let same = |a: &Area, b: &Area| (a.x - b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3;
+    let Some(start) = areas.iter().position(|a| a.machine == anchor) else {
+        return out;
+    };
+    let mut done = vec![false; areas.len()];
+    done[start] = true;
+    let mut queue = vec![start];
+    while let Some(p) = queue.pop() {
+        for c in 0..areas.len() {
+            if done[c] {
+                continue;
+            }
+            let (old_p, old_c) = (&areas[p], &areas[c]);
+            let new_p = out[p].clone();
+            let (x, y) = if same(old_p, old_c) {
+                (new_p.x, new_p.y)
+            } else if let Some(side) = area_side(old_p, old_c) {
+                let (w, h) = (out[c].w, out[c].h);
+                match side {
+                    Side::Left | Side::Right => {
+                        let r = (old_c.y + old_c.h / 2.0 - old_p.y) / old_p.h;
+                        let y = new_p.y + r * new_p.h - h / 2.0;
+                        (
+                            if side == Side::Right {
+                                new_p.x + new_p.w
+                            } else {
+                                new_p.x - w
+                            },
+                            y,
+                        )
+                    }
+                    Side::Top | Side::Bottom => {
+                        let r = (old_c.x + old_c.w / 2.0 - old_p.x) / old_p.w;
+                        let x = new_p.x + r * new_p.w - w / 2.0;
+                        (
+                            x,
+                            if side == Side::Bottom {
+                                new_p.y + new_p.h
+                            } else {
+                                new_p.y - h
+                            },
+                        )
+                    }
+                }
+            } else {
+                continue;
+            };
+            out[c].x = x;
+            out[c].y = y;
+            done[c] = true;
+            queue.push(c);
+        }
+    }
+    out
+}
+
 /// The resolved arrangement, by machine id.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     /// In the order they were placed: of machines sharing a place, the first one online counts.
-    tiles: Vec<(String, f64, f64)>,
+    tiles: Vec<(String, R)>,
     pub swap_cmd_ctrl: HashSet<String>,
     pub corner: f64,
 }
@@ -236,28 +336,29 @@ impl Layout {
             },
             ..Layout::default()
         };
-        for tile in file.effective_tiles() {
-            let (x, y) = pos(&tile);
-            if let Some(machine) = resolve(&tile.machine)
-                && x.is_finite()
-                && y.is_finite()
-                && !layout.tiles.iter().any(|(m, ..)| *m == machine)
+        for area in file.effective_areas() {
+            let r = rect(&area);
+            if let Some(machine) = resolve(&area.machine)
+                && [r.0, r.1, r.2, r.3].iter().all(|v| v.is_finite())
+                && r.2 > 0.0
+                && r.3 > 0.0
+                && !layout.tiles.iter().any(|(m, _)| *m == machine)
             {
-                layout.tiles.push((machine, x, y));
+                layout.tiles.push((machine, r));
             }
         }
         layout.swap_cmd_ctrl = file.swap_cmd_ctrl.iter().filter_map(|n| resolve(n)).collect();
         Ok(layout)
     }
 
-    /// Builds a layout directly (tests): `machine` on `side` of `of` over the whole edge; `of` is
-    /// put at `(0, 0)` if it has no place yet.
+    /// Builds a layout directly (tests): `machine` on `side` of `of` over the whole edge, both
+    /// 1 × 1; `of` is put at `(0, 0)` if it has no place yet.
     pub fn with(mut self, machine: &str, side: Side, of: &str) -> Self {
-        let (x, y) = match self.place_of(of) {
-            Some(p) => p,
+        let (x, y, ..) = match self.place_of(of) {
+            Some(r) => r,
             None => {
-                self.tiles.push((of.to_string(), 0.0, 0.0));
-                (0.0, 0.0)
+                self.tiles.push((of.to_string(), (0.0, 0.0, 1.0, 1.0)));
+                (0.0, 0.0, 1.0, 1.0)
             }
         };
         let (dx, dy) = match side {
@@ -266,20 +367,23 @@ impl Layout {
             Side::Top => (0.0, -1.0),
             Side::Bottom => (0.0, 1.0),
         };
-        self.tiles.retain(|(m, ..)| m != machine);
-        self.tiles.push((machine.to_string(), x + dx, y + dy));
+        self.at_sized(machine, x + dx, y + dy, 1.0, 1.0)
+    }
+
+    /// Builds a layout directly (tests): `machine` at `(x, y)`, 1 × 1.
+    pub fn at(self, machine: &str, x: f64, y: f64) -> Self {
+        self.at_sized(machine, x, y, 1.0, 1.0)
+    }
+
+    /// Builds a layout directly (tests): `machine` at `(x, y)` with its size.
+    pub fn at_sized(mut self, machine: &str, x: f64, y: f64, w: f64, h: f64) -> Self {
+        self.tiles.retain(|(m, _)| m != machine);
+        self.tiles.push((machine.to_string(), (x, y, w, h)));
         self
     }
 
-    /// Builds a layout directly (tests): `machine` at `(x, y)`.
-    pub fn at(mut self, machine: &str, x: f64, y: f64) -> Self {
-        self.tiles.retain(|(m, ..)| m != machine);
-        self.tiles.push((machine.to_string(), x, y));
-        self
-    }
-
-    fn place_of(&self, machine: &str) -> Option<(f64, f64)> {
-        self.tiles.iter().find(|(m, ..)| m == machine).map(|(_, x, y)| (*x, *y))
+    fn place_of(&self, machine: &str) -> Option<R> {
+        self.tiles.iter().find(|(m, _)| m == machine).map(|(_, r)| *r)
     }
 
     /// The machines touching `side` of `machine` anywhere along it, in the order they were placed.
@@ -289,8 +393,8 @@ impl Layout {
         };
         self.tiles
             .iter()
-            .filter(|(m, x, y)| m != machine && touching_side(me, (*x, *y)) == Some(side))
-            .map(|(m, ..)| m.clone())
+            .filter(|(m, r)| m != machine && touching_side(me, *r) == Some(side))
+            .map(|(m, _)| m.clone())
             .collect()
     }
 
@@ -300,36 +404,36 @@ impl Layout {
     }
 
     /// The machines beyond `side` of `machine` at `along` (0.0 to 1.0 of that edge), with where the
-    /// pointer comes in along their edge; several when they share a place. Empty where no tile
+    /// pointer comes in along their edge; several when they share a place. Empty where no machine
     /// touches the edge.
     pub fn across(&self, machine: &str, side: Side, along: f64) -> Vec<(String, f64)> {
-        let Some((x, y)) = self.place_of(machine) else {
+        let Some((x, y, w, h)) = self.place_of(machine) else {
             return Vec::new();
         };
         let along = along.clamp(0.0, 1.0);
         // The point on the edge in desk units, and which coordinate runs along it
         let (edge, at, vertical) = match side {
-            Side::Left => (x, y + along, true),
-            Side::Right => (x + 1.0, y + along, true),
-            Side::Top => (y, x + along, false),
-            Side::Bottom => (y + 1.0, x + along, false),
+            Side::Left => (x, y + along * h, true),
+            Side::Right => (x + w, y + along * h, true),
+            Side::Top => (y, x + along * w, false),
+            Side::Bottom => (y + h, x + along * w, false),
         };
+        let end = along >= 1.0 - 1e-9;
         self.tiles
             .iter()
-            .filter(|(m, ..)| m != machine)
-            .filter_map(|(m, tx, ty)| {
-                let (near, far, start) = if vertical {
-                    (*tx, tx + 1.0, *ty)
+            .filter(|(m, _)| m != machine)
+            .filter_map(|(m, (tx, ty, tw, th))| {
+                let (near, far, start, len) = if vertical {
+                    (*tx, tx + tw, *ty, *th)
                 } else {
-                    (*ty, ty + 1.0, *tx)
+                    (*ty, ty + th, *tx, *tw)
                 };
                 let touches = match side {
                     Side::Left | Side::Top => (far - edge).abs() < EPS,
                     Side::Right | Side::Bottom => (near - edge).abs() < EPS,
                 };
-                let covers = at >= start - EPS && at < start + 1.0 - EPS
-                    || (along >= 1.0 - EPS && (at - (start + 1.0)).abs() < EPS);
-                (touches && covers).then(|| (m.clone(), (at - start).clamp(0.0, 1.0)))
+                let covers = at >= start - EPS && at < start + len - EPS || (end && (at - (start + len)).abs() < EPS);
+                (touches && covers).then(|| (m.clone(), ((at - start) / len).clamp(0.0, 1.0)))
             })
             .collect()
     }
@@ -403,22 +507,23 @@ mod tests {
     }
 
     #[test]
-    fn old_neighbors_become_tiles_and_back() {
+    fn old_neighbors_become_areas_and_back() {
         let file: LayoutFile = serde_json::from_str(
             r#"{"neighbors":[{"machine":"laptop","side":"bottom","of":"imac"},
                              {"machine":"book","side":"left","of":"imac"},
                              {"machine":"tv","side":"right","of":"pi"}]}"#,
         )
         .unwrap();
-        let tiles = file.effective_tiles();
-        let at = |m: &str| tiles.iter().find(|t| t.machine == m).map(|t| (t.x, t.y)).unwrap();
+        let areas = file.effective_areas();
+        let (w, h) = STAND_IN;
+        let at = |m: &str| areas.iter().find(|a| a.machine == m).map(|a| (a.x, a.y)).unwrap();
         assert_eq!(at("imac"), (0.0, 0.0));
-        assert_eq!(at("laptop"), (0.0, 1.0));
-        assert_eq!(at("book"), (-1.0, 0.0));
+        assert_eq!(at("laptop"), (0.0, h));
+        assert_eq!(at("book"), (-w, 0.0));
         // A second group stands apart, to the right of the first one
-        assert!(at("pi").0 >= 2.0);
-        assert_eq!(at("tv"), (at("pi").0 + 1.0, at("pi").1));
-        let mut back = neighbors_from_tiles(&tiles);
+        assert!(at("pi").0 >= 2.0 * w);
+        assert_eq!(at("tv"), (at("pi").0 + w, at("pi").1));
+        let mut back = neighbors_from_areas(&areas);
         back.sort_by(|a, b| a.machine.cmp(&b.machine));
         assert_eq!(
             back.iter()
@@ -430,9 +535,64 @@ mod tests {
                 ("tv", Side::Right, "pi")
             ]
         );
-        // Setting tiles keeps the neighbors for older versions in step
+        // Setting areas keeps the neighbors for older versions in step
         let mut file = LayoutFile::default();
-        file.set_tiles(tiles);
+        file.set_areas(areas);
         assert_eq!(file.neighbors.len(), 3);
+    }
+
+    fn area(m: &str, x: f32, y: f32, w: f32, h: f32) -> Area {
+        Area {
+            machine: m.into(),
+            x,
+            y,
+            w,
+            h,
+            measured: true,
+        }
+    }
+
+    #[test]
+    fn real_sizes_cross_at_the_matching_place() {
+        // A wide iMac, a small laptop below its left part
+        let file = LayoutFile {
+            areas: vec![area("imac", 0.0, 0.0, 4.0, 2.0), area("book", 0.5, 2.0, 1.0, 0.75)],
+            ..LayoutFile::default()
+        };
+        let layout = Layout::from_file(&file, same).unwrap();
+        assert_eq!(layout.across("imac", Side::Bottom, 0.25), [("book".to_string(), 0.5)]);
+        assert!(layout.across("imac", Side::Bottom, 0.75).is_empty());
+        assert_eq!(layout.across("book", Side::Top, 0.5), [("imac".to_string(), 0.25)]);
+    }
+
+    #[test]
+    fn a_new_size_keeps_the_desk_together() {
+        // The laptop below the middle of the iMac, a PC right of the iMac, a TV sharing the PC's place
+        let areas = vec![
+            area("imac", 0.0, 0.0, 2.0, 1.0),
+            area("book", 0.5, 1.0, 1.0, 1.0),
+            area("pc", 2.0, 0.0, 1.0, 1.0),
+            area("tv", 2.0, 0.0, 1.0, 1.0),
+            area("far", 9.0, 9.0, 1.0, 1.0),
+        ];
+        let sizes = |a: &Area| match a.machine.as_str() {
+            "imac" => Some((5.12, 1.44)),
+            "book" => Some((1.728, 1.117)),
+            _ => None,
+        };
+        let out = resized(&areas, sizes, "imac");
+        let get = |m: &str| out.iter().find(|a| a.machine == m).unwrap().clone();
+        assert_eq!((get("imac").x, get("imac").y, get("imac").w), (0.0, 0.0, 5.12));
+        // Still below the middle of the iMac
+        let book = get("book");
+        assert!((book.y - 1.44).abs() < 1e-4 && (book.x + book.w / 2.0 - 2.56).abs() < 1e-4);
+        // Still right of it, in the middle of its height, the TV with it
+        let pc = get("pc");
+        assert!((pc.x - 5.12).abs() < 1e-4 && (pc.y + 0.5 - 0.72).abs() < 1e-4);
+        assert_eq!((get("tv").x, get("tv").y), (pc.x, pc.y));
+        assert_eq!((get("far").x, get("far").y), (9.0, 9.0));
+        // Everything that touched still touches
+        assert_eq!(area_side(&get("imac"), &book), Some(Side::Bottom));
+        assert_eq!(area_side(&get("imac"), &pc), Some(Side::Right));
     }
 }
