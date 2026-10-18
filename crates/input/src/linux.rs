@@ -166,7 +166,10 @@ impl Capture for X11Capture {
                             };
                             let pos = (i32::from(p.root_x), i32::from(p.root_y));
                             if shared.grabbed.load(Ordering::SeqCst) {
-                                let park = (shared.park_x.load(Ordering::SeqCst), shared.park_y.load(Ordering::SeqCst));
+                                let park = (
+                                    shared.park_x.load(Ordering::SeqCst),
+                                    shared.park_y.load(Ordering::SeqCst),
+                                );
                                 let delta = (pos.0 - park.0, pos.1 - park.1);
                                 if delta == (0, 0) {
                                     continue;
@@ -184,12 +187,19 @@ impl Capture for X11Capture {
                                 if shared.returned.swap(false, Ordering::SeqCst) {
                                     // Measured from the parking spot, the first motion would look like
                                     // a jump across the screen and switch straight back
-                                    last = (shared.park_x.load(Ordering::SeqCst), shared.park_y.load(Ordering::SeqCst));
+                                    last = (
+                                        shared.park_x.load(Ordering::SeqCst),
+                                        shared.park_y.load(Ordering::SeqCst),
+                                    );
                                 }
                                 let delta = (pos.0 - last.0, pos.1 - last.1);
                                 last = pos;
                                 // At the edge the pointer does not move, but the push still counts
-                                let (dx, dy) = if delta == (0, 0) { raw_delta(&e.axisvalues) } else { delta_f(delta) };
+                                let (dx, dy) = if delta == (0, 0) {
+                                    raw_delta(&e.axisvalues)
+                                } else {
+                                    delta_f(delta)
+                                };
                                 Some(Captured::Motion {
                                     x: f64::from(pos.0),
                                     y: f64::from(pos.1),
@@ -222,7 +232,11 @@ impl Capture for X11Capture {
         let capturing = self.shared.running.load(Ordering::SeqCst);
         Health {
             capturing,
-            problems: if capturing { Vec::new() } else { vec![Problem::CaptureStopped] },
+            problems: if capturing {
+                Vec::new()
+            } else {
+                vec![Problem::CaptureStopped]
+            },
         }
     }
 }
@@ -233,7 +247,11 @@ fn delta_f(d: (i32, i32)) -> (f64, f64) {
 
 /// Relative axes 0 and 1 of a raw motion (used only to notice a push against the screen edge).
 fn raw_delta(values: &[xinput::Fp3232]) -> (f64, f64) {
-    let v = |i: usize| values.get(i).map_or(0.0, |f| f64::from(f.integral) + f64::from(f.frac) / 4_294_967_296.0);
+    let v = |i: usize| {
+        values
+            .get(i)
+            .map_or(0.0, |f| f64::from(f.integral) + f64::from(f.frac) / 4_294_967_296.0)
+    };
     (v(0), v(1))
 }
 
@@ -263,7 +281,9 @@ pub struct X11Inject {
 
 impl InjectState {
     fn fake(&self, kind: u8, detail: u8, x: i16, y: i16) {
-        let _ = self.conn.xtest_fake_input(kind, detail, x11rb::CURRENT_TIME, self.root, x, y, 0);
+        let _ = self
+            .conn
+            .xtest_fake_input(kind, detail, x11rb::CURRENT_TIME, self.root, x, y, 0);
     }
 
     fn flush(&self) {
@@ -272,11 +292,19 @@ impl InjectState {
 
     fn key(&mut self, usage: u16, down: bool) {
         let Some(code) = keymap::from_hid(usage) else { return };
-        let changed = if down { self.keys.press(usage) } else { self.keys.release(usage) };
+        let changed = if down {
+            self.keys.press(usage)
+        } else {
+            self.keys.release(usage)
+        };
         if !changed {
             return;
         }
-        let kind = if down { xproto::KEY_PRESS_EVENT } else { xproto::KEY_RELEASE_EVENT };
+        let kind = if down {
+            xproto::KEY_PRESS_EVENT
+        } else {
+            xproto::KEY_RELEASE_EVENT
+        };
         self.fake(kind, (u32::from(code) + KEYCODE_OFFSET) as u8, 0, 0);
         self.flush();
     }
@@ -297,7 +325,11 @@ impl InjectState {
             MouseButton::Back => 8,
             MouseButton::Forward => 9,
         };
-        let kind = if down { xproto::BUTTON_PRESS_EVENT } else { xproto::BUTTON_RELEASE_EVENT };
+        let kind = if down {
+            xproto::BUTTON_PRESS_EVENT
+        } else {
+            xproto::BUTTON_RELEASE_EVENT
+        };
         self.fake(kind, detail, 0, 0);
         self.flush();
     }
@@ -475,7 +507,13 @@ mod tests {
     #[test]
     fn keys_and_buttons() {
         // X key code 38 is evdev 30, the A key
-        assert_eq!(key(38, true), Some(Captured::Key { usage: 0x04, down: true }));
+        assert_eq!(
+            key(38, true),
+            Some(Captured::Key {
+                usage: 0x04,
+                down: true
+            })
+        );
         assert_eq!(key(3, true), None);
         assert_eq!(
             button(3, true),

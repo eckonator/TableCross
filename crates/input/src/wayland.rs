@@ -19,14 +19,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ashpd::desktop::input_capture::{
-    Barrier, Capabilities, ConnectToEISOptions as CaptureEisOptions, CreateSessionOptions as CaptureSessionOptions,
-    EnableOptions, GetZonesOptions, InputCapture, ReleaseOptions, SetPointerBarriersOptions,
+    Activated, Barrier, Capabilities, ConnectToEISOptions as CaptureEisOptions,
+    CreateSessionOptions as CaptureSessionOptions, EnableOptions, GetZonesOptions, InputCapture, ReleaseOptions,
+    SetPointerBarriersOptions,
 };
 use ashpd::desktop::remote_desktop::{
     ConnectToEISOptions, DeviceType, RemoteDesktop, SelectDevicesOptions, StartOptions,
 };
 use ashpd::desktop::{CreateSessionOptions, PersistMode, Session};
 use futures_util::StreamExt;
+use futures_util::stream::LocalBoxStream;
 use reis::ei;
 use reis::event::{Device, DeviceCapability, EiEvent};
 use tc_core::{Captured, Point};
@@ -88,7 +90,9 @@ pub fn backend() -> Result<Backend, InputError> {
 }
 
 fn now_us() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_micros() as u64)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros() as u64)
 }
 
 /// Where the RemoteDesktop permission is remembered.
@@ -123,7 +127,10 @@ async fn open_sender() -> Result<(Sender, reis::tokio::EiConvertEventStream, Ses
                 .set_restore_token(token.as_deref()),
         )
         .await?;
-    let started = portal.start(&session, None, StartOptions::default()).await?.response()?;
+    let started = portal
+        .start(&session, None, StartOptions::default())
+        .await?
+        .response()?;
     if let (Some(token), Some(file)) = (started.restore_token(), token_file()) {
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -131,7 +138,7 @@ async fn open_sender() -> Result<(Sender, reis::tokio::EiConvertEventStream, Ses
         let _ = std::fs::write(file, token);
     }
     let fd = portal.connect_to_eis(&session, ConnectToEISOptions::default()).await?;
-    let context = ei::Context::new(UnixStream::from(fd)).map_err(|e| ashpd::Error::IO(e.into()))?;
+    let context = ei::Context::new(UnixStream::from(fd)).map_err(ashpd::Error::IO)?;
     let (connection, events) = context
         .handshake_tokio("tablecross", ei::handshake::ContextType::Sender)
         .await
@@ -229,14 +236,22 @@ impl Sender {
             }
             Message::Key { usage, down } => {
                 let Some(code) = keymap::from_hid(usage) else { return };
-                let changed = if down { self.keys.press(usage) } else { self.keys.release(usage) };
+                let changed = if down {
+                    self.keys.press(usage)
+                } else {
+                    self.keys.release(usage)
+                };
                 if !changed {
                     return;
                 }
                 if let Some(device) = self.device(DeviceCapability::Keyboard)
                     && let Some(keyboard) = device.interface::<ei::Keyboard>()
                 {
-                    let state = if down { ei::keyboard::KeyState::Press } else { ei::keyboard::KeyState::Released };
+                    let state = if down {
+                        ei::keyboard::KeyState::Press
+                    } else {
+                        ei::keyboard::KeyState::Released
+                    };
                     keyboard.key(u32::from(code), state);
                     self.frame(device);
                 }
@@ -271,8 +286,11 @@ impl Sender {
                 if let Some(device) = self.device(DeviceCapability::Button)
                     && let Some(buttons) = device.interface::<ei::Button>()
                 {
-                    let state =
-                        if down { ei::button::ButtonState::Press } else { ei::button::ButtonState::Released };
+                    let state = if down {
+                        ei::button::ButtonState::Press
+                    } else {
+                        ei::button::ButtonState::Released
+                    };
                     buttons.button(code, state);
                     self.frame(device);
                 }
@@ -332,7 +350,11 @@ fn barriers(zones: &[(i32, i32, i32, i32)]) -> Vec<Barrier> {
     for (i, zone) in zones.iter().enumerate() {
         let (x, y, w, h) = *zone;
         for side in 0..4u8 {
-            if zones.iter().enumerate().any(|(j, other)| j != i && touches(zone, other, side)) {
+            if zones
+                .iter()
+                .enumerate()
+                .any(|(j, other)| j != i && touches(zone, other, side))
+            {
                 continue;
             }
             let position = match side {
@@ -349,9 +371,7 @@ fn barriers(zones: &[(i32, i32, i32, i32)]) -> Vec<Barrier> {
     out
 }
 
-async fn open_receiver(
-    handler: Handler,
-) -> Result<(Receiver, reis::tokio::EiConvertEventStream), ashpd::Error> {
+async fn open_receiver(handler: Handler) -> Result<(Receiver, reis::tokio::EiConvertEventStream), ashpd::Error> {
     let portal = InputCapture::new().await?;
     let (session, _) = portal
         .create_session(
@@ -375,7 +395,7 @@ async fn open_receiver(
         .await?
         .response()?;
     let fd = portal.connect_to_eis(&session, CaptureEisOptions::default()).await?;
-    let context = ei::Context::new(UnixStream::from(fd)).map_err(|e| ashpd::Error::IO(e.into()))?;
+    let context = ei::Context::new(UnixStream::from(fd)).map_err(ashpd::Error::IO)?;
     let (_connection, events) = context
         .handshake_tokio("tablecross", ei::handshake::ContextType::Receiver)
         .await
@@ -500,18 +520,30 @@ impl Receiver {
     }
 }
 
+/// The "Activated" signals of the input capture portal (the pointer hit a barrier). The stream
+/// borrows its proxy, so the proxy lives for the rest of the program (one per capture start).
+async fn activations() -> Option<LocalBoxStream<'static, Activated>> {
+    let proxy: &'static InputCapture = Box::leak(Box::new(InputCapture::new().await.ok()?));
+    let stream = proxy.receive_activated().await.ok()?;
+    Some(Box::pin(stream))
+}
+
 async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
     let (mut sender, mut sender_events, _sender_session) = match open_sender().await {
         Ok((s, e, session)) => (Some(s), Some(e), Some(session)),
         Err(e) => {
             tracing::warn!("no remote control portal: {e}");
-            shared.problems.lock().expect("problems lock").push(Problem::CaptureStopped);
+            shared
+                .problems
+                .lock()
+                .expect("problems lock")
+                .push(Problem::CaptureStopped);
             (None, None, None)
         }
     };
     let mut receiver: Option<Receiver> = None;
     let mut receiver_events: Option<reis::tokio::EiConvertEventStream> = None;
-    let mut activated = None;
+    let mut activated: Option<LocalBoxStream<'static, Activated>> = None;
     loop {
         tokio::select! {
             command = rx.recv() => {
@@ -519,7 +551,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
                 match command {
                     Cmd::StartCapture(handler) => match open_receiver(handler).await {
                         Ok((r, events)) => {
-                            activated = r.portal.receive_activated().await.ok().map(Box::pin);
+                            activated = activations().await;
                             receiver = Some(r);
                             receiver_events = Some(events);
                             shared.capturing.store(true, Ordering::SeqCst);

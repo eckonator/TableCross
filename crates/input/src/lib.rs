@@ -10,6 +10,8 @@ pub mod keymap {
 }
 
 pub mod helper_protocol;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(target_os = "macos")]
@@ -18,6 +20,8 @@ pub mod system;
 #[cfg(target_os = "macos")]
 pub mod universal_control;
 mod virtual_input;
+#[cfg(target_os = "linux")]
+mod wayland;
 #[cfg(windows)]
 pub mod win_send;
 #[cfg(windows)]
@@ -140,7 +144,18 @@ pub fn platform() -> Result<Backend, InputError> {
     {
         windows::backend()
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        // Wayland sessions only through the portals; X11 (and XWayland-less X sessions) directly
+        if std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t.eq_ignore_ascii_case("wayland"))
+            || std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("DISPLAY").is_none()
+        {
+            wayland::backend()
+        } else {
+            linux::backend()
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         Err(InputError::Unsupported)
     }
