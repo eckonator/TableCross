@@ -63,7 +63,7 @@ pub struct App {
     logo: Option<egui::TextureHandle>,
     /// A newer version found on GitHub.
     pub new_version: Option<crate::update::NewVersion>,
-    update_job: Option<std::sync::mpsc::Receiver<Result<Option<crate::update::NewVersion>, ()>>>,
+    update_job: Option<std::sync::mpsc::Receiver<Result<Option<crate::update::NewVersion>, crate::update::CheckError>>>,
     /// The running check was asked for by hand: say what came out.
     update_manual: bool,
     /// A paired computer runs this newer version: install it as soon as the check finds it.
@@ -523,8 +523,11 @@ impl App {
                         self.install_update(ctx);
                     }
                 }
-                Err(()) if manual => self.show_info(tr("GitHub could not be reached; try again later.")),
-                Err(()) => {}
+                Err(crate::update::CheckError::NoTool) if manual => self.show_info(tr(
+                    "Neither curl nor wget is installed, which the update check needs (Linux: sudo apt install curl).",
+                )),
+                Err(_) if manual => self.show_info(tr("GitHub could not be reached; try again later.")),
+                Err(_) => {}
             }
         }
         self.follow_peers(ctx);

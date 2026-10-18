@@ -193,6 +193,9 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "Check for updates" => "Nach Updates suchen",
         "TableCross {} is up to date." => "TableCross {} ist aktuell.",
+        "Neither curl nor wget is installed, which the update check needs (Linux: sudo apt install curl)." => {
+            "Weder curl noch wget ist installiert, die Update-Suche braucht eines davon (Linux: sudo apt install curl)."
+        }
         "GitHub could not be reached; try again later." => {
             "GitHub war nicht erreichbar; bitte später noch einmal versuchen."
         }

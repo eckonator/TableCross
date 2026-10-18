@@ -87,14 +87,11 @@ fn checked(cmd: &mut Command, what: &str) -> Result<String, String> {
 }
 
 fn download(url: &str, to: &Path) -> Result<(), String> {
-    checked(
-        command("curl")
-            .args(["-fsSL", "--max-time", "900", "-A", "TableCross-update", "-o"])
-            .arg(to)
-            .arg(url),
-        "download",
-    )
-    .map(|_| ())
+    match crate::update::fetch(url, None, 900, Some(to)) {
+        Ok(_) => Ok(()),
+        Err(crate::update::CheckError::NoTool) => Err("download: neither curl nor wget is installed".into()),
+        Err(crate::update::CheckError::Unreachable) => Err("download failed".into()),
+    }
 }
 
 fn work_dir() -> Result<PathBuf, String> {

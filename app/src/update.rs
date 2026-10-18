@@ -1,12 +1,14 @@
 //! Looking for a newer TableCross on GitHub, only if the user agreed.
 //!
 //! The only thing sent is the request for the newest release of the project. It goes through `curl`
-//! (present on macOS, Windows 10+ and Linux), so the app needs no web client of its own. Errors
-//! (offline, no release) stay silent.
+//! (present on macOS and Windows 10+; on Linux `wget` where curl is not installed, as on a plain
+//! Debian desktop), so the app needs no web client of its own. Errors (offline, no release) stay
+//! silent unless the check was asked for.
 //!
 //! Every push to main rebuilds the test build without changing the version number. So for test
 //! builds a release is also new if it was built from another, younger commit than this program.
 
+use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
 
@@ -31,16 +33,27 @@ pub struct NewVersion {
     pub asset: Option<String>,
 }
 
+/// Why a check found nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckError {
+    /// Offline, GitHub down or an answer that makes no sense.
+    Unreachable,
+    /// Neither curl nor wget is installed.
+    NoTool,
+}
+
 /// Starts the check in the background; the result comes through the receiver (`Ok(None)`: nothing
-/// new, `Err`: GitHub not reachable).
-pub fn check_in_background(ctx: egui::Context) -> Receiver<Result<Option<NewVersion>, ()>> {
+/// new).
+pub fn check_in_background(ctx: egui::Context) -> Receiver<Result<Option<NewVersion>, CheckError>> {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("tablecross-update".into())
         .spawn(move || {
             let result = check();
-            if let Ok(Some(v)) = &result {
-                tracing::info!("newer version available: {} ({})", v.version, v.url);
+            match &result {
+                Ok(Some(v)) => tracing::info!("newer version available: {} ({})", v.version, v.url),
+                Err(CheckError::NoTool) => tracing::warn!("update check: neither curl nor wget is installed"),
+                _ => {}
             }
             let _ = tx.send(result);
             ctx.request_repaint();
@@ -49,31 +62,62 @@ pub fn check_in_background(ctx: egui::Context) -> Receiver<Result<Option<NewVers
     rx
 }
 
-fn check() -> Result<Option<NewVersion>, ()> {
-    // TC_UPDATE_URL (debug builds only): another source, e.g. a local JSON file for testing
-    let url = std::env::var("TC_UPDATE_URL")
-        .ok()
-        .filter(|_| cfg!(debug_assertions))
-        .unwrap_or_else(|| RELEASES_URL.into());
-    let mut cmd = Command::new("curl");
-    cmd.args([
-        "-fsSL",
-        "--max-time",
-        "8",
-        "-H",
-        "Accept: application/vnd.github+json",
-        "-A",
-        "TableCross-update-check",
-    ])
-    .arg(&url);
+fn command(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
     #[cfg(windows)]
     {
         // No console window flashing up
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let out = cmd.output().ok().filter(|o| o.status.success()).ok_or(())?;
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| ())?;
+    cmd
+}
+
+/// Fetches `url` with curl, or with wget where curl is missing. With `to` the answer goes into that
+/// file, else it is returned. `accept`: the Accept header; `seconds`: the longest it may take.
+pub fn fetch(url: &str, accept: Option<&str>, seconds: u32, to: Option<&Path>) -> Result<Vec<u8>, CheckError> {
+    let agent = "TableCross-update";
+    let mut curl = command("curl");
+    curl.args(["-fsSL", "--max-time", &seconds.to_string(), "-A", agent]);
+    if let Some(accept) = accept {
+        curl.args(["-H", &format!("Accept: {accept}")]);
+    }
+    if let Some(to) = to {
+        curl.arg("-o").arg(to);
+    }
+    curl.arg(url);
+    let out = match curl.output() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let mut wget = command("wget");
+            wget.args(["-q", "-T", &seconds.to_string(), "-U", agent]);
+            if let Some(accept) = accept {
+                wget.arg(format!("--header=Accept: {accept}"));
+            }
+            match to {
+                Some(to) => wget.arg("-O").arg(to),
+                None => wget.args(["-O", "-"]),
+            };
+            wget.arg(url);
+            match wget.output() {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(CheckError::NoTool),
+                other => other,
+            }
+        }
+        other => other,
+    };
+    let out = out.ok().filter(|o| o.status.success()).ok_or(CheckError::Unreachable)?;
+    Ok(out.stdout)
+}
+
+fn check() -> Result<Option<NewVersion>, CheckError> {
+    // TC_UPDATE_URL (debug builds only): another source, e.g. a local JSON file for testing
+    let url = std::env::var("TC_UPDATE_URL")
+        .ok()
+        .filter(|_| cfg!(debug_assertions))
+        .unwrap_or_else(|| RELEASES_URL.into());
+    let body = fetch(&url, Some("application/vnd.github+json"), 8, None)?;
+    let json: serde_json::Value = serde_json::from_slice(&body).map_err(|_| CheckError::Unreachable)?;
     let releases = json.as_array().cloned().unwrap_or_else(|| vec![json.clone()]);
     let suffix = crate::self_update::asset_suffix();
     let version = env!("CARGO_PKG_VERSION");
