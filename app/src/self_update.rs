@@ -65,18 +65,12 @@ pub fn start(url: String, ctx: egui::Context) -> Receiver<Progress> {
     rx
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn command(program: &str) -> Command {
-    #[allow(unused_mut)]
-    let mut cmd = Command::new(program);
-    #[cfg(windows)]
-    {
-        // No console window flashing up
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    cmd
+    Command::new(program)
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn checked(cmd: &mut Command, what: &str) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{what}: {e}"))?;
     if !out.status.success() {
