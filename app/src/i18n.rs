@@ -227,8 +227,8 @@ fn de(en: &str) -> Option<&'static str> {
         "Shutting down: {}" => "Wird heruntergefahren: {}",
         "Ctrl + Shift + Alt + L" => "Strg + Umschalt + Alt + L",
         "Ctrl + Shift + Alt + 1 … 9" => "Strg + Umschalt + Alt + 1 … 9",
-        "Go to the computer with that number (see Computers)" => {
-            "Zum Computer mit dieser Nummer wechseln (siehe Computer)"
+        "Go to the computer with that number (see Arrangement)" => {
+            "Zum Computer mit dieser Nummer wechseln (siehe Anordnung)"
         }
         "Lock the screens of all computers" => "Die Bildschirme aller Computer sperren",
         "The button opens the settings and a Finder window with the helper file: switch it on there, or drag the file into the list." => {
@@ -296,10 +296,26 @@ fn de(en: &str) -> Option<&'static str> {
         "Show a code here" => "Hier einen Code zeigen",
         "Show log file" => "Logdatei zeigen",
         "Troubleshooting" => "Fehlersuche",
-        "Edges" => "Kanten",
-        "Top and bottom: switch only after a moment of pushing" => "Oben und unten: erst nach kurzem Drücken wechseln",
-        "Protects the Dock and the menu bar from switching by accident. Off: top and bottom switch at once, like left and right." => {
-            "Schützt Dock und Menüleiste vor versehentlichem Wechseln. Aus: oben und unten wechselt der Zeiger sofort, wie links und rechts."
+        "Top and bottom" => "Oben und unten",
+        "switch at once" => "sofort wechseln",
+        "after a moment of pushing" => "nach kurzem Drücken",
+        "after touching twice" => "nach zweimal Anstoßen",
+        "The Dock and the menu bar are at these edges: switching only after pushing or a double tap keeps them from switching by accident. Left and right always switch at once." => {
+            "An diesen Kanten liegen Dock und Menüleiste: Wechseln erst nach Drücken oder zweimal Anstoßen verhindert versehentliche Wechsel. Links und rechts wechselt der Zeiger immer sofort."
+        }
+        "Corners" => "Ecken",
+        "no switching this close to a corner" => "so nah an einer Ecke kein Wechsel",
+        "At left and right edges, so the pointer can reach things in the corners (0: off)." => {
+            "An den linken und rechten Kanten, damit der Zeiger Dinge in den Ecken erreicht (0: aus)."
+        }
+        "Ctrl + Shift + Alt + F" => "Strg + Umschalt + Alt + F",
+        "Keep the pointer on this computer, or let it go again" => {
+            "Zeiger auf diesem Computer festhalten oder wieder freigeben"
+        }
+        "Keep the pointer here" => "Zeiger hier festhalten",
+        "Pointer kept here ✕" => "Zeiger festgehalten ✕",
+        "The pointer does not cross edges (Ctrl+Shift+Alt+F). Click to let it go." => {
+            "Der Zeiger wechselt über keine Kante (Strg+Umschalt+Alt+F). Klicken zum Freigeben."
         }
         "Sleep" => "Ruhezustand",
         "Keep this computer from going to sleep" => "Diesen Computer nicht in den Ruhezustand gehen lassen",

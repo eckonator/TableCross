@@ -8,7 +8,7 @@ mod layout;
 #[cfg(test)]
 mod sim;
 
-pub use engine::{Action, Captured, CornerBlock, EDGE_DWELL, Engine, MachineId, Role, is_modifier};
+pub use engine::{Action, Captured, CornerBlock, EDGE_DWELL, EdgeRule, Engine, MachineId, Role, is_modifier};
 pub use geometry::{Point, Rect, Screens, Side};
 pub use layout::{
     Area, Layout, LayoutError, LayoutFile, Neighbor, STAND_IN, Tile, area_side, areas_from_tiles, neighbors_from_areas,

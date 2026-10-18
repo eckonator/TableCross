@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use eframe::egui::{self, ViewportCommand};
 use tc_session::{Command, SessionHandle};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::i18n::tr;
@@ -20,6 +20,7 @@ pub struct Tray {
     update_shown: std::cell::Cell<bool>,
     show: MenuItem,
     release: MenuItem,
+    pin: CheckMenuItem,
     lock: MenuItem,
     power_off_others: MenuItem,
     power_off_all: MenuItem,
@@ -82,6 +83,7 @@ impl Tray {
         let update = MenuItem::new("", true, None);
         let show = MenuItem::new(tr("Show TableCross"), true, None);
         let release = MenuItem::new(tr("Release everything"), true, None);
+        let pin = CheckMenuItem::new(tr("Keep the pointer here"), true, false, None);
         let lock = MenuItem::new(tr("Lock all screens"), true, None);
         let power_off_others = MenuItem::new(tr("Shut down other computers …"), true, None);
         let power_off_all = MenuItem::new(tr("Shut down all computers …"), true, None);
@@ -90,6 +92,7 @@ impl Tray {
         menu.append_items(&[
             &show,
             &release,
+            &pin,
             &lock,
             &power_off_others,
             &power_off_all,
@@ -118,6 +121,7 @@ impl Tray {
         };
         let (show_id, release_id, quit_id) = (show.id().clone(), release.id().clone(), quit.id().clone());
         let lock_id = lock.id().clone();
+        let pin_id = pin.id().clone();
         let (others_id, all_id) = (power_off_others.id().clone(), power_off_all.id().clone());
         let update_id = update.id().clone();
         let menu_ctx = ctx.clone();
@@ -131,6 +135,10 @@ impl Tray {
             } else if event.id == update_id {
                 update_flag.store(true, Ordering::SeqCst);
                 menu_ctx.request_repaint();
+            } else if event.id == pin_id {
+                if let Some(session) = &session {
+                    session.send(Command::Pin(None));
+                }
             } else if event.id == lock_id {
                 if let Some(session) = &session {
                     session.send(Command::LockAll);
@@ -182,6 +190,7 @@ impl Tray {
             update_shown: std::cell::Cell::new(false),
             show,
             release,
+            pin,
             lock,
             power_off_others,
             power_off_all,
@@ -206,10 +215,18 @@ impl Tray {
         }
     }
 
+    /// Ticks "Keep the pointer here" while the pointer is pinned.
+    pub fn set_pinned(&self, pinned: bool) {
+        if self.pin.is_checked() != pinned {
+            self.pin.set_checked(pinned);
+        }
+    }
+
     /// After a language change.
     pub fn retranslate(&self) {
         self.show.set_text(tr("Show TableCross"));
         self.release.set_text(tr("Release everything"));
+        self.pin.set_text(tr("Keep the pointer here"));
         self.lock.set_text(tr("Lock all screens"));
         self.power_off_others.set_text(tr("Shut down other computers …"));
         self.power_off_all.set_text(tr("Shut down all computers …"));

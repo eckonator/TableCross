@@ -5,7 +5,7 @@ use eframe::egui::{self, RichText};
 use super::card;
 use crate::app::App;
 use crate::i18n::{tr, trf};
-use crate::settings::{LangSetting, ThemeSetting, host_name};
+use crate::settings::{EdgeSetting, LangSetting, ThemeSetting, host_name};
 use tc_session::Command;
 
 impl App {
@@ -97,20 +97,39 @@ impl App {
                     }
                     ui.end_row();
 
-                    ui.label(tr("Edges"));
-                    if ui
-                        .checkbox(
-                            &mut self.settings.edge_push,
-                            tr("Top and bottom: switch only after a moment of pushing"),
+                    ui.label(tr("Top and bottom"));
+                    let before = self.settings.edges;
+                    egui::ComboBox::from_id_salt("edges")
+                        .selected_text(edge_text(self.settings.edges))
+                        .show_ui(ui, |ui| {
+                            for e in [EdgeSetting::AtOnce, EdgeSetting::Push, EdgeSetting::DoubleTap] {
+                                ui.selectable_value(&mut self.settings.edges, e, edge_text(e));
+                            }
+                        })
+                        .response
+                        .on_hover_text(tr(
+                            "The Dock and the menu bar are at these edges: switching only after pushing or a \
+                             double tap keeps them from switching by accident. Left and right always switch at once.",
+                        ));
+                    if before != self.settings.edges {
+                        changed = true;
+                        self.send(Command::EdgeRule(self.settings.edges.rule()));
+                    }
+                    ui.end_row();
+
+                    ui.label(tr("Corners"));
+                    let response = ui
+                        .add(
+                            egui::Slider::new(&mut self.settings.corner, 0..=100)
+                                .suffix(" pt")
+                                .text(tr("no switching this close to a corner")),
                         )
                         .on_hover_text(tr(
-                            "Protects the Dock and the menu bar from switching by accident. Off: top and bottom \
-                             switch at once, like left and right.",
-                        ))
-                        .changed()
-                    {
+                            "At left and right edges, so the pointer can reach things in the corners (0: off).",
+                        ));
+                    if response.changed() {
                         changed = true;
-                        self.send(Command::EdgePush(self.settings.edge_push));
+                        self.send(Command::Corner(f64::from(self.settings.corner)));
                     }
                     ui.end_row();
 
@@ -256,9 +275,13 @@ impl App {
                 ),
                 (
                     tr("Ctrl + Shift + Alt + 1 … 9"),
-                    tr("Go to the computer with that number (see Computers)"),
+                    tr("Go to the computer with that number (see Arrangement)"),
                 ),
                 (tr("Ctrl + Shift + Alt + L"), tr("Lock the screens of all computers")),
+                (
+                    tr("Ctrl + Shift + Alt + F"),
+                    tr("Keep the pointer on this computer, or let it go again"),
+                ),
             ] {
                 ui.label(RichText::new(keys).monospace().strong());
                 ui.label(what);
@@ -359,5 +382,13 @@ impl App {
         {
             self.confirm_remove = true;
         }
+    }
+}
+
+fn edge_text(e: EdgeSetting) -> &'static str {
+    match e {
+        EdgeSetting::AtOnce => tr("switch at once"),
+        EdgeSetting::Push => tr("after a moment of pushing"),
+        EdgeSetting::DoubleTap => tr("after touching twice"),
     }
 }

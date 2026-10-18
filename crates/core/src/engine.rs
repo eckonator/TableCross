@@ -49,6 +49,33 @@ impl std::fmt::Debug for Clock {
     }
 }
 
+/// How top and bottom edges switch (left and right always switch at once).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EdgeRule {
+    #[default]
+    AtOnce,
+    /// After pushing against the edge for a moment (`EDGE_DWELL`).
+    Push,
+    /// After touching the edge twice in a short time.
+    DoubleTap,
+}
+
+/// The second touch of a double tap must come within this time of the first.
+const TAP_WINDOW: Duration = Duration::from_millis(500);
+/// Moving this far from the edge (logical points) between two touches counts as letting go.
+const TAP_AWAY: f64 = 2.0;
+
+/// The pointer touched an edge once (for a double tap).
+#[derive(Debug, Clone)]
+struct EdgeTap {
+    machine: MachineId,
+    side: Side,
+    /// Last time it was at the edge.
+    at: Instant,
+    /// It left the edge since.
+    away: bool,
+}
+
 /// The pointer is pushed against an edge that leads to a neighbor.
 #[derive(Debug, Clone)]
 struct EdgePush {
@@ -171,7 +198,13 @@ pub struct Engine {
     edge_dwell: Duration,
     /// The system reports only one push at an edge (Wayland): no dwell possible.
     single_push: bool,
+    double_tap: bool,
     edge_push: Option<EdgePush>,
+    edge_tap: Option<EdgeTap>,
+    /// The pointer stays on the computer it is on: no edge switches.
+    pinned: bool,
+    /// No switching this close to a corner (logical points); `None`: as in the layout.
+    corner: Option<f64>,
     /// A corner kept the pointer from switching and nobody has asked about it yet.
     corner_block: Option<CornerBlock>,
     /// When a corner block was last reported, per machine and side (reported again only after a pause).
@@ -232,6 +265,10 @@ impl Engine {
             clock: Clock(Arc::new(Instant::now)),
             edge_dwell: Duration::ZERO,
             single_push: false,
+            double_tap: false,
+            edge_tap: None,
+            pinned: false,
+            corner: None,
             edge_push: None,
             corner_block: None,
             corner_reported: None,
@@ -256,6 +293,37 @@ impl Engine {
     pub fn set_single_push(&mut self) {
         self.single_push = true;
         self.edge_dwell = Duration::ZERO;
+        self.double_tap = false;
+    }
+
+    /// How top and bottom edges switch.
+    pub fn set_edge_rule(&mut self, rule: EdgeRule) {
+        self.set_edge_dwell(if rule == EdgeRule::Push {
+            EDGE_DWELL
+        } else {
+            Duration::ZERO
+        });
+        self.double_tap = rule == EdgeRule::DoubleTap && !self.single_push;
+        self.edge_push = None;
+        self.edge_tap = None;
+    }
+
+    /// Keeps the pointer on the computer it is on (edges do not switch; shortcuts still do).
+    pub fn set_pinned(&mut self, pinned: bool) {
+        self.pinned = pinned;
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    /// No switching at left and right edges this close to a corner (logical points).
+    pub fn set_corner(&mut self, corner: f64) {
+        self.corner = (corner.is_finite() && corner >= 0.0).then_some(corner);
+    }
+
+    fn corner(&self) -> f64 {
+        self.corner.unwrap_or(self.layout.corner)
     }
 
     pub fn role(&self) -> Role {
@@ -579,7 +647,10 @@ impl Engine {
                     self.end_push_if_left(&me, p);
                     return;
                 };
-                if self.corner_blocks(side) && mine.corner_distance(side, p) < self.layout.corner {
+                if self.pinned {
+                    return;
+                }
+                if self.corner_blocks(side) && mine.corner_distance(side, p) < self.corner() {
                     if self.neighbor_entry(&self.me, side, p).is_some() {
                         let me = self.me.clone();
                         self.note_corner_block(&me, side, p);
@@ -631,7 +702,11 @@ impl Engine {
                     return;
                 };
                 let clamped = here.clamp(to);
-                if self.corner_blocks(side) && screens.corner_distance(side, pos) < self.layout.corner {
+                if self.pinned {
+                    self.set_position(&target, clamped, lx, ly, actions);
+                    return;
+                }
+                if self.corner_blocks(side) && screens.corner_distance(side, pos) < self.corner() {
                     if self.neighbor_entry(&target, side, pos).is_some() {
                         self.note_corner_block(&target, side, pos);
                     }
@@ -671,6 +746,15 @@ impl Engine {
     /// vertical part even when it is pushed up or down), and neither does the small motion back of a
     /// finger put down again on a trackpad.
     fn end_push_if_left(&mut self, machine: &str, p: Point) {
+        if let Some(tap) = &mut self.edge_tap
+            && tap.machine == machine
+            && self
+                .machines
+                .get(machine)
+                .is_none_or(|screens| screens.edge_distance(tap.side, p) > TAP_AWAY)
+        {
+            tap.away = true;
+        }
         let Some(push) = &self.edge_push else {
             return;
         };
@@ -714,10 +798,16 @@ impl Engine {
     /// Top and bottom edges switch only after the pointer was pushed against them for a moment, in
     /// one go or in several strokes.
     fn pushed_long_enough(&mut self, machine: &str, side: Side) -> bool {
-        if !matches!(side, Side::Top | Side::Bottom) || self.edge_dwell.is_zero() {
+        if !matches!(side, Side::Top | Side::Bottom) {
             return true;
         }
         let now = (self.clock.0)();
+        if self.double_tap {
+            return self.tapped_twice(machine, side, now);
+        }
+        if self.edge_dwell.is_zero() {
+            return true;
+        }
         match &mut self.edge_push {
             Some(push) if push.machine == machine && push.side == side && now - push.last <= EDGE_PAUSE => {
                 push.pushed += (now - push.last).min(EDGE_STEP);
@@ -734,6 +824,29 @@ impl Engine {
                     side,
                     pushed: Duration::ZERO,
                     last: now,
+                });
+                false
+            }
+        }
+    }
+
+    /// Touching the edge, letting go and touching it again within `TAP_WINDOW`.
+    fn tapped_twice(&mut self, machine: &str, side: Side, now: Instant) -> bool {
+        match &mut self.edge_tap {
+            Some(tap) if tap.machine == machine && tap.side == side && now - tap.at <= TAP_WINDOW => {
+                if tap.away {
+                    self.edge_tap = None;
+                    return true;
+                }
+                tap.at = now;
+                false
+            }
+            _ => {
+                self.edge_tap = Some(EdgeTap {
+                    machine: machine.to_string(),
+                    side,
+                    at: now,
+                    away: false,
                 });
                 false
             }

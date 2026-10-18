@@ -19,6 +19,26 @@ pub enum LangSetting {
     En,
 }
 
+/// How top and bottom edges switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeSetting {
+    #[default]
+    AtOnce,
+    Push,
+    DoubleTap,
+}
+
+impl EdgeSetting {
+    pub fn rule(self) -> tc_core::EdgeRule {
+        match self {
+            EdgeSetting::AtOnce => tc_core::EdgeRule::AtOnce,
+            EdgeSetting::Push => tc_core::EdgeRule::Push,
+            EdgeSetting::DoubleTap => tc_core::EdgeRule::DoubleTap,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeSetting {
@@ -56,8 +76,10 @@ pub struct Settings {
     pub stay_awake: bool,
     /// With `stay_awake`: keep the display on as well.
     pub screen_stays_on: bool,
-    /// Top and bottom edges switch only after a moment of pushing (Dock, menu bar); off: at once.
-    pub edge_push: bool,
+    /// How top and bottom edges switch (the Dock and the menu bar are there).
+    pub edges: EdgeSetting,
+    /// No switching at left and right edges this close to a corner (points).
+    pub corner: u32,
 }
 
 impl Default for Settings {
@@ -78,7 +100,8 @@ impl Default for Settings {
             universal_control_off: true,
             stay_awake: false,
             screen_stays_on: false,
-            edge_push: false,
+            edges: EdgeSetting::AtOnce,
+            corner: 16,
         }
     }
 }
@@ -124,7 +147,12 @@ impl Settings {
             universal_control_off: field(&fields, "universal_control_off", d.universal_control_off),
             stay_awake: field(&fields, "stay_awake", d.stay_awake),
             screen_stays_on: field(&fields, "screen_stays_on", d.screen_stays_on),
-            edge_push: field(&fields, "edge_push", d.edge_push),
+            // "edge_push" of 0.4.2: pushing on or off
+            edges: match fields.get("edge_push") {
+                Some(serde_json::Value::Bool(true)) if !fields.contains_key("edges") => EdgeSetting::Push,
+                _ => field(&fields, "edges", d.edges),
+            },
+            corner: field(&fields, "corner", d.corner).min(200),
         }
     }
 
@@ -199,6 +227,17 @@ mod tests {
         assert_eq!(s.port, tc_net::DEFAULT_PORT);
         assert!(s.autostart);
         assert_eq!(Settings::parse("not json"), Settings::default());
+    }
+
+    #[test]
+    fn pushing_at_edges_from_0_4_2_is_kept() {
+        assert_eq!(Settings::parse(r#"{"edge_push":true}"#).edges, EdgeSetting::Push);
+        assert_eq!(Settings::parse(r#"{"edge_push":false}"#).edges, EdgeSetting::AtOnce);
+        assert_eq!(
+            Settings::parse(r#"{"edges":"double_tap"}"#).edges,
+            EdgeSetting::DoubleTap
+        );
+        assert_eq!(Settings::parse(r#"{"corner":5000}"#).corner, 200);
     }
 
     #[test]

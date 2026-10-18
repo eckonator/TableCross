@@ -250,7 +250,8 @@ impl App {
                 if self.settings.collect_logs {
                     handle.send(Command::CollectLogs(true));
                 }
-                handle.send(Command::EdgePush(self.settings.edge_push));
+                handle.send(Command::EdgeRule(self.settings.edges.rule()));
+                handle.send(Command::Corner(f64::from(self.settings.corner)));
                 self.session = Some(handle);
                 self.task = Some(task);
             }
@@ -403,6 +404,24 @@ impl App {
                         .on_hover_text(&text);
                 });
         });
+        if self.status.pinned {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(6.0);
+                let chip = egui::Button::new(RichText::new(tr("Pointer kept here ✕")).size(12.0).color(p.on_accent))
+                    .fill(p.accent)
+                    .corner_radius(10.0);
+                if ui
+                    .add(chip)
+                    .on_hover_text(tr(
+                        "The pointer does not cross edges (Ctrl+Shift+Alt+F). Click to let it go.",
+                    ))
+                    .clicked()
+                {
+                    self.send(Command::Pin(Some(false)));
+                }
+            });
+        }
         ui.add_space(18.0);
         for (page, symbol, label) in [
             (Page::Status, "◉", tr("Status")),
@@ -516,6 +535,7 @@ impl App {
                 .filter(|n| n.asset.is_some())
                 .map(|n| n.version.as_str());
             tray.set_update(version);
+            tray.set_pinned(self.status.pinned);
         }
         if self.update_flag.swap(false, Ordering::SeqCst) {
             self.install_update(ctx);

@@ -85,8 +85,10 @@ may have several neighbors; the pointer crosses only where the edges touch, at t
 computer keeps its size when screens are switched off or on; *Take over the current size* in its
 menu adopts the screens it has now. New computers are paired on the Pairing page.
 
-Settings worth knowing: all edges switch at once; *Top and bottom: switch only after a moment of
-pushing* protects the Dock and the menu bar instead. *Keep this computer from going to sleep* (with the screen on as well, if
+Settings worth knowing: all edges switch at once; for top and bottom, *after a moment of pushing* or
+*after touching twice* protects the Dock and the menu bar instead, and the corners where left and
+right edges do not switch can be widened or switched off. Ctrl+Shift+Alt+F (or the status icon menu)
+keeps the pointer on the computer it is on until pressed again. *Keep this computer from going to sleep* (with the screen on as well, if
 wanted) for a computer in the middle of the desk, so the way over it to the others stays open. On
 macOS, TableCross switches off Universal Control at start, which also takes the pointer at screen
 edges; the status page warns while it is on.
@@ -153,8 +155,8 @@ turn at the same place (two laptops on the same monitors, say) share a tile in t
 edge leads to the one that is connected.
 
 Move the pointer over the edge to control the other computer; moving a computer's own mouse takes
-control back. All edges switch at once (optionally top and bottom only after a moment of pushing, see
-the settings). Its own keyboard simply keeps typing there, so the mouse of one computer and the
+control back. All edges switch at once (optionally top and bottom only after pushing or touching
+twice, see the settings). Its own keyboard simply keeps typing there, so the mouse of one computer and the
 keyboard of another work together. Ctrl+Shift+Alt+Esc releases everything at once. `--swap-cmd-ctrl` on
 `place` swaps ⌘ and Ctrl while controlling that computer. On macOS the terminal (later the app) needs
 the Accessibility permission.

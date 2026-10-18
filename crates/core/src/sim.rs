@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use tc_protocol::{MediaKey, Message, MouseButton, Screen};
 
-use crate::engine::{Action, Captured, EDGE_DWELL, Engine, Role};
+use crate::engine::{Action, Captured, EDGE_DWELL, EdgeRule, Engine, Role};
 use crate::geometry::{Point, Screens, Side};
 use crate::layout::Layout;
 
@@ -757,6 +757,95 @@ fn without_pushing_top_and_bottom_switch_like_the_sides() {
     assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
     sim.mouse("imac", 0.0, -900.0);
     assert_eq!(sim.role("imac"), Role::Idle);
+}
+
+fn imac_and_below() -> Sim {
+    Sim::new(
+        &[
+            ("imac", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("below", vec![screen(0, 0, 1000, 800, 1.0)]),
+            ("right", vec![screen(0, 0, 1000, 800, 1.0)]),
+        ],
+        Layout::default()
+            .with("below", Side::Bottom, "imac")
+            .with("right", Side::Right, "imac"),
+    )
+}
+
+#[test]
+fn a_pinned_pointer_stays_on_its_computer() {
+    let mut sim = imac_and_below();
+    sim.machines
+        .get_mut("imac")
+        .unwrap()
+        .engine
+        .set_edge_rule(EdgeRule::AtOnce);
+    sim.machines.get_mut("imac").unwrap().engine.set_pinned(true);
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(500.0, 400.0);
+    sim.glide("imac", 2000.0, 0.0);
+    sim.glide("imac", 0.0, 2000.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // Over there, pinned as well: no way back over the edge
+    sim.machines.get_mut("imac").unwrap().engine.set_pinned(false);
+    sim.glide("imac", 0.0, 100.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
+    sim.machines.get_mut("imac").unwrap().engine.set_pinned(true);
+    sim.glide("imac", 0.0, -3000.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
+    // The shortcut still goes there
+    let actions = sim.machines.get_mut("imac").unwrap().engine.switch_to("right");
+    sim.apply("imac", actions);
+    assert_eq!(sim.role("imac"), Role::Controlling("right".into()));
+}
+
+#[test]
+fn a_double_tap_switches_at_top_and_bottom() {
+    let mut sim = imac_and_below();
+    sim.machines
+        .get_mut("imac")
+        .unwrap()
+        .engine
+        .set_edge_rule(EdgeRule::DoubleTap);
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(500.0, 790.0);
+    // Pushing on and on: no switch
+    sim.glide("imac", 0.0, 600.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // Back a little and against the edge again: over
+    sim.mouse("imac", 0.0, -10.0);
+    sim.mouse("imac", 0.0, 20.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
+    // Back up: a double tap at the top edge of the laptop
+    sim.glide("imac", 0.0, -900.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("below".into()));
+    sim.mouse("imac", 0.0, 10.0);
+    sim.mouse("imac", 0.0, -20.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // Two touches too far apart in time: no switch
+    *sim.now.lock().unwrap() += Duration::from_secs(5);
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(500.0, 790.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    sim.mouse("imac", 0.0, 20.0);
+    sim.mouse("imac", 0.0, -10.0);
+    *sim.now.lock().unwrap() += Duration::from_secs(2);
+    sim.mouse("imac", 0.0, 20.0);
+    assert_eq!(sim.role("imac"), Role::Idle);
+    // Left and right still at once
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(990.0, 400.0);
+    sim.glide("imac", 30.0, 0.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("right".into()));
+}
+
+#[test]
+fn the_corner_rule_can_be_widened_or_switched_off() {
+    let mut sim = imac_and_below();
+    sim.machines.get_mut("imac").unwrap().engine.set_corner(100.0);
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(990.0, 60.0);
+    sim.glide("imac", 30.0, 0.0);
+    assert_eq!(sim.role("imac"), Role::Idle, "60 points from the corner, within 100");
+    sim.machines.get_mut("imac").unwrap().engine.set_corner(0.0);
+    sim.machines.get_mut("imac").unwrap().os.pointer = Point::new(990.0, 2.0);
+    sim.glide("imac", 30.0, 0.0);
+    assert_eq!(sim.role("imac"), Role::Controlling("right".into()));
 }
 
 #[test]

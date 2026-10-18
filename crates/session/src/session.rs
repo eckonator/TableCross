@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use tc_core::{Action, Area, Captured, Engine, Layout, LayoutFile, Role, Side};
+use tc_core::{Action, Area, Captured, EdgeRule, Engine, Layout, LayoutFile, Role, Side};
 use tc_input::{Backend, Capture, Inject, Problem};
 use tc_net::{
     Disconnect, Discovered, Event, Fingerprint, Identity, LinkInfo, Node, NodeConfig, PairError, PairingCode,
@@ -26,6 +26,7 @@ use crate::transfer::{self, Cancels, Progress, TransferState, TransferView};
 
 const ESCAPE: u16 = 0x29;
 const KEY_L: u16 = 0x0F;
+const KEY_F: u16 = 0x09;
 /// Keys 1 to 9 of the main block.
 const DIGITS: [u16; 9] = [0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26];
 const ARROWS: [(u16, Side); 4] = [
@@ -69,9 +70,13 @@ pub enum Command {
     /// The whole desk as areas by machine id; computers whose areas touch become neighbors where
     /// the edges overlap. Replaces the arrangement.
     Arrange(Vec<Area>),
-    /// Top and bottom edges switch only after a moment of pushing (the Dock and the menu bar are
-    /// there); off: at once, like left and right.
-    EdgePush(bool),
+    /// How top and bottom edges switch: at once, after a moment of pushing or after a double tap
+    /// (the Dock and the menu bar are there).
+    EdgeRule(EdgeRule),
+    /// No switching at left and right edges this close to a corner (logical points).
+    Corner(f64),
+    /// Keep the pointer on the computer it is on (`None`: the other way round).
+    Pin(Option<bool>),
     /// While the arrangement is being changed here: where the pointer would cross, per connected
     /// computer (empty: nowhere), shown on their screens.
     ShowEdges(Vec<(Fingerprint, Vec<EdgeMark>)>),
@@ -219,6 +224,8 @@ pub struct Status {
     /// Where the pointer crosses on this computer's screens, while another computer changes the
     /// arrangement, and when that came (shown for a moment).
     pub edge_marks: Option<(Vec<EdgeMark>, Instant)>,
+    /// The pointer stays on the computer it is on (Ctrl+Shift+Alt+F).
+    pub pinned: bool,
 }
 
 /// Talks to a running session; cheap to clone.
@@ -464,6 +471,20 @@ impl Shared {
         }
     }
 
+    /// Keeps the pointer on the computer it is on, or lets it go again (`None`: the other way round).
+    fn toggle_pin(&self, pin: Option<bool>) {
+        let mut engine = self.engine.lock().expect("engine lock");
+        let pin = pin.unwrap_or(!engine.pinned());
+        if pin == engine.pinned() {
+            return;
+        }
+        engine.set_pinned(pin);
+        drop(engine);
+        tracing::info!("pointer {}", if pin { "pinned to this computer" } else { "free again" });
+        self.refresh();
+        self.changed();
+    }
+
     /// Rebuilds the status snapshot from node, engine and input.
     fn refresh(&self) {
         let file = self.status.lock().expect("status lock").layout.clone();
@@ -489,7 +510,10 @@ impl Shared {
             .into_iter()
             .filter(|d| !paired.contains(&d.fingerprint))
             .collect();
-        let role = self.engine.lock().expect("engine lock").role();
+        let (role, pinned) = {
+            let engine = self.engine.lock().expect("engine lock");
+            (engine.role(), engine.pinned())
+        };
         let (controlling, controlled_by) = match role {
             Role::Idle => (None, None),
             Role::Controlling(id) => (Some(self.name_of(&id)), None),
@@ -500,6 +524,7 @@ impl Shared {
         status.discovered = discovered;
         status.controlling = controlling;
         status.controlled_by = controlled_by;
+        status.pinned = pinned;
         if status
             .pairing
             .as_ref()
@@ -564,6 +589,12 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 if down && let Some(target) = shared.numbered(number) {
                     let actions = shared.engine.lock().expect("engine lock").switch_to(&target);
                     shared.execute(actions);
+                }
+                return false;
+            }
+            if prefix && usage == KEY_F {
+                if down {
+                    shared.toggle_pin(None);
                 }
                 return false;
             }
@@ -1459,14 +1490,12 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
         }
         Command::Place { peer, side } => shared.edit_layout(|file| layout_file::place(file, &me, &peer, side)),
         Command::Arrange(areas) => shared.edit_layout(|file| file.set_areas(areas)),
-        Command::EdgePush(on) => {
-            let dwell = if on { tc_core::EDGE_DWELL } else { Duration::ZERO };
-            shared.engine.lock().expect("engine lock").set_edge_dwell(dwell);
-            tracing::info!(
-                "top and bottom edges: {}",
-                if on { "after a moment of pushing" } else { "at once" }
-            );
+        Command::EdgeRule(rule) => {
+            shared.engine.lock().expect("engine lock").set_edge_rule(rule);
+            tracing::info!("top and bottom edges: {rule:?}");
         }
+        Command::Corner(points) => shared.engine.lock().expect("engine lock").set_corner(points),
+        Command::Pin(pin) => shared.toggle_pin(pin),
         Command::ShowEdges(marks) => {
             let knows = |peer: &Fingerprint| {
                 shared
@@ -1509,6 +1538,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             }
         }
         Command::ReleaseAll => {
+            shared.toggle_pin(Some(false));
             let actions = shared.engine.lock().expect("engine lock").release_everything();
             shared.execute(actions);
             if let Some(inject) = &shared.inject {

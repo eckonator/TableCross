@@ -418,7 +418,6 @@ impl Layout {
             Side::Top => (y, x + along * w, false),
             Side::Bottom => (y + h, x + along * w, false),
         };
-        let end = along >= 1.0 - 1e-9;
         self.tiles
             .iter()
             .filter(|(m, _)| m != machine)
@@ -432,7 +431,8 @@ impl Layout {
                     Side::Left | Side::Top => (far - edge).abs() < EPS,
                     Side::Right | Side::Bottom => (near - edge).abs() < EPS,
                 };
-                let covers = at >= start - EPS && at < start + len - EPS || (end && (at - (start + len)).abs() < EPS);
+                // Both ends belong to the edge; where two neighbors meet, the first one counts
+                let covers = at >= start - EPS && at <= start + len + EPS;
                 (touches && covers).then(|| (m.clone(), ((at - start) / len).clamp(0.0, 1.0)))
             })
             .collect()
