@@ -56,8 +56,7 @@ Source: "{#Source}\THIRD-PARTY-LICENSES.yml"; DestDir: "{app}"; Flags: ignorever
 Name: "{group}\TableCross"; Filename: "{app}\TableCross.exe"
 
 [Run]
-; An older service is removed first, so the new program file is used
-Filename: "{app}\tablecross-service.exe"; Parameters: "uninstall"; Flags: runhidden; Tasks: service
+; The old service was removed before the files were copied (see [Code])
 Filename: "{app}\tablecross-service.exe"; Parameters: "install"; Flags: runhidden; Tasks: service
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TableCross"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""TableCross"" dir=in action=allow protocol=UDP localport=24800 profile=private,domain program=""{app}\TableCross.exe"""; Flags: runhidden
@@ -69,3 +68,14 @@ Filename: "{app}\TableCross.exe"; Flags: nowait runasoriginaluser; Check: Wizard
 Filename: "{app}\tablecross-service.exe"; Parameters: "uninstall"; Flags: runhidden; RunOnceId: "RemoveService"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TableCross"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM TableCross.exe"; Flags: runhidden; RunOnceId: "StopApp"
+
+[Code]
+// An older service (and its agent) still runs from the program folder: stop and remove it before
+// the new files are copied, else the service program is in use and cannot be replaced.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if (CurStep = ssInstall) and FileExists(ExpandConstant('{app}\tablecross-service.exe')) then
+    Exec(ExpandConstant('{app}\tablecross-service.exe'), 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;

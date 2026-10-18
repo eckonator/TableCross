@@ -44,6 +44,8 @@ pub struct App {
     pub setup_step: Option<usize>,
     pub code_input: String,
     pub address_input: String,
+    /// "Add an address" on the pairing page: for which computer, and what was typed.
+    pub peer_address: Option<(tc_net::Fingerprint, String)>,
     pub pair_target: Option<Fingerprint>,
     pub confirm_unpair: Option<Fingerprint>,
     pub info: Option<(String, Instant)>,
@@ -81,6 +83,8 @@ pub struct App {
     pub remove_settings: bool,
     pub confirm_remove: bool,
     removal: Option<Removal>,
+    /// The session the status icon menu talks to (it changes when the session restarts).
+    tray_session: Arc<std::sync::Mutex<Option<SessionHandle>>>,
     /// Keeps the system (and with `true` the display) awake while the settings ask for it.
     stay_awake: Option<(bool, tc_input::system::KeepAwake)>,
 }
@@ -128,6 +132,7 @@ impl App {
             setup_step: None,
             code_input: String::new(),
             address_input: String::new(),
+            peer_address: None,
             pair_target: None,
             confirm_unpair: None,
             info: None,
@@ -157,6 +162,7 @@ impl App {
                 .then(|| Instant::now() + HELPER_PROMPT_FOR),
             update_progress: None,
             stay_awake: None,
+            tray_session: Arc::new(std::sync::Mutex::new(None)),
         };
         app.apply_stay_awake();
         if app.demo.is_none() {
@@ -178,7 +184,7 @@ impl App {
         if !app.dev.quitting_after_screenshot() {
             app.tray = crate::tray::Tray::new(
                 &ctx,
-                app.session.clone(),
+                app.tray_session.clone(),
                 app.quit_flag.clone(),
                 app.update_flag.clone(),
                 app.power_off_flag.clone(),
@@ -252,6 +258,7 @@ impl App {
                 }
                 handle.send(Command::EdgeRule(self.settings.edges.rule()));
                 handle.send(Command::Corner(f64::from(self.settings.corner)));
+                *self.tray_session.lock().expect("tray session lock") = Some(handle.clone());
                 self.session = Some(handle);
                 self.task = Some(task);
             }
@@ -265,6 +272,7 @@ impl App {
     }
 
     fn stop_session(&mut self) {
+        *self.tray_session.lock().expect("tray session lock") = None;
         if let Some(session) = self.session.take() {
             session.send(Command::Shutdown);
         }

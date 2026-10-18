@@ -236,6 +236,8 @@ struct State {
 struct Inner {
     identity: Identity,
     config: NodeConfig,
+    /// This computer's screens as told to new links (they change with monitors).
+    screens: Mutex<Vec<Screen>>,
     instance: u64,
     endpoint: quinn::Endpoint,
     local_addr: SocketAddr,
@@ -254,6 +256,11 @@ struct Inner {
 
 impl LinkHost for Inner {
     fn deliver(&self, peer: Fingerprint, message: Message) {
+        if let Message::Screens { screens } = &message
+            && let Some(entry) = self.state.lock().expect("node state lock").links.get_mut(&peer)
+        {
+            entry.screens = screens.clone();
+        }
         let _ = self.events.send(Event::Message { peer, message });
     }
 
@@ -320,6 +327,7 @@ impl Node {
             link_client: tls::client_config(&identity, ALPN_LINK),
             pair_client: tls::client_config(&identity, ALPN_PAIR),
             identity,
+            screens: Mutex::new(config.screens.clone()),
             config,
             instance: u64::from_le_bytes(instance),
             endpoint,
@@ -437,6 +445,12 @@ impl Node {
 
     /// Sends a message to a connected peer: datagram messages unreliably, everything else in order.
     /// `false` if the peer is not connected.
+    /// This computer's screens changed: new links get them in their hello (telling connected
+    /// peers is up to the caller, as only newer versions understand `Message::Screens`).
+    pub fn set_screens(&self, screens: Vec<Screen>) {
+        *self.inner.screens.lock().expect("screens lock") = screens;
+    }
+
     pub fn send(&self, peer: &Fingerprint, message: Message) -> bool {
         let state = self.inner.lock();
         let Some(entry) = state.links.get(peer) else {
@@ -596,7 +610,7 @@ impl Inner {
         Message::Hello {
             version: PROTOCOL_VERSION,
             name: self.config.name.clone(),
-            screens: self.config.screens.clone(),
+            screens: self.screens.lock().expect("screens lock").clone(),
             app: self.config.app_version.clone(),
         }
     }

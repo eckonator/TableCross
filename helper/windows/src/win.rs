@@ -25,16 +25,20 @@ use windows_sys::Win32::System::Pipes::{
 use windows_sys::Win32::System::RemoteDesktop::{ProcessIdToSessionId, WTSGetActiveConsoleSessionId};
 use windows_sys::Win32::System::Services::{
     CloseServiceHandle, ControlService, CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW,
-    RegisterServiceCtrlHandlerExW, SC_MANAGER_ALL_ACCESS, SERVICE_ACCEPT_SESSIONCHANGE, SERVICE_ACCEPT_STOP,
-    SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_CONTROL_INTERROGATE, SERVICE_CONTROL_STOP, SERVICE_ERROR_NORMAL,
-    SERVICE_RUNNING, SERVICE_STATUS, SERVICE_STATUS_HANDLE, SERVICE_STOPPED, SERVICE_TABLE_ENTRYW,
-    SERVICE_WIN32_OWN_PROCESS, SetServiceStatus, StartServiceCtrlDispatcherW, StartServiceW,
+    QueryServiceStatus, RegisterServiceCtrlHandlerExW, SC_MANAGER_ALL_ACCESS, SERVICE_ACCEPT_SESSIONCHANGE,
+    SERVICE_ACCEPT_STOP, SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_CONTROL_INTERROGATE, SERVICE_CONTROL_STOP,
+    SERVICE_ERROR_NORMAL, SERVICE_RUNNING, SERVICE_STATUS, SERVICE_STATUS_HANDLE, SERVICE_STOPPED,
+    SERVICE_TABLE_ENTRYW, SERVICE_WIN32_OWN_PROCESS, SetServiceStatus, StartServiceCtrlDispatcherW, StartServiceW,
 };
 use windows_sys::Win32::System::StationsAndDesktops::{CloseDesktop, HDESK, OpenInputDesktop, SetThreadDesktop};
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CreateProcessAsUserW, GetCurrentProcess, GetCurrentProcessId, OpenProcessToken,
     PROCESS_INFORMATION, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
+use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
+
+/// `CreateServiceW` while the old service is still being removed.
+const ERROR_SERVICE_MARKED_FOR_DELETE: u32 = 1072;
 
 const SERVICE_NAME: &str = "TableCross";
 const DISPLAY_NAME: &str = "TableCross Service";
@@ -88,21 +92,29 @@ fn install() -> Result<(), String> {
         if manager.is_null() {
             return Err(last_error("opening the service manager (run as administrator)"));
         }
-        let service = CreateServiceW(
-            manager,
-            wide(SERVICE_NAME).as_ptr(),
-            wide(DISPLAY_NAME).as_ptr(),
-            SERVICE_ALL_ACCESS,
-            SERVICE_WIN32_OWN_PROCESS,
-            SERVICE_AUTO_START,
-            SERVICE_ERROR_NORMAL,
-            command.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-        );
+        // A service just removed stays "marked for deletion" until it has stopped: wait for that
+        let mut service = std::ptr::null_mut();
+        for _ in 0..30 {
+            service = CreateServiceW(
+                manager,
+                wide(SERVICE_NAME).as_ptr(),
+                wide(DISPLAY_NAME).as_ptr(),
+                SERVICE_ALL_ACCESS,
+                SERVICE_WIN32_OWN_PROCESS,
+                SERVICE_AUTO_START,
+                SERVICE_ERROR_NORMAL,
+                command.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            );
+            if !service.is_null() || GetLastError() != ERROR_SERVICE_MARKED_FOR_DELETE {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
         if service.is_null() {
             CloseServiceHandle(manager);
             return Err(last_error("creating the service"));
@@ -131,6 +143,14 @@ fn uninstall() -> Result<(), String> {
         }
         let mut status: SERVICE_STATUS = std::mem::zeroed();
         ControlService(service, SERVICE_CONTROL_STOP, &mut status);
+        // Wait until it has stopped (and with it the agent), so its files are free and a new
+        // service can be created right after
+        for _ in 0..30 {
+            if QueryServiceStatus(service, &mut status) == 0 || status.dwCurrentState == SERVICE_STOPPED {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
         let deleted = DeleteService(service) != 0;
         CloseServiceHandle(service);
         CloseServiceHandle(manager);
@@ -320,6 +340,9 @@ impl InputDesktop {
 /// Serves the app of this session: reads messages from the pipe and injects them on the desktop that
 /// has the input. When the app goes away, everything it pressed is released.
 fn agent() {
+    // The app sends pixels; without this, Windows scales the agent's view of the screen and the
+    // pointer lands in the wrong place at display scaling other than 100 %
+    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
     let mut session = 0u32;
     unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) };
     let name = wide(agent_pipe(session));

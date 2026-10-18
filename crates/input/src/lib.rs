@@ -66,6 +66,9 @@ pub enum Problem {
     HooksRemoved(u32),
     /// macOS: Universal Control is switched on and takes the pointer at screen edges as well.
     UniversalControl,
+    /// Linux with Wayland: the remote control portal is not available or was not allowed, so this
+    /// computer cannot be controlled from others.
+    ControlUnavailable,
 }
 
 impl std::fmt::Display for Problem {
@@ -88,6 +91,7 @@ impl std::fmt::Display for Problem {
             }
             Problem::HooksRemoved(n) => write!(f, "Windows removed the input hooks {n} times (installed again)"),
             Problem::UniversalControl => write!(f, "Universal Control of macOS is switched on"),
+            Problem::ControlUnavailable => write!(f, "remote control of this computer is not available"),
         }
     }
 }

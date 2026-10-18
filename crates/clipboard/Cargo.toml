@@ -31,3 +31,4 @@ windows-sys = { version = "0.61", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
+x11rb = "0.14"

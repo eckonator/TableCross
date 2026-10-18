@@ -261,6 +261,11 @@ pub enum Message {
     ShowEdges {
         marks: Vec<EdgeMark>,
     },
+    /// The sender's screens changed (a monitor came or went, or they became known only after the
+    /// connection was made). From 0.4.7 on, only to peers that announced it.
+    Screens {
+        screens: Vec<Screen>,
+    },
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -280,7 +285,9 @@ impl Message {
     /// Numbers must be finite. NaN or infinity would throw off the pointer on the receiving side.
     fn values_finite(&self) -> bool {
         match self {
-            Message::Hello { screens, .. } => screens.iter().all(|s| s.scale.is_finite() && s.scale > 0.0),
+            Message::Hello { screens, .. } | Message::Screens { screens } => {
+                screens.iter().all(|s| s.scale.is_finite() && s.scale > 0.0)
+            }
             Message::Enter { x, y } => x.is_finite() && y.is_finite(),
             Message::MouseMove { x, y, dx, dy, .. } => [x, y, dx, dy].iter().all(|v| v.is_finite()),
             Message::Wheel { dx, dy, .. } => dx.is_finite() && dy.is_finite(),
@@ -308,6 +315,7 @@ impl Message {
             Message::Tiles { tiles, names, .. } => tiles.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS,
             Message::Desk { areas, names, .. } => areas.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS,
             Message::ShowEdges { marks } => marks.len() <= MAX_PLACEMENTS,
+            Message::Screens { screens } => screens.len() <= MAX_PLACEMENTS,
             Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
             _ => true,
         }
@@ -471,6 +479,15 @@ mod tests {
                     side: Side::Top,
                     from: 0.5,
                     to: 1.0,
+                }],
+            },
+            Message::Screens {
+                screens: vec![Screen {
+                    x: 0,
+                    y: 0,
+                    width: 5120,
+                    height: 1440,
+                    scale: 1.0,
                 }],
             },
         ]

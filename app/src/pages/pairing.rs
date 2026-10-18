@@ -202,7 +202,48 @@ impl App {
                 } else if ui.button(tr("Remove pairing …")).clicked() {
                     self.confirm_unpair = Some(peer.fingerprint);
                 }
+                if self.peer_address.as_ref().is_none_or(|(fp, _)| *fp != peer.fingerprint)
+                    && ui
+                        .button(tr("Add an address …"))
+                        .on_hover_text(tr(
+                            "Where to reach this computer when it is not found on the network by itself",
+                        ))
+                        .clicked()
+                {
+                    self.peer_address = Some((peer.fingerprint, String::new()));
+                }
             });
+            if let Some((fp, mut text)) = self.peer_address.clone()
+                && fp == peer.fingerprint
+            {
+                let mut done = false;
+                let mut add = None;
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .desired_width(200.0)
+                            .hint_text("192.168.1.20:24800"),
+                    );
+                    let address: Option<SocketAddr> = text.trim().parse().ok();
+                    if ui
+                        .add_enabled(address.is_some(), egui::Button::new(tr("Add")))
+                        .clicked()
+                    {
+                        add = address;
+                        done = true;
+                    }
+                    if ui.button(tr("Cancel")).clicked() {
+                        done = true;
+                    }
+                });
+                if let Some(address) = add {
+                    self.send(Command::AddAddress {
+                        peer: peer.fingerprint,
+                        address,
+                    });
+                }
+                self.peer_address = (!done).then_some((fp, text));
+            }
         }
     }
 }

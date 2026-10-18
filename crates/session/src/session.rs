@@ -471,6 +471,27 @@ impl Shared {
         }
     }
 
+    /// This computer's screens changed: new links get them, connected peers that understand it
+    /// are told at once (older ones only after reconnecting).
+    fn screens_changed(&self, screens: Vec<Screen>) {
+        tracing::info!("screens of this computer changed: {screens:?}");
+        self.node.set_screens(screens.clone());
+        for peer in self.node.status() {
+            if peer
+                .link
+                .as_ref()
+                .is_some_and(|link| layout_file::knows_screens(&link.app_version))
+            {
+                self.node.send(
+                    &peer.peer.fingerprint,
+                    Message::Screens {
+                        screens: screens.clone(),
+                    },
+                );
+            }
+        }
+    }
+
     /// Keeps the pointer on the computer it is on, or lets it go again (`None`: the other way round).
     fn toggle_pin(&self, pin: Option<bool>) {
         let mut engine = self.engine.lock().expect("engine lock");
@@ -577,6 +598,7 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
             }
             let prefix = PREFIX.iter().all(|(l, r)| held.contains(l) || held.contains(r));
             if down && prefix && usage == ESCAPE {
+                shared.toggle_pin(Some(false));
                 let actions = shared.engine.lock().expect("engine lock").release_everything();
                 shared.execute(actions);
                 if let Some(inject) = &shared.inject {
@@ -901,6 +923,7 @@ async fn run(
                         status.screens = now.clone();
                         drop(status);
                         shared.engine.lock().expect("engine lock").set_local_screens(&now);
+                        shared.screens_changed(now);
                     }
                 }
             }
@@ -1362,6 +1385,20 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             peer,
             message: message @ (Message::Layout { .. } | Message::Tiles { .. } | Message::Desk { .. }),
         } => shared.layout_received(peer, message),
+        Event::Message {
+            peer,
+            message: Message::Screens { screens },
+        } => {
+            tracing::info!("screens of {} changed: {screens:?}", shared.name_of(&peer.to_string()));
+            shared
+                .engine
+                .lock()
+                .expect("engine lock")
+                .peer_online(&peer.to_string(), &screens);
+            shared.reload_layout();
+            shared.refresh();
+            shared.changed();
+        }
         Event::Message {
             message: Message::ShowEdges { marks },
             ..

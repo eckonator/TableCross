@@ -47,15 +47,26 @@ pub fn load(dir: &Path) -> Result<LayoutFile> {
     Ok(file)
 }
 
+/// First version that knows `Message::Screens`.
+const SCREENS_SINCE: (u32, u32, u32) = (0, 4, 7);
+
+fn version(app_version: &str) -> (u32, u32, u32) {
+    let mut parts = app_version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
+}
+
 /// Whether a peer running `app_version` understands `Message::Desk` and `Message::ShowEdges`.
 pub fn knows_desk(app_version: &str) -> bool {
-    let mut parts = app_version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
-    let version = (
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-    );
-    version >= DESK_SINCE
+    version(app_version) >= DESK_SINCE
+}
+
+/// Whether a peer running `app_version` understands `Message::Screens`.
+pub fn knows_screens(app_version: &str) -> bool {
+    version(app_version) >= SCREENS_SINCE
 }
 
 pub fn save(dir: &Path, file: &LayoutFile) -> Result<()> {
@@ -428,6 +439,7 @@ mod tests {
         assert!(!knows_desk("0.4.1"));
         assert!(!knows_desk("0.3.10"));
         assert!(!knows_desk(""));
+        assert!(knows_screens("0.4.7") && !knows_screens("0.4.6"));
     }
 
     #[test]

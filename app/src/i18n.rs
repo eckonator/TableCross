@@ -326,6 +326,14 @@ fn de(en: &str) -> Option<&'static str> {
             "Solange TableCross läuft. Ein schlafender Computer fällt weg und mit ihm der Weg über ihn zu den Computern dahinter."
         }
         "Keep the screen on as well" => "Auch den Bildschirm anlassen",
+        "This computer cannot be controlled from the others: the system did not allow remote control. Restart TableCross and allow it when asked." => {
+            "Dieser Computer kann von den anderen nicht gesteuert werden: Das System hat die Fernsteuerung nicht erlaubt. TableCross neu starten und die Erlaubnis bestätigen."
+        }
+        "Add an address …" => "Adresse hinzufügen …",
+        "Where to reach this computer when it is not found on the network by itself" => {
+            "Wo dieser Computer zu erreichen ist, wenn er im Netz nicht von selbst gefunden wird"
+        }
+        "Add" => "Hinzufügen",
         "Universal Control" => "Universelle Steuerung",
         "Switch off Universal Control of macOS" => "Universelle Steuerung von macOS ausschalten",
         "Switch off Universal Control" => "Universelle Steuerung ausschalten",

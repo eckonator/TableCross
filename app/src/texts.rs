@@ -136,6 +136,11 @@ pub fn problem(p: &Problem) -> String {
             "Windows switched off the input capture {} times; it was restarted.",
             &[n],
         ),
+        Problem::ControlUnavailable => tr(
+            "This computer cannot be controlled from the others: the system did not allow remote control. \
+             Restart TableCross and allow it when asked.",
+        )
+        .into(),
         Problem::UniversalControl => tr(
             "Universal Control of macOS is switched on. It also moves the pointer to other Macs at the screen \
              edges, gets in the way of TableCross and takes the pointer over even when TableCross is quit.",

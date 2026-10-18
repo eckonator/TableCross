@@ -2,8 +2,8 @@
 //! StatusNotifierItem; GNOME needs the AppIndicator extension) with a small menu. TableCross keeps
 //! running when its window is closed; the symbol brings the window back.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 
 use eframe::egui::{self, ViewportCommand};
 use tc_session::{Command, SessionHandle};
@@ -75,7 +75,7 @@ impl Tray {
     /// `power_off` to `POWER_OFF_OTHERS` or `POWER_OFF_ALL` when the window should ask about that.
     pub fn new(
         ctx: &egui::Context,
-        session: Option<SessionHandle>,
+        session: Arc<Mutex<Option<SessionHandle>>>,
         quit_flag: Arc<AtomicBool>,
         update_flag: Arc<AtomicBool>,
         power_off: Arc<AtomicU8>,
@@ -129,18 +129,18 @@ impl Tray {
             if event.id == show_id {
                 show_window(&menu_ctx);
             } else if event.id == release_id {
-                if let Some(session) = &session {
+                if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
                     session.send(Command::ReleaseAll);
                 }
             } else if event.id == update_id {
                 update_flag.store(true, Ordering::SeqCst);
                 menu_ctx.request_repaint();
             } else if event.id == pin_id {
-                if let Some(session) = &session {
+                if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
                     session.send(Command::Pin(None));
                 }
             } else if event.id == lock_id {
-                if let Some(session) = &session {
+                if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
                     session.send(Command::LockAll);
                 }
             } else if event.id == others_id || event.id == all_id {
@@ -154,7 +154,7 @@ impl Tray {
             } else if event.id == quit_id {
                 tracing::info!("quit chosen in the status icon menu");
                 // Stop sharing right away, without waiting for the (maybe hidden) window
-                if let Some(session) = &session {
+                if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
                     session.send(Command::Shutdown);
                 }
                 quit_flag.store(true, Ordering::SeqCst);

@@ -158,7 +158,14 @@ impl Capture for X11Capture {
                     .and_then(|c| c.reply().ok())
                     .map_or((0, 0), |p| (i32::from(p.root_x), i32::from(p.root_y)));
                 while shared.running.load(Ordering::SeqCst) {
-                    let Ok(event) = conn.wait_for_event() else { break };
+                    let event = match conn.wait_for_event() {
+                        Ok(event) => event,
+                        Err(e) => {
+                            tracing::warn!("X11 input capture stopped: {e}");
+                            shared.running.store(false, Ordering::SeqCst);
+                            break;
+                        }
+                    };
                     let captured = match event {
                         Event::XinputRawMotion(e) if !ignored.contains(&e.sourceid) => {
                             let Some(p) = conn.query_pointer(root).ok().and_then(|c| c.reply().ok()) else {
@@ -196,7 +203,7 @@ impl Capture for X11Capture {
                                 last = pos;
                                 // At the edge the pointer does not move, but the push still counts
                                 let (dx, dy) = if delta == (0, 0) {
-                                    raw_delta(&e.axisvalues)
+                                    raw_delta(&e.valuator_mask, &e.axisvalues)
                                 } else {
                                     delta_f(delta)
                                 };
@@ -245,14 +252,25 @@ fn delta_f(d: (i32, i32)) -> (f64, f64) {
     (f64::from(d.0), f64::from(d.1))
 }
 
-/// Relative axes 0 and 1 of a raw motion (used only to notice a push against the screen edge).
-fn raw_delta(values: &[xinput::Fp3232]) -> (f64, f64) {
-    let v = |i: usize| {
-        values
-            .get(i)
-            .map_or(0.0, |f| f64::from(f.integral) + f64::from(f.frac) / 4_294_967_296.0)
-    };
-    (v(0), v(1))
+/// Relative axes 0 and 1 of a raw motion (used only to notice a push against the screen edge). The
+/// values come only for the axes set in the mask, in order, so a purely vertical push has a single
+/// value, and it belongs to axis 1.
+fn raw_delta(mask: &[u32], values: &[xinput::Fp3232]) -> (f64, f64) {
+    let value = |f: &xinput::Fp3232| f64::from(f.integral) + f64::from(f.frac) / 4_294_967_296.0;
+    let mut out = (0.0, 0.0);
+    let mut next = values.iter();
+    for axis in 0..mask.len() * 32 {
+        if mask[axis / 32] & (1 << (axis % 32)) == 0 {
+            continue;
+        }
+        let Some(v) = next.next() else { break };
+        match axis {
+            0 => out.0 = value(v),
+            1 => out.1 = value(v),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn key(detail: u32, down: bool) -> Option<Captured> {
@@ -288,6 +306,9 @@ impl InjectState {
 
     fn flush(&self) {
         let _ = self.conn.flush();
+        // The grabs send their events to this connection; nobody needs them, but unread they would
+        // pile up in memory
+        while let Ok(Some(_)) = self.conn.poll_for_event() {}
     }
 
     fn key(&mut self, usage: u16, down: bool) {
@@ -470,6 +491,7 @@ impl Inject for X11Inject {
 
     fn screens(&self) -> Vec<Screen> {
         let state = self.shared.inject.lock().expect("inject lock");
+        state.flush();
         let monitors = state
             .conn
             .randr_get_monitors(state.root, true)
@@ -531,5 +553,24 @@ mod tests {
             })
         );
         assert_eq!(button(5, false), None);
+    }
+}
+
+#[cfg(test)]
+mod raw_tests {
+    use super::*;
+
+    fn fp(v: i32) -> xinput::Fp3232 {
+        xinput::Fp3232 { integral: v, frac: 0 }
+    }
+
+    #[test]
+    fn raw_axes_follow_the_mask() {
+        // Only axis 1 (vertical) set: its value comes first
+        assert_eq!(raw_delta(&[0b10], &[fp(-3)]), (0.0, -3.0));
+        assert_eq!(raw_delta(&[0b11], &[fp(2), fp(-3)]), (2.0, -3.0));
+        assert_eq!(raw_delta(&[0b01], &[fp(4)]), (4.0, 0.0));
+        // Other axes (a wheel) in between do not count
+        assert_eq!(raw_delta(&[0b101], &[fp(1), fp(9)]), (1.0, 0.0));
     }
 }

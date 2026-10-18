@@ -112,6 +112,8 @@ struct Sender {
     keys: PressedKeys,
     buttons: Vec<MouseButton>,
     position: Option<(f32, f32)>,
+    /// Top left corner of all screens (where a relative pointer is pushed to at first).
+    origin: (f32, f32),
 }
 
 async fn open_sender() -> Result<(Sender, reis::tokio::EiConvertEventStream, Session<RemoteDesktop>), ashpd::Error> {
@@ -152,6 +154,7 @@ async fn open_sender() -> Result<(Sender, reis::tokio::EiConvertEventStream, Ses
             keys: PressedKeys::new(),
             buttons: Vec::new(),
             position: None,
+            origin: (0.0, 0.0),
         },
         events,
         session,
@@ -225,9 +228,17 @@ impl Sender {
                         self.frame(device);
                     }
                 } else if let Some(device) = self.device(DeviceCapability::Pointer) {
-                    // Only relative motion offered: move by the difference
-                    let (px, py) = self.position.unwrap_or((x, y));
+                    // Only relative motion offered: move by the difference. Where the pointer is
+                    // is not known at first, so it goes into the top left corner and from there.
                     if let Some(pointer) = device.interface::<ei::Pointer>() {
+                        let (px, py) = match self.position {
+                            Some(p) if !matches!(message, Message::Enter { .. }) => p,
+                            _ => {
+                                pointer.motion_relative(-100_000.0, -100_000.0);
+                                self.frame(device);
+                                self.origin
+                            }
+                        };
                         pointer.motion_relative(x - px, y - py);
                         self.frame(device);
                     }
@@ -326,8 +337,12 @@ impl Sender {
 struct Receiver {
     portal: InputCapture,
     session: Session<InputCapture>,
+    /// Requests (like binding the seat) only leave when flushed.
+    connection: reis::event::Connection,
     zones: Vec<(i32, i32, i32, i32)>,
     activation: Option<u32>,
+    /// The pointer is captured (between an activation and its release).
+    active: bool,
     park: (f64, f64),
     handler: Handler,
 }
@@ -396,7 +411,7 @@ async fn open_receiver(handler: Handler) -> Result<(Receiver, reis::tokio::EiCon
         .response()?;
     let fd = portal.connect_to_eis(&session, CaptureEisOptions::default()).await?;
     let context = ei::Context::new(UnixStream::from(fd)).map_err(ashpd::Error::IO)?;
-    let (_connection, events) = context
+    let (connection, events) = context
         .handshake_tokio("tablecross", ei::handshake::ContextType::Receiver)
         .await
         .map_err(|e| ashpd::Error::IO(std::io::Error::other(e.to_string())))?;
@@ -405,8 +420,10 @@ async fn open_receiver(handler: Handler) -> Result<(Receiver, reis::tokio::EiCon
         Receiver {
             portal,
             session,
+            connection,
             zones,
             activation: None,
+            active: false,
             park: (0.0, 0.0),
             handler,
         },
@@ -418,6 +435,7 @@ impl Receiver {
     /// The pointer hit a barrier: tell the engine as a push over that edge.
     async fn activated(&mut self, activation: Option<u32>, at: (f32, f32), shared: &Shared) {
         self.activation = activation;
+        self.active = true;
         let (x, y) = (f64::from(at.0), f64::from(at.1));
         self.park = (x, y);
         let zone = self
@@ -462,6 +480,48 @@ impl Receiver {
             tracing::warn!("cannot release the pointer: {e}");
         }
         self.activation = None;
+        self.active = false;
+    }
+
+    /// The screens changed: barriers on the new outer edges.
+    async fn refresh_zones(&mut self) {
+        let result = async {
+            let reply = self
+                .portal
+                .zones(&self.session, GetZonesOptions::default())
+                .await?
+                .response()?;
+            let zones: Vec<_> = reply
+                .regions()
+                .iter()
+                .map(|r| (r.x_offset(), r.y_offset(), r.width() as i32, r.height() as i32))
+                .collect();
+            self.portal
+                .set_pointer_barriers(
+                    &self.session,
+                    &barriers(&zones),
+                    reply.zone_set(),
+                    SetPointerBarriersOptions::default(),
+                )
+                .await?
+                .response()?;
+            self.zones = zones;
+            self.portal.enable(&self.session, EnableOptions::default()).await?;
+            Ok::<(), ashpd::Error>(())
+        }
+        .await;
+        match result {
+            Ok(()) => tracing::info!("screen edges for capturing renewed: {:?}", self.zones),
+            Err(e) => tracing::warn!("cannot renew the screen edges for capturing: {e}"),
+        }
+    }
+
+    /// The compositor switched capturing off (e.g. after a screen change): switch it on again.
+    async fn enable_again(&mut self) {
+        tracing::info!("capturing was switched off by the system, switching it on again");
+        if let Err(e) = self.portal.enable(&self.session, EnableOptions::default()).await {
+            tracing::warn!("cannot switch capturing on again: {e}");
+        }
     }
 
     fn event(&mut self, event: EiEvent) {
@@ -512,12 +572,26 @@ impl Receiver {
                     None => keymap::to_hid(code).map(|usage| Captured::Key { usage, down }),
                 })
             }
+            EiEvent::Disconnected(e) => {
+                tracing::warn!("input capture connection ended: {:?}", e.reason);
+                None
+            }
             _ => None,
         };
+        let _ = self.connection.flush();
         if let Some(captured) = captured {
             let _ = (self.handler)(captured);
         }
     }
+}
+
+/// Signals of the input capture portal about the session: the screens changed (`true`) or the
+/// compositor switched capturing off (`false`).
+async fn session_signals() -> Option<LocalBoxStream<'static, bool>> {
+    let proxy: &'static InputCapture = Box::leak(Box::new(InputCapture::new().await.ok()?));
+    let zones = proxy.receive_zones_changed().await.ok()?.map(|_| true);
+    let disabled = proxy.receive_disabled().await.ok()?.map(|_| false);
+    Some(Box::pin(futures_util::stream::select(zones, disabled)))
 }
 
 /// The "Activated" signals of the input capture portal (the pointer hit a barrier). The stream
@@ -537,13 +611,14 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
                 .problems
                 .lock()
                 .expect("problems lock")
-                .push(Problem::CaptureStopped);
+                .push(Problem::ControlUnavailable);
             (None, None, None)
         }
     };
     let mut receiver: Option<Receiver> = None;
     let mut receiver_events: Option<reis::tokio::EiConvertEventStream> = None;
     let mut activated: Option<LocalBoxStream<'static, Activated>> = None;
+    let mut session_events: Option<LocalBoxStream<'static, bool>> = None;
     loop {
         tokio::select! {
             command = rx.recv() => {
@@ -551,7 +626,25 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
                 match command {
                     Cmd::StartCapture(handler) => match open_receiver(handler).await {
                         Ok((r, events)) => {
+                            // Without an absolute pointer the screens come from the capture zones
+                            {
+                                let mut screens = shared.screens.lock().expect("screens lock");
+                                if screens.is_empty() {
+                                    *screens = r
+                                        .zones
+                                        .iter()
+                                        .map(|&(x, y, w, h)| Screen {
+                                            x,
+                                            y,
+                                            width: w.max(0) as u32,
+                                            height: h.max(0) as u32,
+                                            scale: 1.0,
+                                        })
+                                        .collect();
+                                }
+                            }
                             activated = activations().await;
+                            session_events = session_signals().await;
                             receiver = Some(r);
                             receiver_events = Some(events);
                             shared.capturing.store(true, Ordering::SeqCst);
@@ -563,6 +656,14 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
                     },
                     Cmd::Inject(message) => {
                         if let Some(sender) = sender.as_mut() {
+                            let screens = shared.screens.lock().expect("screens lock");
+                            sender.origin = screens.iter().fold((f32::MAX, f32::MAX), |(x, y), s| {
+                                (x.min(s.x as f32), y.min(s.y as f32))
+                            });
+                            if screens.is_empty() {
+                                sender.origin = (0.0, 0.0);
+                            }
+                            drop(screens);
                             sender.inject(&message);
                         }
                     }
@@ -570,7 +671,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
                     Cmd::Ungrab(at) => {
                         shared.grabbed.store(false, Ordering::SeqCst);
                         if let Some(r) = receiver.as_mut()
-                            && r.activation.is_some()
+                            && r.active
                         {
                             r.release(Some((at.x, at.y))).await;
                         }
@@ -590,6 +691,15 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
             Some(Ok(event)) = async { match receiver_events.as_mut() { Some(s) => s.next().await, None => None } } => {
                 if let Some(r) = receiver.as_mut() {
                     r.event(event);
+                }
+            }
+            Some(zones) = async { match session_events.as_mut() { Some(s) => s.next().await, None => None } } => {
+                if let Some(r) = receiver.as_mut() {
+                    if zones {
+                        r.refresh_zones().await;
+                    } else {
+                        r.enable_again().await;
+                    }
                 }
             }
             Some(signal) = async { match activated.as_mut() { Some(s) => s.next().await, None => None } } => {
