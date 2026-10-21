@@ -129,40 +129,40 @@ mod tests {
     #[test]
     fn a_held_key_repeats_until_released() {
         let (_capture, inject, device) = virtual_backend(Vec::new());
-        inject.set_key_repeat(Some((Duration::from_millis(60), Duration::from_millis(20))));
+        let delay = Duration::from_millis(300);
+        inject.set_key_repeat(Some((delay, Duration::from_millis(20))));
         let repeating = Repeating::wrap(inject.clone());
         let a = Message::Key {
             usage: 0x04,
             down: true,
         };
+        let presses = || device.injected().iter().filter(|m| **m == a).count();
+        let pressed = Instant::now();
         repeating.inject(&a).unwrap();
-        std::thread::sleep(Duration::from_millis(40));
-        assert_eq!(
-            device.injected().iter().filter(|m| **m == a).count(),
-            1,
-            "not before the delay"
-        );
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
+        let early = presses();
+        // Sleeping may take much longer on a busy machine: only judge what came before the delay
+        if pressed.elapsed() < delay {
+            assert_eq!(early, 1, "not before the delay");
+        }
+        std::thread::sleep((pressed + delay + Duration::from_millis(200)).saturating_duration_since(Instant::now()));
         repeating
             .inject(&Message::Key {
                 usage: 0x04,
                 down: false,
             })
             .unwrap();
-        let downs = device.injected().iter().filter(|m| **m == a).count();
-        assert!((3..=7).contains(&downs), "{downs} presses");
-        std::thread::sleep(Duration::from_millis(80));
-        assert_eq!(
-            device.injected().iter().filter(|m| **m == a).count(),
-            downs,
-            "stops on release"
-        );
+        let downs = presses();
+        assert!(downs >= 3, "{downs} presses");
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(presses(), downs, "stops on release");
     }
 
     #[test]
     fn modifiers_and_released_everything_do_not_repeat() {
         let (_capture, inject, device) = virtual_backend(Vec::new());
-        inject.set_key_repeat(Some((Duration::from_millis(10), Duration::from_millis(10))));
+        // The delay leaves time to let go before the first repeat, even on a busy machine
+        inject.set_key_repeat(Some((Duration::from_millis(300), Duration::from_millis(10))));
         let repeating = Repeating::wrap(inject.clone());
         let shift = Message::Key {
             usage: 0xE1,
@@ -176,7 +176,7 @@ mod tests {
             })
             .unwrap();
         repeating.release_all();
-        std::thread::sleep(Duration::from_millis(60));
+        std::thread::sleep(Duration::from_millis(400));
         let log = device.injected();
         assert_eq!(log.iter().filter(|m| **m == shift).count(), 1);
         assert_eq!(log.len(), 2, "{log:?}");

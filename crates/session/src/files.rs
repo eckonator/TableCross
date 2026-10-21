@@ -72,9 +72,6 @@ pub fn label(names: &[String]) -> String {
 
 /// Where files promised to the clipboard are fetched to when pasted (emptied at start).
 pub fn promise_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("TC_PROMISE_DIR") {
-        return PathBuf::from(dir);
-    }
     #[cfg(target_os = "macos")]
     if let Some(home) = std::env::var_os("HOME") {
         return PathBuf::from(home).join("Library/Caches/TableCross/clipboard");
