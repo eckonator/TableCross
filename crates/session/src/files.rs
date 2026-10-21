@@ -340,9 +340,14 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), b"hi").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc", dir.join("Fotos/link")).unwrap();
+        // A copied top level that is itself a link stays behind
         #[cfg(unix)]
         std::os::unix::fs::symlink(dir.join("Fotos"), dir.join("Fotos-Link")).unwrap();
-        let listing = list(&[dir.join("Fotos"), dir.join("notes.txt"), dir.join("Fotos-Link")]).unwrap();
+        let copied: Vec<PathBuf> = [dir.join("Fotos"), dir.join("notes.txt")]
+            .into_iter()
+            .chain(cfg!(unix).then(|| dir.join("Fotos-Link")))
+            .collect();
+        let listing = list(&copied).unwrap();
         let paths: Vec<_> = listing.entries.iter().map(|(e, _)| e.path.as_str()).collect();
         assert_eq!(
             paths,
