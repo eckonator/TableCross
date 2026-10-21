@@ -832,7 +832,10 @@ fn screens_of(status: &Status, me: &str, id: &str) -> Option<Vec<egui::Rect>> {
 }
 
 /// The screens of this computer or of a connected peer and their physical sizes.
-fn screens_and_sizes(status: &Status, me: &str, id: &str) -> Option<(Vec<Screen>, Vec<(u32, u32)>)> {
+/// Screens and their physical sizes in millimeters, in the same order.
+type ScreensAndSizes = (Vec<Screen>, Vec<(u32, u32)>);
+
+fn screens_and_sizes(status: &Status, me: &str, id: &str) -> Option<ScreensAndSizes> {
     if id == me {
         return Some((status.screens.clone(), status.screen_sizes.clone()));
     }
