@@ -702,13 +702,26 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
     let mut held = BTreeSet::new();
     // State of the drag pasteboard when the left button went down
     let mut drag_before: Option<u64> = None;
+    // The left button went over with dragged files
+    let mut handed_over = false;
     Box::new(move |event: Captured| {
         if let Captured::Button {
             button: MouseButton::Left,
-            down: true,
+            down,
         } = event
         {
-            drag_before = tc_clipboard::drag::change_count();
+            if down {
+                drag_before = tc_clipboard::drag::change_count();
+                handed_over = false;
+            } else if handed_over {
+                // Cancelling the drag here makes macOS report a release of its own: only the real
+                // one may drop the files over there
+                if tc_input::system::left_button_held() == Some(true) {
+                    tracing::info!("release while the button is still held ignored (the drag goes on)");
+                    return false;
+                }
+                handed_over = false;
+            }
         }
         if let Captured::Key { usage, down } = event {
             if down {
@@ -781,6 +794,7 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
         {
             tracing::info!("local input takes control back from {}: {seen:?}", shared.name_of(to));
         }
+        let mut dropped = Vec::new();
         if let Some(before) = drag_before
             && dragged_over_edge(&actions)
         {
@@ -789,12 +803,13 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 // Esc cancels the drag here, so nothing lands at the screen edge; the files go over
                 let esc = |down| Action::Inject(Message::Key { usage: ESCAPE, down });
                 actions.splice(0..0, [esc(true), esc(false)]);
-                let _ = shared.internal.send(Internal::Dropped(files));
+                dropped = files;
                 // A computer that drags them on gets the button: letting go drops the files there
                 let mut engine = shared.engine.lock().expect("engine lock");
                 if let Role::Controlling(target) = engine.role() {
                     if shared.peer_knows(&target, layout_file::knows_drag) {
                         engine.hand_over_button(MouseButton::Left);
+                        handed_over = true;
                         tracing::info!("files dragged over the edge, the button goes over with them");
                     } else {
                         tracing::info!("files dragged over the edge to an older version");
@@ -803,6 +818,10 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
             }
         }
         execute(actions, &shared.node, shared.inject.as_deref());
+        // Announced only now: the pointer must arrive over there before the files do
+        if !dropped.is_empty() {
+            let _ = shared.internal.send(Internal::Dropped(dropped));
+        }
         !grabbed
     })
 }

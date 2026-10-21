@@ -193,6 +193,23 @@ impl Drop for KeepAwake {
     }
 }
 
+/// Whether the left mouse button is physically held right now (`None`: cannot tell here). Events
+/// can claim otherwise: macOS sends a release of its own when a drag is cancelled.
+pub fn left_button_held() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        unsafe extern "C" {
+            fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
+        }
+        /// `kCGEventSourceStateHIDSystemState`: what the hardware reports.
+        const HID_STATE: i32 = 1;
+        Some(unsafe { CGEventSourceButtonState(HID_STATE, 0) })
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 /// Opens a folder in the file manager.
 pub fn show_folder(path: &std::path::Path) {
     let program = if cfg!(target_os = "macos") {

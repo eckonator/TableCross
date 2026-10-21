@@ -457,6 +457,7 @@ pub(crate) async fn run(
     let mut tick = tokio::time::interval(HEARTBEAT);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut heartbeat = 0u32;
+    let mut last_tick = Instant::now();
     let send = &mut established.send;
 
     let end = loop {
@@ -487,8 +488,12 @@ pub(crate) async fn run(
             }
             _ = tick.tick() => {
                 let now = Instant::now();
+                // This program itself did not run for a while (a busy computer): what the peer sent
+                // meanwhile was not read yet either, so silence says nothing this time
+                let starved = now.duration_since(last_tick) > HEARTBEAT * 3;
+                last_tick = now;
                 let silent = now.duration_since(stats.lock().expect("stats lock").last_seen);
-                if silent > PEER_TIMEOUT {
+                if silent > PEER_TIMEOUT && !starved {
                     CloseCode::Timeout.close(&connection, "no heartbeat");
                     break LinkEnd::Timeout;
                 }
