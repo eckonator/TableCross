@@ -3,7 +3,12 @@
 //! While grabbed, the pointer is parked in the middle of its screen and hidden; every movement is
 //! blocked and reported as the distance from the parking spot (with the user's pointer speed and
 //! acceleration already applied). Windows removes hooks that answer too slowly without telling
-//! anyone, so a timer compares the system's last input with the hooks' and installs them again.
+//! anyone, so their thread runs at high priority and a timer compares the system's last input with
+//! the hooks' and installs them again.
+//!
+//! The hook reports the pointer where Windows already stopped it: at the outer edge of the screens
+//! it stays the same however far the mouse moves on. The mouse's own movement (Raw Input) shows the
+//! push there, which pushing and double tapping at an edge need.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
@@ -11,26 +16,33 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use tc_core::{Captured, Point};
 use tc_protocol::{Message, MouseButton, Screen};
-use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateDCW, DeleteDC, EnumDisplayMonitors, GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZSIZE, MONITORINFO,
-    MONITORINFOEXW, VERTSIZE,
+    CreateDCW, DeleteDC, EnumDisplayMonitors, GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZSIZE,
+    MONITOR_DEFAULTTONULL, MONITORINFO, MONITORINFOEXW, MonitorFromPoint, VERTSIZE,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+use windows_sys::Win32::System::Threading::{
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+};
 use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetLastInputInfo, LASTINPUTINFO, VK_NUMLOCK, VK_PAUSE, VK_SNAPSHOT,
 };
+use windows_sys::Win32::UI::Input::{
+    GetRawInputData, HRAWINPUT, MOUSE_MOVE_ABSOLUTE, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
+    RIDEV_INPUTSINK, RIM_TYPEMOUSE, RegisterRawInputDevices,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CopyIcon, CreateCursor, DispatchMessageW, GetCursorPos, GetMessageW, HC_ACTION, HCURSOR, HHOOK,
-    KBDLLHOOKSTRUCT, KillTimer, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SPI_GETKEYBOARDDELAY,
-    SPI_GETKEYBOARDSPEED, SPI_SETCURSORS, SetCursorPos, SetSystemCursor, SetTimer, SetWindowsHookExW,
-    SystemParametersInfoW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT,
-    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP,
+    CallNextHookEx, CopyIcon, CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    GetCursorPos, GetMessageW, HC_ACTION, HCURSOR, HHOOK, HWND_MESSAGE, KBDLLHOOKSTRUCT, KillTimer, LLKHF_EXTENDED,
+    MSG, MSLLHOOKSTRUCT, PostThreadMessageW, RegisterClassW, SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED,
+    SPI_SETCURSORS, SetCursorPos, SetSystemCursor, SetTimer, SetWindowsHookExW, SystemParametersInfoW,
+    TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_INPUT, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
 };
 
 use crate::keymap::windows as keymap;
@@ -133,10 +145,15 @@ impl Capture for WinCapture {
         std::thread::Builder::new()
             .name("tablecross-capture".into())
             .spawn(move || unsafe {
+                // Hooks that answer late are removed by Windows without a word
+                if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) == 0 {
+                    tracing::warn!("cannot raise the priority of the input hook thread");
+                }
                 let Some((keyboard, mouse)) = install_hooks() else {
                     let _ = ready_tx.send(false);
                     return;
                 };
+                let sink = raw_input_sink();
                 let mut last = POINT { x: 0, y: 0 };
                 GetCursorPos(&mut last);
                 CONTEXT.with(|c| {
@@ -162,6 +179,9 @@ impl Capture for WinCapture {
                     DispatchMessageW(&msg);
                 }
                 KillTimer(std::ptr::null_mut(), timer);
+                if !sink.is_null() {
+                    DestroyWindow(sink);
+                }
                 CONTEXT.with(|c| {
                     if let Some(context) = c.borrow_mut().take() {
                         UnhookWindowsHookEx(context.keyboard);
@@ -376,6 +396,121 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
         } else {
             1
         }
+    }
+}
+
+/// A message-only window that receives the mouse's own movement while other programs are in front
+/// (null where Raw Input is not available: pushing at an edge then needs a fresh move to it).
+fn raw_input_sink() -> HWND {
+    unsafe {
+        let module = GetModuleHandleW(std::ptr::null());
+        let class: Vec<u16> = "TableCrossRawInput".encode_utf16().chain(Some(0)).collect();
+        let window_class = WNDCLASSW {
+            lpfnWndProc: Some(raw_input_proc),
+            hInstance: module,
+            lpszClassName: class.as_ptr(),
+            ..std::mem::zeroed()
+        };
+        // Fails harmlessly when the class is still registered from an earlier start
+        RegisterClassW(&window_class);
+        let window = CreateWindowExW(
+            0,
+            class.as_ptr(),
+            class.as_ptr(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            std::ptr::null_mut(),
+            module,
+            std::ptr::null(),
+        );
+        if window.is_null() {
+            tracing::warn!("no window for the mouse's own movement");
+            return window;
+        }
+        let device = RAWINPUTDEVICE {
+            usUsagePage: 0x01,
+            usUsage: 0x02,
+            dwFlags: RIDEV_INPUTSINK,
+            hwndTarget: window,
+        };
+        if RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
+            tracing::warn!("cannot read the mouse's own movement");
+            DestroyWindow(window);
+            return std::ptr::null_mut();
+        }
+        window
+    }
+}
+
+unsafe extern "system" fn raw_input_proc(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        if message == WM_INPUT {
+            let mut raw: RAWINPUT = std::mem::zeroed();
+            let mut size = size_of::<RAWINPUT>() as u32;
+            let read = GetRawInputData(
+                lparam as HRAWINPUT,
+                RID_INPUT,
+                (&raw mut raw).cast(),
+                &mut size,
+                size_of::<RAWINPUTHEADER>() as u32,
+            );
+            if read != u32::MAX && raw.header.dwType == RIM_TYPEMOUSE {
+                let mouse = raw.data.mouse;
+                // Tablets and remote desktops move to positions: nothing to push with. Our own
+                // injected movement comes along here as well, marked.
+                if mouse.usFlags & MOUSE_MOVE_ABSOLUTE == 0 && mouse.ulExtraInformation as usize != OWN_INPUT {
+                    push_at_edge(mouse.lLastX, mouse.lLastY);
+                }
+            }
+        }
+        DefWindowProcW(window, message, wparam, lparam)
+    }
+}
+
+/// The mouse moves on while the pointer stands at the outer edge of the screens: tell the engine
+/// as a motion over that edge, which the hook cannot (its position stays where Windows stopped it).
+fn push_at_edge(raw_x: i32, raw_y: i32) {
+    let event = CONTEXT.with(|c| {
+        let context = c.try_borrow().ok()?;
+        let context = context.as_ref()?;
+        let shared = &context.shared;
+        if shared.grabbed.load(Ordering::SeqCst) || shared.returned.load(Ordering::SeqCst) || pointer_confined() {
+            return None;
+        }
+        let p = context.last;
+        let beyond = |dx: i32, dy: i32| unsafe {
+            MonitorFromPoint(
+                POINT {
+                    x: p.x + dx,
+                    y: p.y + dy,
+                },
+                MONITOR_DEFAULTTONULL,
+            )
+            .is_null()
+        };
+        let dx = if raw_x != 0 && beyond(raw_x.signum(), 0) {
+            raw_x
+        } else {
+            0
+        };
+        let dy = if raw_y != 0 && beyond(0, raw_y.signum()) {
+            raw_y
+        } else {
+            0
+        };
+        (dx != 0 || dy != 0).then(|| Captured::Motion {
+            x: f64::from(p.x),
+            y: f64::from(p.y),
+            dx: f64::from(dx),
+            dy: f64::from(dy),
+        })
+    });
+    if let Some(event) = event {
+        let _ = std::panic::catch_unwind(|| handle(&[event]));
     }
 }
 

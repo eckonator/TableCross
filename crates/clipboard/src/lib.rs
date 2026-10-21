@@ -111,6 +111,14 @@ pub mod drag {
     }
 }
 
+/// Text with the line endings of this system: CRLF on Windows, LF elsewhere. A Mac's LF alone
+/// reads as one line in older Windows programs, a Windows CR as a stray character on Linux.
+#[cfg_attr(not(any(target_os = "macos", windows, target_os = "linux")), allow(dead_code))]
+fn native_lines(text: &str) -> String {
+    let lf = text.replace("\r\n", "\n");
+    if cfg!(windows) { lf.replace('\n', "\r\n") } else { lf }
+}
+
 /// The clipboard of this system, if supported.
 pub fn platform() -> Option<Box<dyn SystemClipboard>> {
     #[cfg(target_os = "macos")]
@@ -190,5 +198,20 @@ impl SystemClipboard for MemoryClipboard {
         state.1 = Read::Empty;
         *self.promise.lock().expect("clipboard lock") = Some(fulfil);
         Some(Ok(state.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_lines;
+
+    #[test]
+    fn lines_end_as_this_system_has_them() {
+        let native = native_lines("one\r\ntwo\nthree");
+        if cfg!(windows) {
+            assert_eq!(native, "one\r\ntwo\r\nthree");
+        } else {
+            assert_eq!(native, "one\ntwo\nthree");
+        }
     }
 }

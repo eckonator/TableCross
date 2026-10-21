@@ -16,12 +16,12 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ashpd::desktop::input_capture::{
     Activated, Barrier, Capabilities, ConnectToEISOptions as CaptureEisOptions,
-    CreateSessionOptions as CaptureSessionOptions, EnableOptions, GetZonesOptions, InputCapture, ReleaseOptions,
-    SetPointerBarriersOptions,
+    CreateSessionOptions as CaptureSessionOptions, DisableOptions, EnableOptions, GetZonesOptions, InputCapture,
+    ReleaseOptions, SetPointerBarriersOptions,
 };
 use ashpd::desktop::remote_desktop::{
     ConnectToEISOptions, DeviceType, RemoteDesktop, SelectDevicesOptions, StartOptions,
@@ -345,7 +345,19 @@ struct Receiver {
     active: bool,
     park: (f64, f64),
     handler: Handler,
+    /// Capturing is switched on (barriers may only be set while it is off: GNOME refuses them
+    /// otherwise, and a second switching on as well).
+    enabled: bool,
+    /// Until then a "Disabled" signal is the echo of our own change (KWin sends one for every
+    /// change of the barriers, and keeps them), not the system switching capturing off.
+    own_change: Instant,
 }
+
+/// How long after changing the barriers a "Disabled" signal is taken for its echo.
+const OWN_CHANGE: Duration = Duration::from_secs(2);
+/// After the system switched capturing off (a screen change on GNOME, which says nothing else),
+/// the screens get this long to settle before the barriers are set anew.
+const SETTLE_AFTER_DISABLED: Duration = Duration::from_secs(1);
 
 /// Barriers on every zone edge that has no other zone behind it.
 fn barriers(zones: &[(i32, i32, i32, i32)]) -> Vec<Barrier> {
@@ -384,6 +396,48 @@ fn barriers(zones: &[(i32, i32, i32, i32)]) -> Vec<Barrier> {
         }
     }
     out
+}
+
+/// Where the pointer hit a barrier, on the screens, and the push over that edge as a motion. KWin
+/// may report a quick push far beyond the barrier: the nearest zone counts, and the side the
+/// pointer was pushed out of.
+fn pushed_out(zones: &[(i32, i32, i32, i32)], x: f64, y: f64) -> (f64, f64, f64, f64) {
+    let distance = |&(zx, zy, zw, zh): &(i32, i32, i32, i32)| {
+        let dx = (f64::from(zx) - x).max(x - f64::from(zx + zw - 1)).max(0.0);
+        let dy = (f64::from(zy) - y).max(y - f64::from(zy + zh - 1)).max(0.0);
+        dx.hypot(dy)
+    };
+    let zone = zones.iter().min_by(|a, b| distance(a).total_cmp(&distance(b))).copied();
+    match zone {
+        Some((zx, zy, zw, zh)) => {
+            let (right_x, bottom_y) = (f64::from(zx + zw - 1), f64::from(zy + zh - 1));
+            let (cx, cy) = (x.clamp(f64::from(zx), right_x), y.clamp(f64::from(zy), bottom_y));
+            let (dx, dy) = if x < f64::from(zx) {
+                (-2.0, 0.0)
+            } else if x > right_x {
+                (2.0, 0.0)
+            } else if y < f64::from(zy) {
+                (0.0, -2.0)
+            } else if y > bottom_y {
+                (0.0, 2.0)
+            } else {
+                let (left, right) = (cx - f64::from(zx), right_x - cx);
+                let (top, bottom) = (cy - f64::from(zy), bottom_y - cy);
+                let nearest = left.min(right).min(top).min(bottom);
+                if nearest == left {
+                    (-2.0, 0.0)
+                } else if nearest == right {
+                    (2.0, 0.0)
+                } else if nearest == top {
+                    (0.0, -2.0)
+                } else {
+                    (0.0, 2.0)
+                }
+            };
+            (cx, cy, dx, dy)
+        }
+        None => (x, y, 0.0, 0.0),
+    }
 }
 
 async fn open_receiver(handler: Handler) -> Result<(Receiver, reis::tokio::EiConvertEventStream), ashpd::Error> {
@@ -426,6 +480,8 @@ async fn open_receiver(handler: Handler) -> Result<(Receiver, reis::tokio::EiCon
             active: false,
             park: (0.0, 0.0),
             handler,
+            enabled: true,
+            own_change: Instant::now() + OWN_CHANGE,
         },
         events,
     ))
@@ -437,34 +493,8 @@ impl Receiver {
         self.activation = activation;
         self.active = true;
         let (x, y) = (f64::from(at.0), f64::from(at.1));
+        let (x, y, dx, dy) = pushed_out(&self.zones, x, y);
         self.park = (x, y);
-        let zone = self
-            .zones
-            .iter()
-            .find(|(zx, zy, zw, zh)| {
-                x >= f64::from(*zx) - 1.0
-                    && x <= f64::from(zx + zw)
-                    && y >= f64::from(*zy) - 1.0
-                    && y <= f64::from(zy + zh)
-            })
-            .copied();
-        let (dx, dy) = match zone {
-            Some((zx, zy, zw, zh)) => {
-                let (left, right) = (x - f64::from(zx), f64::from(zx + zw) - x);
-                let (top, bottom) = (y - f64::from(zy), f64::from(zy + zh) - y);
-                let nearest = left.min(right).min(top).min(bottom);
-                if nearest == left {
-                    (-2.0, 0.0)
-                } else if nearest == right {
-                    (2.0, 0.0)
-                } else if nearest == top {
-                    (0.0, -2.0)
-                } else {
-                    (0.0, 2.0)
-                }
-            }
-            None => (0.0, 0.0),
-        };
         let _ = (self.handler)(Captured::Motion { x, y, dx, dy });
         if !shared.grabbed.load(Ordering::SeqCst) {
             // No computer behind this edge: give the pointer back at once
@@ -483,8 +513,15 @@ impl Receiver {
         self.active = false;
     }
 
-    /// The screens changed: barriers on the new outer edges.
+    /// The screens changed: barriers on the new outer edges. Capturing is switched off around it.
     async fn refresh_zones(&mut self) {
+        self.own_change = Instant::now() + OWN_CHANGE;
+        if self.enabled {
+            if let Err(e) = self.portal.disable(&self.session, DisableOptions::default()).await {
+                tracing::warn!("cannot switch capturing off to renew the screen edges: {e}");
+            }
+            self.enabled = false;
+        }
         let result = async {
             let reply = self
                 .portal
@@ -507,6 +544,7 @@ impl Receiver {
                 .response()?;
             self.zones = zones;
             self.portal.enable(&self.session, EnableOptions::default()).await?;
+            self.enabled = true;
             Ok::<(), ashpd::Error>(())
         }
         .await;
@@ -516,12 +554,16 @@ impl Receiver {
         }
     }
 
-    /// The compositor switched capturing off (e.g. after a screen change): switch it on again.
-    async fn enable_again(&mut self) {
-        tracing::info!("capturing was switched off by the system, switching it on again");
-        if let Err(e) = self.portal.enable(&self.session, EnableOptions::default()).await {
-            tracing::warn!("cannot switch capturing on again: {e}");
+    /// The compositor switched capturing off: after a screen change (GNOME says nothing else), or
+    /// its shortcut to cancel. Barriers on the screens as they are now, and on again.
+    async fn disabled(&mut self) {
+        if Instant::now() < self.own_change {
+            return;
         }
+        tracing::info!("capturing was switched off by the system, switching it on again");
+        self.enabled = false;
+        tokio::time::sleep(SETTLE_AFTER_DISABLED).await;
+        self.refresh_zones().await;
     }
 
     fn event(&mut self, event: EiEvent) {
@@ -698,7 +740,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, shared: Arc<Shared>) {
                     if zones {
                         r.refresh_zones().await;
                     } else {
-                        r.enable_again().await;
+                        r.disabled().await;
                     }
                 }
             }
@@ -774,6 +816,18 @@ impl Inject for WaylandInject {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_push_far_beyond_the_barrier_goes_over_the_nearest_edge() {
+        let zones = [(0, 0, 1920, 1080), (1920, 0, 1280, 1024)];
+        // On the barrier at the right of the second screen, and far beyond it
+        assert_eq!(pushed_out(&zones, 3200.0, 500.0), (3199.0, 500.0, 2.0, 0.0));
+        assert_eq!(pushed_out(&zones, 3290.0, 500.0), (3199.0, 500.0, 2.0, 0.0));
+        // Below the first screen, a little beside it
+        assert_eq!(pushed_out(&zones, 100.0, 1150.0), (100.0, 1079.0, 0.0, 2.0));
+        // On the screen right at its left edge
+        assert_eq!(pushed_out(&zones, 0.0, 300.0), (0.0, 300.0, -2.0, 0.0));
+    }
 
     #[test]
     fn barriers_only_on_open_edges() {

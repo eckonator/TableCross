@@ -176,7 +176,8 @@ impl SystemClipboard for MacClipboard {
             let mut ok = true;
             unsafe {
                 if let Some(text) = &content.text {
-                    ok &= board.setString_forType(&NSString::from_str(text), NSPasteboardTypeString);
+                    ok &= board
+                        .setString_forType(&NSString::from_str(&crate::native_lines(text)), NSPasteboardTypeString);
                 }
                 if let Some(html) = &content.html {
                     ok &= board.setData_forType(Some(&NSData::with_bytes(html.as_bytes())), NSPasteboardTypeHTML);

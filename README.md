@@ -56,6 +56,11 @@ service for the sign-in screen and elevated programs, and opens UDP port 24800 f
 Windows may warn about an unknown publisher (“Windows protected your PC”): click **More info → Run
 anyway**. Later versions install from inside the app (**Update now**). There is also a portable `.zip`.
 
+On Windows 11 with **Smart App Control** switched on, Windows blocks programs without a code signature
+outright, with no “Run anyway”; TableCross is not signed, the `.zip` neither. The only way past it is
+to switch Smart App Control off (Windows Security → App & browser control → Smart App Control).
+Windows cannot switch it on again afterwards without being reset, so decide with care.
+
 **Linux** (X11, or Wayland on GNOME 45+ / KDE Plasma 6.1+), x86_64 or arm64: unpack the `.tar.gz` and
 run `./install.sh` (installs for the current user; `./install.sh --uninstall` removes it). GNOME shows
 the TableCross symbol and its menu only with the AppIndicator extension (Debian/Ubuntu:

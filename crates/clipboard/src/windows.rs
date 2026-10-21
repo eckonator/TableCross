@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
+use windows_sys::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
     OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
@@ -11,6 +11,7 @@ use windows_sys::Win32::System::DataExchange::{
 use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
 
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, HDROP};
+use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, HWND_MESSAGE};
 
 use crate::{ClipContent, ClipError, Read, SystemClipboard, cf_html, dib};
 
@@ -67,16 +68,48 @@ fn format(name: &str) -> u32 {
 }
 
 /// Holds the clipboard open; closes it when dropped. Retries a few times, other programs often
-/// hold it for a moment.
-struct Open;
+/// hold it for a moment. Writing needs an owner window: emptied without one, the clipboard may
+/// refuse what is put on it.
+struct Open {
+    owner: HWND,
+}
 
 impl Open {
     fn new() -> Result<Self, ClipError> {
+        Self::with_owner(std::ptr::null_mut())
+    }
+
+    /// Open for writing, owned by a window of its own.
+    fn to_write() -> Result<Self, ClipError> {
+        let class: Vec<u16> = "STATIC".encode_utf16().chain(Some(0)).collect();
+        let owner = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                HWND_MESSAGE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        Self::with_owner(owner)
+    }
+
+    fn with_owner(owner: HWND) -> Result<Self, ClipError> {
         for _ in 0..10 {
-            if unsafe { OpenClipboard(std::ptr::null_mut()) } != 0 {
-                return Ok(Open);
+            if unsafe { OpenClipboard(owner) } != 0 {
+                return Ok(Open { owner });
             }
             std::thread::sleep(Duration::from_millis(20));
+        }
+        if !owner.is_null() {
+            unsafe { DestroyWindow(owner) };
         }
         Err(ClipError::Busy)
     }
@@ -84,7 +117,12 @@ impl Open {
 
 impl Drop for Open {
     fn drop(&mut self) {
-        unsafe { CloseClipboard() };
+        unsafe {
+            CloseClipboard();
+            if !self.owner.is_null() {
+                DestroyWindow(self.owner);
+            }
+        }
     }
 }
 
@@ -185,10 +223,14 @@ impl SystemClipboard for WinClipboard {
 
     fn write(&self, content: &ClipContent) -> Result<u64, ClipError> {
         {
-            let _open = Open::new()?;
+            let _open = Open::to_write()?;
             unsafe { EmptyClipboard() };
             if let Some(text) = &content.text {
-                let wide: Vec<u8> = text.encode_utf16().chain(Some(0)).flat_map(u16::to_le_bytes).collect();
+                let wide: Vec<u8> = crate::native_lines(text)
+                    .encode_utf16()
+                    .chain(Some(0))
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
                 set(CF_UNICODETEXT, &wide);
             }
             if let Some(html) = &content.html {
@@ -213,7 +255,7 @@ impl SystemClipboard for WinClipboard {
 
     fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
         {
-            let _open = Open::new()?;
+            let _open = Open::to_write()?;
             unsafe { EmptyClipboard() };
             set(CF_HDROP, &drop_list(files));
             // Pasting copies (and does not move) the files

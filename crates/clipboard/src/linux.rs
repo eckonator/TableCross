@@ -245,10 +245,11 @@ impl SystemClipboard for LinuxClipboard {
         let mut state = self.state.lock().expect("clipboard lock");
         // One kind at a time here: text wins over an image that came with it (table cells, for
         // example, come as text and as a picture of them)
-        let has_text = content.text.as_ref().is_some_and(|t| !t.is_empty());
+        let text = content.text.as_deref().map(crate::native_lines);
+        let has_text = text.as_ref().is_some_and(|t| !t.is_empty());
         let result = if let Some(html) = content.html.as_ref().filter(|_| has_text || content.png.is_none()) {
-            state.clipboard.set_html(html, content.text.as_ref())
-        } else if let Some(text) = content.text.as_ref().filter(|_| has_text) {
+            state.clipboard.set_html(html, text.as_ref())
+        } else if let Some(text) = text.as_ref().filter(|_| has_text) {
             state.clipboard.set_text(text)
         } else if let Some(image) = content.png.as_deref().and_then(image_of) {
             state.clipboard.set_image(image)
