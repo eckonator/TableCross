@@ -351,8 +351,12 @@ struct FileState {
     requested: Option<u64>,
     /// Where the requested files go (copied files, chosen by the user).
     save_to: Option<PathBuf>,
-    /// The copied files on this clipboard as a promise.
+    /// The copied files on this clipboard as a promise, or files dragged over the edge being
+    /// dragged on here.
     promise: Option<Arc<Promise>>,
+    /// The controlling computer let go of the left button since the pointer came here (a drag
+    /// that came over ended before its files were announced).
+    left_up_seen: bool,
     /// What we put on the clipboard after a transfer (not announced again).
     written: Vec<PathBuf>,
     cancels: Cancels,
@@ -574,6 +578,16 @@ impl Shared {
         }
     }
 
+    /// Whether the peer with this machine id runs a version for which `knows` holds.
+    fn peer_knows(&self, id: &str, knows: fn(&str) -> bool) -> bool {
+        self.node
+            .status()
+            .iter()
+            .find(|p| p.peer.fingerprint.to_string() == id)
+            .and_then(|p| p.link.as_ref())
+            .is_some_and(|link| knows(&link.app_version))
+    }
+
     /// Tells the physical size of this computer's screens to `to`, or to every connected peer,
     /// where the peer understands it.
     fn send_sizes(&self, to: Option<&Fingerprint>) {
@@ -776,6 +790,13 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 let esc = |down| Action::Inject(Message::Key { usage: ESCAPE, down });
                 actions.splice(0..0, [esc(true), esc(false)]);
                 let _ = shared.internal.send(Internal::Dropped(files));
+                // A computer that drags them on gets the button: letting go drops the files there
+                let mut engine = shared.engine.lock().expect("engine lock");
+                if let Role::Controlling(target) = engine.role()
+                    && shared.peer_knows(&target, layout_file::knows_drag)
+                {
+                    engine.hand_over_button(MouseButton::Left);
+                }
             }
         }
         execute(actions, &shared.node, shared.inject.as_deref());
@@ -1116,6 +1137,26 @@ fn promise_files(shared: &Arc<Shared>, id: u64, items: usize) -> bool {
     if !clipboard.system.can_promise() {
         return false;
     }
+    let fulfil = new_promise(shared, id);
+    shared.clip.lock().expect("clip lock").writing();
+    let system = clipboard.system.clone();
+    let shared = shared.clone();
+    tokio::task::spawn_blocking(move || {
+        let count = match system.write_file_promise(items, fulfil) {
+            Some(Ok(count)) => Some(count),
+            Some(Err(e)) => {
+                tracing::warn!("cannot put the copied files on the clipboard: {e}");
+                None
+            }
+            None => None,
+        };
+        shared.clip.lock().expect("clip lock").write_done(count);
+    });
+    true
+}
+
+/// A promise of the files `id` (replacing the one before); the returned function fetches them.
+fn new_promise(shared: &Arc<Shared>, id: u64) -> tc_clipboard::Fulfil {
     let promise = Arc::new(Promise {
         id,
         dir: files::promise_dir().join(format!("{id:x}")),
@@ -1128,25 +1169,42 @@ fn promise_files(shared: &Arc<Shared>, id: u64, items: usize) -> bool {
         .expect("files lock")
         .promise
         .replace(promise.clone());
+    if let Some(old) = old {
+        tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&old.dir));
+    }
     let internal = shared.internal.clone();
-    let fulfil: tc_clipboard::Fulfil = Arc::new(move || promise.fulfil(&internal));
-    shared.clip.lock().expect("clip lock").writing();
-    let system = clipboard.system.clone();
+    Arc::new(move || promise.fulfil(&internal))
+}
+
+/// Files dragged over the edge by the computer controlling this one: the drag goes on here, and
+/// where they are dropped they are fetched. Returns false where it cannot (then they are fetched
+/// into Downloads).
+fn continue_drag(shared: &Arc<Shared>, peer: Fingerprint, id: u64, names: &[String]) -> bool {
+    let from = peer.to_string();
+    if !tc_clipboard::drag::can_continue()
+        || names.is_empty()
+        || shared.engine.lock().expect("engine lock").role() != Role::ControlledBy(from.clone())
+        || !shared.peer_knows(&from, layout_file::knows_drag)
+        || shared.files.lock().expect("files lock").left_up_seen
+    {
+        return false;
+    }
+    let fulfil = new_promise(shared, id);
     let shared = shared.clone();
-    tokio::task::spawn_blocking(move || {
-        if let Some(old) = old {
-            let _ = std::fs::remove_dir_all(&old.dir);
+    let press = Box::new(move || {
+        // Let go meanwhile: nothing to drag
+        if shared.files.lock().expect("files lock").left_up_seen {
+            return;
         }
-        let count = match system.write_file_promise(items, fulfil) {
-            Some(Ok(count)) => Some(count),
-            Some(Err(e)) => {
-                tracing::warn!("cannot put the copied files on the clipboard: {e}");
-                None
-            }
-            None => None,
+        let down = Message::MouseButton {
+            button: MouseButton::Left,
+            down: true,
         };
-        shared.clip.lock().expect("clip lock").write_done(count);
+        let actions = shared.engine.lock().expect("engine lock").received(&from, down);
+        shared.execute(actions);
     });
+    tracing::info!("files dragged over the edge, the drag goes on here");
+    tc_clipboard::drag::continue_drag(names.to_vec(), fulfil, press);
     true
 }
 
@@ -1171,13 +1229,12 @@ fn fetch_promised(shared: &Arc<Shared>, id: u64) {
 /// Asks for files dragged over the edge from a peer (the pointer just arrived here). Copied files
 /// wait until they are saved.
 fn request_dropped(shared: &Arc<Shared>) {
-    let dropped = shared
-        .files
-        .lock()
-        .expect("files lock")
-        .remote
-        .as_ref()
-        .is_some_and(|r| r.5);
+    let state = shared.files.lock().expect("files lock");
+    let dropped = state.remote.as_ref().is_some_and(|r| {
+        // Dragged on here: they come when dropped
+        r.5 && !state.promise.as_ref().is_some_and(|p| p.id == r.1)
+    });
+    drop(state);
     if dropped {
         request_files(shared);
     }
@@ -1261,11 +1318,16 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
             Some((from, newest, label, count, size, dropped)) if *from == peer && *newest == id => {
                 let (label, count, size, dropped) = (label.clone(), *count, *size, *dropped);
                 state.remote = None;
-                let target = match state.save_to.take() {
-                    Some(dir) if !dropped => dir,
+                let save_to = state.save_to.take();
+                let promise = state
+                    .promise
+                    .clone()
+                    .filter(|p| p.id == id && save_to.as_ref() == Some(&p.dir));
+                let target = match (&promise, save_to) {
+                    (Some(promise), _) => promise.dir.clone(),
+                    (None, Some(dir)) if !dropped => dir,
                     _ => files::downloads(),
                 };
-                let promise = state.promise.clone().filter(|p| p.id == id && p.dir == target);
                 (label, count, size, dropped, target, promise, state.cancels.add(id))
             }
             _ => {
@@ -1572,7 +1634,10 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 size,
                 pasteable,
             });
-            if dropped && matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_)) {
+            if dropped
+                && !continue_drag(shared, peer, id, &names)
+                && matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_))
+            {
                 request_files(shared);
             }
         }
@@ -1682,6 +1747,14 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             power_off_here();
         }
         Event::Message { peer, message } => {
+            match message {
+                Message::Enter { .. } => shared.files.lock().expect("files lock").left_up_seen = false,
+                Message::MouseButton {
+                    button: MouseButton::Left,
+                    down: false,
+                } => shared.files.lock().expect("files lock").left_up_seen = true,
+                _ => {}
+            }
             let actions = shared
                 .engine
                 .lock()

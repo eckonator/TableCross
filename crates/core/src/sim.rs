@@ -291,6 +291,32 @@ fn crossing_and_typing_reach_only_the_target() {
 }
 
 #[test]
+fn a_drag_handed_over_at_the_edge_is_let_go_on_the_target() {
+    let mut sim = Sim::mac_pc();
+    sim.button("mac", MouseButton::Left, true);
+    cross_to_pc(&mut sim);
+    // The drag ended on the Mac at the edge
+    assert!(sim.os("mac").buttons.is_empty());
+    sim.machines
+        .get_mut("mac")
+        .unwrap()
+        .engine
+        .hand_over_button(MouseButton::Left);
+    // The PC continues the drag: it presses the button itself
+    let down = Message::MouseButton {
+        button: MouseButton::Left,
+        down: true,
+    };
+    let actions = sim.machines.get_mut("pc").unwrap().engine.received("mac", down);
+    sim.apply("pc", actions);
+    assert!(sim.os("pc").buttons.contains(&MouseButton::Left));
+    // Letting go on the Mac drops there
+    sim.button("mac", MouseButton::Left, false);
+    assert!(sim.os("pc").buttons.is_empty());
+    sim.assert_all_released();
+}
+
+#[test]
 fn disconnect_in_the_middle_of_a_key_press_leaves_nothing_held() {
     let mut sim = Sim::mac_pc();
     cross_to_pc(&mut sim);

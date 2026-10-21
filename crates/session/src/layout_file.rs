@@ -50,6 +50,10 @@ pub fn load(dir: &Path) -> Result<LayoutFile> {
 /// First version that knows `Message::Screens`.
 const SCREENS_SINCE: (u32, u32, u32) = (0, 4, 7);
 
+/// First version that continues a drag of files that came over the edge (and hands the button
+/// over when it sends one).
+const DRAG_SINCE: (u32, u32, u32) = (0, 4, 14);
+
 /// First version that knows `Message::ScreenSizes`.
 const SIZES_SINCE: (u32, u32, u32) = (0, 4, 10);
 
@@ -70,6 +74,11 @@ pub fn knows_desk(app_version: &str) -> bool {
 /// Whether a peer running `app_version` understands `Message::Screens`.
 pub fn knows_screens(app_version: &str) -> bool {
     version(app_version) >= SCREENS_SINCE
+}
+
+/// Whether a peer running `app_version` takes part in dragging files over the edge for real.
+pub fn knows_drag(app_version: &str) -> bool {
+    version(app_version) >= DRAG_SINCE
 }
 
 /// Whether a peer running `app_version` understands `Message::ScreenSizes`.
@@ -449,6 +458,7 @@ mod tests {
         assert!(!knows_desk(""));
         assert!(knows_screens("0.4.7") && !knows_screens("0.4.6"));
         assert!(knows_sizes("0.4.10") && !knows_sizes("0.4.9"));
+        assert!(knows_drag("0.4.14") && !knows_drag("0.4.13"));
     }
 
     #[test]

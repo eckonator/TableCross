@@ -616,6 +616,17 @@ impl Engine {
     }
 
     /// Emergency: give everything back to the local system and release all keys everywhere.
+    /// A drag of files went over the edge: the held `button` now belongs to the target, which
+    /// continues the drag (it presses the button itself), so letting go drops the files there.
+    pub fn hand_over_button(&mut self, button: MouseButton) {
+        if let Mode::Remote { target, .. } = &self.mode {
+            self.held_buttons
+                .entry(button)
+                .or_default()
+                .insert(Dest::Remote(target.clone()));
+        }
+    }
+
     pub fn release_everything(&mut self) -> Vec<Action> {
         let mut actions = Vec::new();
         match &self.mode {

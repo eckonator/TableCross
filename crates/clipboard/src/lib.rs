@@ -10,6 +10,8 @@ mod dib;
 mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod mac_drag;
 #[cfg(windows)]
 mod windows;
 
@@ -75,6 +77,21 @@ pub mod drag {
         return Some(crate::mac::drag_change_count());
         #[cfg(not(target_os = "macos"))]
         None
+    }
+
+    /// Whether a drag that came over the edge can go on here with the files promised.
+    pub fn can_continue() -> bool {
+        cfg!(target_os = "macos")
+    }
+
+    /// Continues a drag of files that came over the edge: presses the left button (`press`) in a
+    /// window under the pointer and drags `names` from there; where they are dropped, `fulfil`
+    /// fetches them. Does nothing where `can_continue` is false.
+    pub fn continue_drag(names: Vec<String>, fulfil: super::Fulfil, press: Box<dyn FnOnce() + Send>) {
+        #[cfg(target_os = "macos")]
+        crate::mac_drag::start(names, fulfil, press);
+        #[cfg(not(target_os = "macos"))]
+        let _ = (names, fulfil, press);
     }
 
     /// The files dragged since `change_count` returned `before`.

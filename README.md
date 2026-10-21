@@ -112,8 +112,9 @@ permissions, starting with the system, the program; optionally settings and pair
   Traffic is always encrypted.
 - **Clipboard and files.** Text, rich text and images. Files copied on one computer are pasted with
   ⌘V in the Finder of a Mac, wherever you want them, and travel only then; on Windows and Linux
-  they are saved through the menu of the TableCross symbol. Files dragged over the edge of a Mac
-  land in `Downloads` on the other computer, which opens that folder.
+  they are saved through the menu of the TableCross symbol. Files dragged from a Mac over the edge
+  keep being dragged on another Mac and land where you drop them; elsewhere they land in
+  `Downloads`, which opens.
 - **Windows sign-in screen.** An optional Windows service keeps control on the login and UAC screens.
 
 Local network only, no cloud, no account, no telemetry. If you allow it, the app asks GitHub now and
