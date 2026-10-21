@@ -351,6 +351,8 @@ struct Receiver {
     /// Until then a "Disabled" signal is the echo of our own change (KWin sends one for every
     /// change of the barriers, and keeps them), not the system switching capturing off.
     own_change: Instant,
+    /// When the system switched capturing off lately: if it keeps doing so, it is meant.
+    switched_off: Vec<Instant>,
 }
 
 /// How long after changing the barriers a "Disabled" signal is taken for its echo.
@@ -358,6 +360,9 @@ const OWN_CHANGE: Duration = Duration::from_secs(2);
 /// After the system switched capturing off (a screen change on GNOME, which says nothing else),
 /// the screens get this long to settle before the barriers are set anew.
 const SETTLE_AFTER_DISABLED: Duration = Duration::from_secs(1);
+/// Switched off this often within `SWITCHED_OFF_WINDOW`, capturing stays off.
+const SWITCHED_OFF_LIMIT: usize = 5;
+const SWITCHED_OFF_WINDOW: Duration = Duration::from_secs(60);
 
 /// Barriers on every zone edge that has no other zone behind it.
 fn barriers(zones: &[(i32, i32, i32, i32)]) -> Vec<Barrier> {
@@ -482,6 +487,7 @@ async fn open_receiver(handler: Handler) -> Result<(Receiver, reis::tokio::EiCon
             handler,
             enabled: true,
             own_change: Instant::now() + OWN_CHANGE,
+            switched_off: Vec::new(),
         },
         events,
     ))
@@ -557,11 +563,19 @@ impl Receiver {
     /// The compositor switched capturing off: after a screen change (GNOME says nothing else), or
     /// its shortcut to cancel. Barriers on the screens as they are now, and on again.
     async fn disabled(&mut self) {
-        if Instant::now() < self.own_change {
+        let now = Instant::now();
+        if now < self.own_change {
+            return;
+        }
+        self.enabled = false;
+        self.switched_off
+            .retain(|at| now.duration_since(*at) < SWITCHED_OFF_WINDOW);
+        self.switched_off.push(now);
+        if self.switched_off.len() > SWITCHED_OFF_LIMIT {
+            tracing::warn!("capturing was switched off by the system again and again: it stays off");
             return;
         }
         tracing::info!("capturing was switched off by the system, switching it on again");
-        self.enabled = false;
         tokio::time::sleep(SETTLE_AFTER_DISABLED).await;
         self.refresh_zones().await;
     }

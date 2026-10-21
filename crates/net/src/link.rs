@@ -14,6 +14,10 @@ use crate::identity::Fingerprint;
 use crate::wire::{CloseCode, Preamble, SETUP_TIMEOUT, WireError, read_frame, remote_close, write_frame};
 
 pub(crate) const HEARTBEAT: Duration = Duration::from_millis(500);
+/// While one computer controls another, a probe this often: Wi-Fi power saving lets a quiet radio
+/// doze, and what reaches it then waits (one packet in ten by 65 ms or more, measured elsewhere);
+/// a radio that sends, and answers, stays awake. About 1 KB/s, and only meanwhile.
+const BRISK: Duration = Duration::from_millis(40);
 /// Without any sign of life for this long the peer counts as lost.
 pub(crate) const PEER_TIMEOUT: Duration = Duration::from_secs(2);
 /// Probes without answer after this long count as lost.
@@ -246,6 +250,8 @@ pub(crate) trait LinkHost: Send + Sync + 'static {
     fn deliver(&self, peer: Fingerprint, message: Message);
     fn deliver_blob(&self, peer: Fingerprint, header: Vec<u8>, data: Vec<u8>);
     fn deliver_stream(&self, peer: Fingerprint, header: Vec<u8>, stream: InStream);
+    /// The radios are to stay awake (see `BRISK`).
+    fn brisk(&self) -> bool;
 }
 
 /// Data length that marks a stream without a fixed size (files): read until it ends.
@@ -456,6 +462,8 @@ pub(crate) async fn run(
 
     let mut tick = tokio::time::interval(HEARTBEAT);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut brisk_tick = tokio::time::interval(BRISK);
+    brisk_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut heartbeat = 0u32;
     let mut last_tick = Instant::now();
     let send = &mut established.send;
@@ -502,6 +510,10 @@ pub(crate) async fn run(
                     break connection_end(&connection);
                 }
                 let seq = stats.lock().expect("stats lock").ping(now);
+                let _ = connection.send_datagram(encode(&Message::Ping { seq }).into());
+            }
+            _ = brisk_tick.tick(), if host.brisk() => {
+                let seq = stats.lock().expect("stats lock").ping(Instant::now());
                 let _ = connection.send_datagram(encode(&Message::Ping { seq }).into());
             }
         }

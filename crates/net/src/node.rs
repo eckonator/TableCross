@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -252,6 +252,8 @@ struct Inner {
     discovery: Option<Arc<Discovery>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     next_link_id: AtomicU64,
+    /// Links keep the radios awake (one computer controls another).
+    brisk: AtomicBool,
 }
 
 impl LinkHost for Inner {
@@ -274,6 +276,10 @@ impl LinkHost for Inner {
             header,
             stream: StreamSlot(Arc::new(Mutex::new(Some(stream)))),
         });
+    }
+
+    fn brisk(&self) -> bool {
+        self.brisk.load(Ordering::SeqCst)
     }
 }
 
@@ -348,6 +354,7 @@ impl Node {
             discovery,
             tasks: Mutex::new(Vec::new()),
             next_link_id: AtomicU64::new(1),
+            brisk: AtomicBool::new(false),
         });
         let accept = tokio::spawn(accept_loop(inner.clone()));
         let sleep_watch = tokio::spawn(watch_sleep(inner.clone()));
@@ -445,6 +452,12 @@ impl Node {
 
     /// Sends a message to a connected peer: datagram messages unreliably, everything else in order.
     /// `false` if the peer is not connected.
+    /// While one computer controls another, links probe often enough to keep Wi-Fi radios from
+    /// dozing (less delay when the mouse moves again after a rest).
+    pub fn set_brisk(&self, on: bool) {
+        self.inner.brisk.store(on, Ordering::SeqCst);
+    }
+
     /// This computer's screens changed: new links get them in their hello (telling connected
     /// peers is up to the caller, as only newer versions understand `Message::Screens`).
     pub fn set_screens(&self, screens: Vec<Screen>) {

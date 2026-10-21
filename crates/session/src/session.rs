@@ -1176,6 +1176,7 @@ async fn run(
                         Role::ControlledBy(id) => Notice::ControlledBy(shared.name_of(id)),
                     };
                     awake.set(now != Role::Idle);
+                    shared.node.set_brisk(now != Role::Idle);
                     role = now;
                     shared.refresh();
                     shared.notice(notice);
@@ -1715,7 +1716,10 @@ fn same_peer(a: &Event, b: &Event) -> bool {
 fn handle_event(shared: &Arc<Shared>, event: Event) {
     match event {
         Event::Connected {
-            peer, name, screens, ..
+            peer,
+            name,
+            screens,
+            address,
         } => {
             let offer = shared.clip.lock().expect("clip lock").for_new_peer();
             if let Some((offer, eager)) = offer {
@@ -1743,7 +1747,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             if shared.logs.lock().expect("logs lock").collect {
                 shared.node.send(&peer, Message::LogSubscribe { on: true });
             }
-            tracing::info!("screens of {name}: {screens:?}");
+            tracing::info!("screens of {name}: {screens:?}, reached at {address}");
             shared.notice(Notice::Connected(name));
         }
         Event::Disconnected { peer, reason } => {
