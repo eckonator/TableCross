@@ -1,6 +1,7 @@
 //! A backend without operating system: tests feed events and read what was injected.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tc_core::{Captured, Point};
 use tc_protocol::{Message, Screen};
@@ -13,6 +14,7 @@ struct State {
     grabbed: bool,
     pointer: Point,
     log: Vec<Message>,
+    key_repeat: Option<(Duration, Duration)>,
 }
 
 /// Feeds events as if they came from the local devices.
@@ -114,5 +116,16 @@ impl Inject for VirtualInject {
 
     fn screens(&self) -> Vec<Screen> {
         self.screens.clone()
+    }
+
+    fn key_repeat(&self) -> Option<(Duration, Duration)> {
+        self.state.lock().expect("virtual input").key_repeat
+    }
+}
+
+impl VirtualInject {
+    /// Delay and interval of the auto-repeat this system would want (`None`: it repeats itself).
+    pub fn set_key_repeat(&self, timing: Option<(Duration, Duration)>) {
+        self.state.lock().expect("virtual input").key_repeat = timing;
     }
 }

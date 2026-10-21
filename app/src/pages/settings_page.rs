@@ -186,6 +186,27 @@ impl App {
                             }
                         }
                         ui.end_row();
+
+                        ui.label(tr("Handoff"));
+                        if ui
+                            .checkbox(&mut self.settings.handoff_off, tr("Switch off Handoff of macOS"))
+                            .on_hover_text(tr(
+                                "With Handoff, macOS carries the clipboard to your other Macs as well and sends what \
+                                 TableCross shares back as new: pasting then waits for the other Mac. TableCross \
+                                 switches it off at start. This also stops the clipboard with an iPhone or iPad.",
+                            ))
+                            .changed()
+                        {
+                            changed = true;
+                            if self.settings.handoff_off
+                                && !self.isolated
+                                && tc_input::handoff::is_on()
+                                && let Err(e) = tc_input::handoff::turn_off()
+                            {
+                                self.show_info(trf("Could not switch off Handoff: {}", &[&e]));
+                            }
+                        }
+                        ui.end_row();
                     }
                 });
         });

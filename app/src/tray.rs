@@ -19,12 +19,43 @@ pub struct Tray {
     update: MenuItem,
     update_shown: std::cell::Cell<bool>,
     show: MenuItem,
+    /// "Save files from the clipboard …", active while another computer has files copied.
+    save_files: MenuItem,
     release: MenuItem,
     pin: CheckMenuItem,
     lock: MenuItem,
     power_off_others: MenuItem,
     power_off_all: MenuItem,
     quit: MenuItem,
+}
+
+/// Linux: whether the desktop shows status icons at all (someone owns the StatusNotifierWatcher
+/// name). GNOME does so only with the AppIndicator extension. `None`: cannot tell.
+#[cfg(target_os = "linux")]
+pub fn icons_shown() -> Option<bool> {
+    let out = std::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.DBus",
+            "--object-path",
+            "/org/freedesktop/DBus",
+            "--method",
+            "org.freedesktop.DBus.NameHasOwner",
+            "org.kde.StatusNotifierWatcher",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let reply = String::from_utf8_lossy(&out.stdout);
+    if reply.contains("true") {
+        Some(true)
+    } else if reply.contains("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// What the menu asked to shut down, kept until the window asked back.
@@ -79,9 +110,11 @@ impl Tray {
         quit_flag: Arc<AtomicBool>,
         update_flag: Arc<AtomicBool>,
         power_off: Arc<AtomicU8>,
+        save_files_flag: Arc<AtomicBool>,
     ) -> Option<Self> {
         let update = MenuItem::new("", true, None);
         let show = MenuItem::new(tr("Show TableCross"), true, None);
+        let save_files = MenuItem::new(tr("Save files from the clipboard …"), false, None);
         let release = MenuItem::new(tr("Release everything"), true, None);
         let pin = CheckMenuItem::new(tr("Keep the pointer here"), true, false, None);
         let lock = MenuItem::new(tr("Lock all screens"), true, None);
@@ -91,6 +124,7 @@ impl Tray {
         let menu = Menu::new();
         menu.append_items(&[
             &show,
+            &save_files,
             &release,
             &pin,
             &lock,
@@ -124,6 +158,7 @@ impl Tray {
         let pin_id = pin.id().clone();
         let (others_id, all_id) = (power_off_others.id().clone(), power_off_all.id().clone());
         let update_id = update.id().clone();
+        let save_files_id = save_files.id().clone();
         let menu_ctx = ctx.clone();
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             if event.id == show_id {
@@ -132,6 +167,9 @@ impl Tray {
                 if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
                     session.send(Command::ReleaseAll);
                 }
+            } else if event.id == save_files_id {
+                save_files_flag.store(true, Ordering::SeqCst);
+                show_window(&menu_ctx);
             } else if event.id == update_id {
                 update_flag.store(true, Ordering::SeqCst);
                 menu_ctx.request_repaint();
@@ -189,6 +227,7 @@ impl Tray {
             update,
             update_shown: std::cell::Cell::new(false),
             show,
+            save_files,
             release,
             pin,
             lock,
@@ -215,6 +254,13 @@ impl Tray {
         }
     }
 
+    /// "Save files from the clipboard …" can be chosen while another computer has files copied.
+    pub fn set_files_waiting(&self, waiting: bool) {
+        if self.save_files.is_enabled() != waiting {
+            self.save_files.set_enabled(waiting);
+        }
+    }
+
     /// Ticks "Keep the pointer here" while the pointer is pinned.
     pub fn set_pinned(&self, pinned: bool) {
         if self.pin.is_checked() != pinned {
@@ -225,6 +271,7 @@ impl Tray {
     /// After a language change.
     pub fn retranslate(&self) {
         self.show.set_text(tr("Show TableCross"));
+        self.save_files.set_text(tr("Save files from the clipboard …"));
         self.release.set_text(tr("Release everything"));
         self.pin.set_text(tr("Keep the pointer here"));
         self.lock.set_text(tr("Lock all screens"));

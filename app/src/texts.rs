@@ -33,10 +33,13 @@ pub fn notice(n: &Notice) -> String {
             &[&format!("{:.1}", *n as f64 / 1_048_576.0)],
         ),
         Notice::ClipboardReceived(name) => trf("Clipboard taken over from {}", &[name]),
-        Notice::FilesReceived(name, count, dir) => trf(
+        Notice::FilesReceived(name, count, dir, true) => trf(
             "{} files from {} are in {} and on the clipboard",
             &[count, name, &dir.display()],
         ),
+        Notice::FilesReceived(name, count, dir, false) => {
+            trf("{} files from {} are in {}", &[count, name, &dir.display()])
+        }
         Notice::TransferFailed(name, e) => trf("File transfer with {} failed: {}", &[name, e]),
         Notice::LockedAll => tr("All screens were locked").into(),
         Notice::PoweringOff(names) if names.is_empty() => tr("This computer is shutting down").into(),

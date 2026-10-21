@@ -106,6 +106,8 @@ pub enum Command {
     /// Try to start input capture again (after granting a permission).
     RetryInput,
     CancelTransfer(u64),
+    /// Fetch the files copied on another computer into this folder.
+    SaveFiles(PathBuf),
     /// Collect the logs of the connected computers in `logs/peers` (troubleshooting), or stop.
     CollectLogs(bool),
     Shutdown,
@@ -134,8 +136,9 @@ pub enum Notice {
     ClipboardSkipped(Skip),
     /// Clipboard content from this peer was taken over.
     ClipboardReceived(String),
-    /// Files from this peer arrived in the folder; they are on the clipboard as well.
-    FilesReceived(String, u64, PathBuf),
+    /// Files from this peer arrived in the folder; `true`: they are on the clipboard as well
+    /// (dragged over the edge).
+    FilesReceived(String, u64, PathBuf, bool),
     TransferFailed(String, String),
     /// All screens were locked from here.
     LockedAll,
@@ -170,7 +173,7 @@ impl std::fmt::Display for Notice {
             Notice::ClipboardSkipped(Skip::Concealed) => write!(f, "clipboard not shared: marked as private"),
             Notice::ClipboardSkipped(Skip::TooLarge(n)) => write!(f, "clipboard not shared: too large ({n} bytes)"),
             Notice::ClipboardReceived(n) => write!(f, "clipboard taken over from {n}"),
-            Notice::FilesReceived(n, count, dir) => {
+            Notice::FilesReceived(n, count, dir, _) => {
                 write!(f, "{count} file(s) from {n} in {}", dir.display())
             }
             Notice::TransferFailed(n, e) => write!(f, "file transfer with {n} failed: {e}"),
@@ -224,8 +227,8 @@ pub struct Status {
     pub layout: LayoutFile,
     /// File transfers, newest last.
     pub transfers: Vec<TransferView>,
-    /// Files copied on another computer that come over when the pointer arrives here.
-    pub files_waiting: Option<String>,
+    /// Files copied on another computer, to be saved here on request.
+    pub files_waiting: Option<FilesWaiting>,
     /// Where the pointer crosses on this computer's screens, while another computer changes the
     /// arrangement, and when that came (shown for a moment).
     pub edge_marks: Option<(Vec<EdgeMark>, Instant)>,
@@ -255,6 +258,16 @@ impl SessionHandle {
     }
 }
 
+/// Files copied on another computer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilesWaiting {
+    pub peer: String,
+    /// The names of the copied files and folders, shortened when there are many.
+    pub label: String,
+    pub count: u64,
+    pub size: u64,
+}
+
 /// Called whenever the status changed (the app repaints).
 pub type OnChange = Arc<dyn Fn() + Send + Sync>;
 
@@ -278,6 +291,8 @@ struct FileState {
     /// Files waiting on a peer: peer, id, label, count, size, dragged over the edge.
     remote: Option<(Fingerprint, u64, String, u64, u64, bool)>,
     requested: Option<u64>,
+    /// Where the requested files go (copied files, chosen by the user).
+    save_to: Option<PathBuf>,
     /// What we put on the clipboard after a transfer (not announced again).
     written: Vec<PathBuf>,
     cancels: Cancels,
@@ -907,7 +922,7 @@ async fn run(
                     let arrived = matches!(now, Role::ControlledBy(_))
                         || (now == Role::Idle && matches!(role, Role::Controlling(_)));
                     if arrived {
-                        request_files(&shared);
+                        request_dropped(&shared);
                     }
                     if !matches!(now, Role::Controlling(_)) {
                         let request = shared.clip.lock().expect("clip lock").became_active();
@@ -1029,7 +1044,22 @@ fn files_listed(shared: &Arc<Shared>, listing: Result<Listing, String>, dropped:
     }
 }
 
-/// Asks for files waiting on a peer (the pointer just arrived here).
+/// Asks for files dragged over the edge from a peer (the pointer just arrived here). Copied files
+/// wait until they are saved.
+fn request_dropped(shared: &Arc<Shared>) {
+    let dropped = shared
+        .files
+        .lock()
+        .expect("files lock")
+        .remote
+        .as_ref()
+        .is_some_and(|r| r.5);
+    if dropped {
+        request_files(shared);
+    }
+}
+
+/// Asks for the files waiting on a peer.
 fn request_files(shared: &Arc<Shared>) {
     let mut state = shared.files.lock().expect("files lock");
     let Some((peer, id, ..)) = state.remote else { return };
@@ -1101,13 +1131,17 @@ fn send_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64) {
 }
 
 fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_net::InStream) {
-    let (label, count, total, dropped, cancel) = {
+    let (label, count, total, dropped, target, cancel) = {
         let mut state = shared.files.lock().expect("files lock");
         match &state.remote {
             Some((from, newest, label, count, size, dropped)) if *from == peer && *newest == id => {
                 let (label, count, size, dropped) = (label.clone(), *count, *size, *dropped);
                 state.remote = None;
-                (label, count, size, dropped, state.cancels.add(id))
+                let target = match state.save_to.take() {
+                    Some(dir) if !dropped => dir,
+                    _ => files::download_dir(),
+                };
+                (label, count, size, dropped, target, state.cancels.add(id))
             }
             _ => {
                 drop(state);
@@ -1133,7 +1167,6 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
     );
     let shared = shared.clone();
     tokio::spawn(async move {
-        let target = files::download_dir();
         let progress_shared = shared.clone();
         let mut progress = Progress::new(move |done| update_transfer(&progress_shared, id, |t| t.done = done));
         let result = match tokio::fs::create_dir_all(&target).await {
@@ -1145,8 +1178,9 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
         match result {
             Ok(placed) => {
                 update_transfer(&shared, id, |t| t.state = TransferState::Done(Some(target.clone())));
-                shared.files.lock().expect("files lock").written = placed.clone();
-                if let Some(clipboard) = &shared.clipboard {
+                // Dragged files go on the clipboard as well; saved ones were only meant for the folder
+                if dropped && let Some(clipboard) = &shared.clipboard {
+                    shared.files.lock().expect("files lock").written = placed.clone();
                     let system = clipboard.system.clone();
                     let written = placed.clone();
                     let count = tokio::task::spawn_blocking(move || system.write_files(&written).ok())
@@ -1158,7 +1192,7 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
                 if dropped {
                     tc_input::system::show_folder(&target);
                 }
-                shared.notice(Notice::FilesReceived(peer_name, count, target));
+                shared.notice(Notice::FilesReceived(peer_name, count, target, dropped));
             }
             Err(_) if cancelled => update_transfer(&shared, id, |t| t.state = TransferState::Cancelled),
             Err(e) => {
@@ -1389,9 +1423,15 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 state.local = None;
                 state.remote = Some((peer, id, label.clone(), count, size, dropped));
                 state.requested = None;
+                state.save_to = None;
             }
-            shared.status.lock().expect("status lock").files_waiting = Some(label);
-            if matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_)) {
+            shared.status.lock().expect("status lock").files_waiting = (!dropped).then(|| FilesWaiting {
+                peer: shared.name_of(&peer.to_string()),
+                label,
+                count,
+                size,
+            });
+            if dropped && matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_)) {
                 request_files(shared);
             }
         }
@@ -1540,6 +1580,10 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
         Command::StartPairing => {
             let code = shared.node.start_pairing();
             shared.status.lock().expect("status lock").pairing = Some((code, Instant::now() + tc_net::PAIRING_WINDOW));
+        }
+        Command::SaveFiles(dir) => {
+            shared.files.lock().expect("files lock").save_to = Some(dir);
+            request_files(shared);
         }
         Command::StopPairing => {
             shared.node.stop_pairing();

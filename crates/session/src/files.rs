@@ -150,8 +150,9 @@ pub fn unique_name(dir: &Path, name: &str) -> PathBuf {
         .expect("some number is free")
 }
 
-/// Where received files go (`TC_DOWNLOAD_DIR` overrides it, for tests).
-pub fn download_dir() -> PathBuf {
+/// The Downloads folder, where saved files go unless another one is chosen (`TC_DOWNLOAD_DIR`
+/// overrides it, for tests).
+pub fn downloads() -> PathBuf {
     if let Some(dir) = std::env::var_os("TC_DOWNLOAD_DIR") {
         return PathBuf::from(dir);
     }
@@ -159,7 +160,15 @@ pub fn download_dir() -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    home.join("Downloads").join("TableCross")
+    home.join("Downloads")
+}
+
+/// Where files dragged over the edge go (`TC_DOWNLOAD_DIR` overrides it, for tests).
+pub fn download_dir() -> PathBuf {
+    match std::env::var_os("TC_DOWNLOAD_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => downloads().join("TableCross"),
+    }
 }
 
 pub fn encode_entry(entry: &Entry) -> Vec<u8> {

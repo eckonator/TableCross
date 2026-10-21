@@ -59,6 +59,15 @@ pub struct App {
     power_off_flag: Arc<AtomicU8>,
     /// Asking whether to shut down; `true` includes this computer.
     confirm_power_off: Option<bool>,
+    /// "Save files from the clipboard …" was chosen in the menu of the status icon.
+    save_files_flag: Arc<AtomicBool>,
+    /// Asking where the files copied on another computer go: the folder chosen so far.
+    save_files_to: Option<PathBuf>,
+    /// Linux: the desktop shows no status icons (GNOME without the AppIndicator extension), and
+    /// when that was last looked at.
+    pub icons_missing: bool,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    icons_checked: Option<Instant>,
     tray: Option<crate::tray::Tray>,
     dev: DevTools,
     background: bool,
@@ -143,6 +152,10 @@ impl App {
             update_flag: Arc::new(AtomicBool::new(false)),
             power_off_flag: Arc::new(AtomicU8::new(0)),
             confirm_power_off: None,
+            save_files_flag: Arc::new(AtomicBool::new(false)),
+            save_files_to: None,
+            icons_missing: false,
+            icons_checked: None,
             tray: None,
             dev,
             background,
@@ -188,6 +201,7 @@ impl App {
                 app.quit_flag.clone(),
                 app.update_flag.clone(),
                 app.power_off_flag.clone(),
+                app.save_files_flag.clone(),
             );
             // Only with a status icon: otherwise the window could not be found again
             if app.tray.is_some() {
@@ -225,6 +239,13 @@ impl App {
             match tc_input::universal_control::turn_off() {
                 Ok(()) => tracing::info!("Universal Control of macOS was on, switched it off"),
                 Err(e) => tracing::warn!("cannot switch off Universal Control: {e}"),
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if self.settings.handoff_off && !self.isolated && tc_input::handoff::is_on() {
+            match tc_input::handoff::turn_off() {
+                Ok(()) => tracing::info!("Handoff of macOS was on, switched it off"),
+                Err(e) => tracing::warn!("cannot switch off Handoff: {e}"),
             }
         }
         let backend = match tc_input::platform() {
@@ -539,6 +560,7 @@ impl App {
             }
         }
         self.follow_peers(ctx);
+        self.check_icons();
         if let Some(tray) = &self.tray {
             let version = self
                 .new_version
@@ -547,6 +569,7 @@ impl App {
                 .map(|n| n.version.as_str());
             tray.set_update(version);
             tray.set_pinned(self.status.pinned);
+            tray.set_files_waiting(self.status.files_waiting.is_some());
         }
         if self.update_flag.swap(false, Ordering::SeqCst) {
             self.install_update(ctx);
@@ -741,6 +764,97 @@ impl App {
         }
     }
 
+    /// Linux: looks every few seconds whether status icons are shown, until they are (the
+    /// extension may start after TableCross, or be installed meanwhile).
+    fn check_icons(&mut self) {
+        #[cfg(target_os = "linux")]
+        if self.tray.is_some()
+            && (self.icons_missing || self.icons_checked.is_none())
+            && self
+                .icons_checked
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(10))
+        {
+            self.icons_checked = Some(Instant::now());
+            let missing = crate::tray::icons_shown() == Some(false);
+            if missing != self.icons_missing {
+                tracing::info!("status icons shown by the desktop: {}", !missing);
+            }
+            self.icons_missing = missing;
+        }
+    }
+
+    /// Asks where the files copied on another computer go, then fetches them.
+    pub fn save_files(&mut self) {
+        if self.status.files_waiting.is_some() {
+            self.save_files_to = Some(tc_session::downloads());
+        } else {
+            self.show_info(tr("No files are copied on another computer."));
+        }
+    }
+
+    fn save_files_dialog(&mut self, ctx: &egui::Context) {
+        if self.save_files_flag.swap(false, Ordering::SeqCst) {
+            self.save_files();
+        }
+        let Some(folder) = self.save_files_to.clone() else {
+            return;
+        };
+        // Copied something else meanwhile
+        let Some(waiting) = self.status.files_waiting.clone() else {
+            self.save_files_to = None;
+            return;
+        };
+        let p = theme::palette(ctx);
+        let mut decided = None;
+        let modal = egui::Modal::new(egui::Id::new("save_files")).show(ctx, |ui| {
+            ui.set_max_width(440.0);
+            ui.label(RichText::new(tr("Save files from the clipboard")).size(16.0).strong());
+            ui.add_space(6.0);
+            ui.label(i18n::trf("Copied on {}:", &[&waiting.peer]));
+            ui.label(RichText::new(&waiting.label).strong());
+            ui.label(
+                RichText::new(i18n::trf(
+                    "{} files, {}",
+                    &[&waiting.count, &crate::texts::bytes(waiting.size)],
+                ))
+                .color(p.muted),
+            );
+            ui.add_space(10.0);
+            ui.label(tr("Save in"));
+            ui.horizontal(|ui| {
+                ui.add(egui::Label::new(RichText::new(folder.display().to_string()).monospace()).truncate());
+                if ui.button(tr("Change …")).clicked()
+                    && let Some(chosen) = rfd::FileDialog::new().set_directory(&folder).pick_folder()
+                {
+                    self.save_files_to = Some(chosen);
+                }
+            });
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::Button::new(RichText::new(tr("Save")).color(p.on_accent)).fill(p.accent))
+                    .clicked()
+                {
+                    decided = Some(true);
+                }
+                if ui.button(tr("Cancel")).clicked() {
+                    decided = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && decided.is_none() {
+            decided = Some(false);
+        }
+        if let Some(go) = decided {
+            if go && let Some(folder) = self.save_files_to.clone() {
+                tracing::info!("saving the copied files in {}", folder.display());
+                self.send(Command::SaveFiles(folder));
+                self.page = Page::Status;
+            }
+            self.save_files_to = None;
+        }
+    }
+
     /// Opens the Input Monitoring settings and the helper file once, if a just replaced helper lacks
     /// the permission.
     fn helper_prompt(&mut self) {
@@ -884,6 +998,7 @@ impl eframe::App for App {
                 });
             });
         self.power_off_dialog(&ctx);
+        self.save_files_dialog(&ctx);
         // Numbers like the round trip change without events
         ctx.request_repaint_after(Duration::from_millis(500));
     }

@@ -26,11 +26,11 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CopyIcon, CreateCursor, DispatchMessageW, GetCursorPos, GetMessageW, HC_ACTION, HCURSOR, HHOOK,
-    KBDLLHOOKSTRUCT, KillTimer, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SPI_SETCURSORS, SetCursorPos,
-    SetSystemCursor, SetTimer, SetWindowsHookExW, SystemParametersInfoW, TranslateMessage, UnhookWindowsHookEx,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER,
-    WM_XBUTTONDOWN, WM_XBUTTONUP,
+    KBDLLHOOKSTRUCT, KillTimer, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PostThreadMessageW, SPI_GETKEYBOARDDELAY,
+    SPI_GETKEYBOARDSPEED, SPI_SETCURSORS, SetCursorPos, SetSystemCursor, SetTimer, SetWindowsHookExW,
+    SystemParametersInfoW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
 use crate::keymap::windows as keymap;
@@ -584,6 +584,18 @@ impl Inject for WinInject {
             );
         }
         screens
+    }
+
+    fn key_repeat(&self) -> Option<(std::time::Duration, std::time::Duration)> {
+        let (mut delay, mut speed) = (1u32, 31u32);
+        unsafe {
+            SystemParametersInfoW(SPI_GETKEYBOARDDELAY, 0, &mut delay as *mut u32 as *mut _, 0);
+            SystemParametersInfoW(SPI_GETKEYBOARDSPEED, 0, &mut speed as *mut u32 as *mut _, 0);
+        }
+        // Delay 0 to 3: 250 ms to 1 s; speed 0 to 31: about 2.5 to 30 repeats per second
+        let delay = std::time::Duration::from_millis(250 * (u64::from(delay.min(3)) + 1));
+        let rate = 2.5 + f64::from(speed.min(31)) * 27.5 / 31.0;
+        Some((delay, std::time::Duration::from_secs_f64(1.0 / rate)))
     }
 
     fn sizes(&self) -> Vec<(u32, u32)> {

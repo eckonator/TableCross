@@ -337,6 +337,12 @@ fn de(en: &str) -> Option<&'static str> {
         "Universal Control" => "Universelle Steuerung",
         "Switch off Universal Control of macOS" => "Universelle Steuerung von macOS ausschalten",
         "Switch off Universal Control" => "Universelle Steuerung ausschalten",
+        "Handoff" => "Handoff",
+        "Switch off Handoff of macOS" => "Handoff von macOS ausschalten",
+        "Could not switch off Handoff: {}" => "Handoff ließ sich nicht ausschalten: {}",
+        "With Handoff, macOS carries the clipboard to your other Macs as well and sends what TableCross shares back as new: pasting then waits for the other Mac. TableCross switches it off at start. This also stops the clipboard with an iPhone or iPad." => {
+            "Mit Handoff bringt macOS die Zwischenablage ebenfalls zu deinen anderen Macs und schickt, was TableCross teilt, als neu zurück: Einfügen wartet dann auf den anderen Mac. TableCross schaltet es beim Start aus. Damit endet auch die Zwischenablage mit iPhone oder iPad."
+        }
         "Could not switch off Universal Control: {}" => "Universelle Steuerung ließ sich nicht ausschalten: {}",
         "Universal Control also moves the pointer to other Macs at the screen edges. TableCross switches it off at start so the two do not fight over the pointer." => {
             "Die Universelle Steuerung schiebt den Zeiger an den Bildschirmrändern ebenfalls zu anderen Macs. TableCross schaltet sie beim Start aus, damit sich beide nicht um den Zeiger streiten."
@@ -427,9 +433,21 @@ fn de(en: &str) -> Option<&'static str> {
         "{} removed the pairing" => "{} hat die Kopplung entfernt",
         "{} s ago" => "vor {} s",
         "{} was refused: {}" => "{} wurde abgewiesen: {}",
-        "Copied on another computer: {}. They come over when the pointer arrives here." => {
-            "Auf einem anderen Computer kopiert: {}. Die Dateien kommen, sobald der Zeiger hierher wechselt."
+        "Copied on {}: {}." => "Auf {} kopiert: {}.",
+        "Save files …" => "Dateien speichern …",
+        "This desktop shows no status icons, so the TableCross symbol and its menu are missing. On GNOME, install the AppIndicator extension, log out and in again and switch it on in the app “Extensions” (on Debian and Ubuntu:" => {
+            "Diese Oberfläche zeigt keine Symbole in der Leiste, deshalb fehlen das TableCross-Symbol und sein Menü. Unter GNOME die Erweiterung AppIndicator installieren, ab- und wieder anmelden und sie in der App „Erweiterungen“ einschalten (unter Debian und Ubuntu:"
         }
+        "Copy command" => "Befehl kopieren",
+        "Command copied to the clipboard." => "Befehl in die Zwischenablage kopiert.",
+        "Save files from the clipboard …" => "Dateien aus der Zwischenablage speichern …",
+        "Save files from the clipboard" => "Dateien aus der Zwischenablage speichern",
+        "No files are copied on another computer." => "Auf keinem anderen Computer sind Dateien kopiert.",
+        "Copied on {}:" => "Auf {} kopiert:",
+        "{} files, {}" => "{} Dateien, {}",
+        "Save in" => "Speichern in",
+        "Change …" => "Ändern …",
+        "Save" => "Speichern",
         "from {}" => "von {}",
         "to {}" => "an {}",
         "{} file(s), done" => "{} Datei(en), fertig",
@@ -437,6 +455,7 @@ fn de(en: &str) -> Option<&'static str> {
         "cancelled" => "abgebrochen",
         "failed: {}" => "fehlgeschlagen: {}",
         "{} files from {} are in {} and on the clipboard" => "{} Dateien von {} liegen in {} und in der Zwischenablage",
+        "{} files from {} are in {}" => "{} Dateien von {} liegen in {}",
         "File transfer with {} failed: {}" => "Dateiübertragung mit {} fehlgeschlagen: {}",
         "A new TableCross is available ({})." => "Eine neue Version von TableCross ist da ({}).",
         "Download" => "Herunterladen",

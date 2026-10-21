@@ -121,6 +121,8 @@ const RIGHT_DRAGGED: u32 = 7;
 const KEY_DOWN: u32 = 10;
 const KEY_UP: u32 = 11;
 const FLAGS_CHANGED: u32 = 12;
+/// `kCGKeyboardEventAutorepeat`: the key event is a repeat of a held key.
+const KEYBOARD_AUTOREPEAT: u32 = 8;
 /// `NSEventTypeSystemDefined`; media keys arrive as these.
 const SYSTEM_DEFINED: u32 = 14;
 const SCROLL_WHEEL: u32 = 22;
@@ -781,7 +783,10 @@ impl InjectState {
         } else {
             self.keys.release(usage)
         };
-        if !changed {
+        let modifier = MODIFIER_FLAGS.iter().any(|(u, ..)| *u == usage);
+        // Pressed again while held: auto-repeat (see `repeat`)
+        let repeat = down && !changed;
+        if !changed && (!down || modifier) {
             return;
         }
         unsafe {
@@ -789,7 +794,10 @@ impl InjectState {
             if event.is_null() {
                 return;
             }
-            if MODIFIER_FLAGS.iter().any(|(u, ..)| *u == usage) {
+            if repeat {
+                CGEventSetIntegerValueField(event, KEYBOARD_AUTOREPEAT, 1);
+            }
+            if modifier {
                 // Modifiers are "flags changed" events with the new flags
                 CGEventSetType(event, FLAGS_CHANGED);
             }
@@ -911,6 +919,18 @@ impl Inject for MacInject {
                 }
             })
             .collect()
+    }
+
+    fn key_repeat(&self) -> Option<(Duration, Duration)> {
+        let delay = objc2_app_kit::NSEvent::keyRepeatDelay();
+        let interval = objc2_app_kit::NSEvent::keyRepeatInterval();
+        // "Off" in System Settings is a delay of hours
+        (delay.is_finite() && interval.is_finite() && delay < 5.0).then(|| {
+            (
+                Duration::from_secs_f64(delay.max(0.1)),
+                Duration::from_secs_f64(interval.max(0.015)),
+            )
+        })
     }
 
     fn sizes(&self) -> Vec<(u32, u32)> {

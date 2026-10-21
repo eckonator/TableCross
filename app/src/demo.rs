@@ -119,7 +119,12 @@ pub fn status() -> Status {
                 state: tc_session::TransferState::Done(Some("/Users/demo/Downloads/TableCross".into())),
             },
         ],
-        files_waiting: None,
+        files_waiting: Some(tc_session::FilesWaiting {
+            peer: "Office-PC".into(),
+            label: "Fotos, notes.txt".into(),
+            count: 1201,
+            size: 2_000_000_000,
+        }),
     }
 }
 

@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # On Linux the status icon talks StatusNotifierItem over D-Bus (no GTK needed)
+rfd = "0.17"
 tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

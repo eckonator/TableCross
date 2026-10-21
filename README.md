@@ -57,7 +57,10 @@ Windows may warn about an unknown publisher (“Windows protected your PC”): c
 anyway**. Later versions install from inside the app (**Update now**). There is also a portable `.zip`.
 
 **Linux** (X11, or Wayland on GNOME 45+ / KDE Plasma 6.1+), x86_64 or arm64: unpack the `.tar.gz` and
-run `./install.sh` (installs for the current user; `./install.sh --uninstall` removes it).
+run `./install.sh` (installs for the current user; `./install.sh --uninstall` removes it). GNOME shows
+the TableCross symbol and its menu only with the AppIndicator extension (Debian/Ubuntu:
+`sudo apt install gnome-shell-extension-appindicator`, then log out and in and switch it on in
+**Extensions**).
 
 **Raspberry Pi 4/5** (64-bit Raspberry Pi OS): use the `arm64` archive. The default desktop (labwc or
 Wayfire on Wayland) offers no way for programs to read or send input, so switch to X11 in

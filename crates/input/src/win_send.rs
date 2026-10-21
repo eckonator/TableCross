@@ -124,7 +124,8 @@ impl Injector {
         } else {
             self.keys.release(usage)
         };
-        if !changed {
+        // Pressed again while held: auto-repeat, sent as another press like a keyboard does
+        if !changed && !down {
             return;
         }
         let up = if down { 0 } else { KEYEVENTF_KEYUP };

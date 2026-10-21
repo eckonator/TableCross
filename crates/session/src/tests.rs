@@ -399,7 +399,7 @@ async fn clipboard_follows_in_both_directions() {
 static DOWNLOAD_DIR: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test(flavor = "multi_thread")]
-async fn copied_files_arrive_when_the_pointer_does() {
+async fn copied_files_arrive_when_saved() {
     let _guard = DOWNLOAD_DIR.lock().await;
     let source = dir("files-source");
     std::fs::create_dir_all(source.join("Fotos/Urlaub")).unwrap();
@@ -419,12 +419,12 @@ async fn copied_files_arrive_when_the_pointer_does() {
     })
     .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        !target.join("Fotos").exists(),
-        "nothing moves before the pointer arrives"
-    );
-
+    // Not even when the pointer arrives: only when saved
     a.session.send(Command::SwitchTo(Some(b.node.fingerprint())));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!target.join("Fotos").exists(), "nothing moves before saving");
+
+    b.session.send(Command::SaveFiles(target.clone()));
     until("files arrived", || {
         b.session
             .status()
@@ -436,9 +436,10 @@ async fn copied_files_arrive_when_the_pointer_does() {
     assert_eq!(std::fs::read(target.join("Fotos/Urlaub/big.bin")).unwrap(), big);
     assert_eq!(std::fs::read_to_string(target.join("Fotos/a.txt")).unwrap(), "Grüße");
     assert_eq!(std::fs::read_to_string(target.join("notes.txt")).unwrap(), "hello");
-    assert_eq!(
+    assert_ne!(
         b.clipboard.get(),
-        Read::Files(vec![target.join("Fotos"), target.join("notes.txt")])
+        Read::Files(vec![target.join("Fotos"), target.join("notes.txt")]),
+        "saved files stay off the clipboard"
     );
     // No part folder left, and the files are not announced back
     let leftovers: Vec<_> = std::fs::read_dir(&target)
@@ -469,7 +470,7 @@ async fn cancelling_a_transfer_leaves_nothing_behind() {
         b.session.status().files_waiting.is_some()
     })
     .await;
-    a.session.send(Command::SwitchTo(Some(b.node.fingerprint())));
+    b.session.send(Command::SaveFiles(target.clone()));
     until("transfer running", || {
         b.session.status().transfers.first().is_some_and(|t| t.done > 0)
     })

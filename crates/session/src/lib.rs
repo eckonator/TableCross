@@ -14,7 +14,9 @@ mod transfer;
 mod tests;
 
 pub use clip::{Clipboard, Skip};
+pub use files::downloads;
 pub use session::{
-    Command, InputState, Notice, OnChange, PairTarget, PeerView, Session, SessionConfig, SessionHandle, Status,
+    Command, FilesWaiting, InputState, Notice, OnChange, PairTarget, PeerView, Session, SessionConfig, SessionHandle,
+    Status,
 };
 pub use transfer::{TransferState, TransferView};

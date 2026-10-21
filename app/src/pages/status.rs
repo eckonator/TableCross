@@ -19,6 +19,7 @@ impl App {
         );
         let status = self.status.clone();
         self.update_notes(ui);
+        self.icons_note(ui);
         self.problems(ui, &status);
         ui.add_space(14.0);
         card(ui, "", |ui| self.this_computer(ui, &status));
@@ -74,11 +75,12 @@ impl App {
 
     fn transfers(&mut self, ui: &mut egui::Ui, status: &Status) {
         if let Some(waiting) = &status.files_waiting {
-            let text = trf(
-                "Copied on another computer: {}. They come over when the pointer arrives here.",
-                &[waiting],
-            );
+            let text = trf("Copied on {}: {}.", &[&waiting.peer, &waiting.label]);
             theme::note(ui, theme::Tone::Info, &text);
+            ui.add_space(4.0);
+            if ui.button(tr("Save files …")).clicked() {
+                self.save_files();
+            }
             ui.add_space(8.0);
         }
         for t in status.transfers.iter().rev() {
@@ -133,6 +135,28 @@ impl App {
     }
 
     /// The question whether to look for new versions, or the note that there is one.
+    /// GNOME shows no status icons without an extension: no menu, and a closed window is hard to find.
+    fn icons_note(&mut self, ui: &mut egui::Ui) {
+        if !self.icons_missing {
+            return;
+        }
+        const INSTALL: &str = "sudo apt install gnome-shell-extension-appindicator";
+        let text = tr(
+            "This desktop shows no status icons, so the TableCross symbol and its menu are missing. On \
+             GNOME, install the AppIndicator extension, log out and in again and switch it on in the app \
+             “Extensions” (on Debian and Ubuntu:",
+        );
+        let mut copied = false;
+        theme::banner(ui, theme::Tone::Info, &format!("{text} {INSTALL})."), |ui| {
+            copied = ui.button(tr("Copy command")).clicked();
+        });
+        if copied {
+            ui.ctx().copy_text(INSTALL.into());
+            self.show_info(tr("Command copied to the clipboard."));
+        }
+        ui.add_space(10.0);
+    }
+
     fn update_notes(&mut self, ui: &mut egui::Ui) {
         if let Some(new) = self.new_version.clone() {
             use crate::self_update::Progress;

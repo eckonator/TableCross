@@ -9,6 +9,8 @@ pub mod keymap {
     pub mod windows;
 }
 
+#[cfg(target_os = "macos")]
+pub mod handoff;
 pub mod helper_protocol;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -16,6 +18,10 @@ mod linux;
 mod mac;
 #[cfg(target_os = "macos")]
 mod mac_helper;
+#[cfg(target_os = "macos")]
+mod mac_prefs;
+#[cfg(any(target_os = "macos", windows, test))]
+mod repeat;
 pub mod system;
 #[cfg(target_os = "macos")]
 pub mod universal_control;
@@ -135,6 +141,11 @@ pub trait Inject: Send + Sync {
     fn sizes(&self) -> Vec<(u32, u32)> {
         Vec::new()
     }
+    /// Delay and interval for repeating a held injected key; `None`: the system repeats injected
+    /// keys itself (or nothing is known).
+    fn key_repeat(&self) -> Option<(std::time::Duration, std::time::Duration)> {
+        None
+    }
 }
 
 /// Capture and injection of one system.
@@ -143,15 +154,24 @@ pub struct Backend {
     pub inject: Arc<dyn Inject>,
 }
 
+/// Injected keys repeat while held (macOS and Windows repeat only real keyboards).
+#[cfg(any(target_os = "macos", windows))]
+fn repeating(backend: Backend) -> Backend {
+    Backend {
+        inject: repeat::Repeating::wrap(backend.inject),
+        ..backend
+    }
+}
+
 /// The backend of this system.
 pub fn platform() -> Result<Backend, InputError> {
     #[cfg(target_os = "macos")]
     {
-        mac::backend()
+        mac::backend().map(repeating)
     }
     #[cfg(windows)]
     {
-        windows::backend()
+        windows::backend().map(repeating)
     }
     #[cfg(target_os = "linux")]
     {
