@@ -15,7 +15,8 @@ use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, defi
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession,
     NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSFilePromiseProvider, NSFilePromiseProviderDelegate,
-    NSImage, NSImageNameMultipleDocuments, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowStyleMask,
+    NSImage, NSImageNameMultipleDocuments, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowStyleMask,
 };
 use objc2_foundation::{NSArray, NSError, NSOperationQueue, NSPoint, NSProcessInfo, NSRect, NSSize, NSString, NSURL};
 
@@ -278,6 +279,12 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
         window.setBackgroundColor(Some(&NSColor::colorWithWhite_alpha(1.0, 0.02)));
         window.setHasShadow(false);
         window.setLevel(NSScreenSaverWindowLevel);
+        // Wherever the pointer is: another space, over an app in full screen
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::FullScreenAuxiliary,
+        );
         let view = DragView::new(mtm, size, files);
         window.setContentView(Some(&view));
         window.orderFrontRegardless();

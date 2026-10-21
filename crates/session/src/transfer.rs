@@ -64,12 +64,14 @@ impl<F: Fn(u64)> Progress<F> {
     }
 }
 
-/// Sends every entry of `listing` on a new stream to `peer`.
+/// Sends every entry of `listing` on a new stream to `peer`; without `links` (a peer before 0.4.26)
+/// as plain files and folders only.
 pub async fn send(
     node: &Node,
     peer: &Fingerprint,
     id: u64,
     listing: &Listing,
+    links: bool,
     cancel: &AtomicBool,
     progress: &mut Progress<impl Fn(u64)>,
 ) -> Result<(), String> {
@@ -83,7 +85,19 @@ pub async fn send(
             out.cancel();
             return Err("cancelled".into());
         }
-        if entry.kind == Kind::File {
+        let plain;
+        let entry = if links {
+            entry
+        } else {
+            match entry.plain() {
+                Some(e) => {
+                    plain = e;
+                    &plain
+                }
+                None => continue,
+            }
+        };
+        if entry.has_content() {
             let mut file = tokio::fs::File::open(path)
                 .await
                 .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -179,6 +193,8 @@ async fn receive_into(
 ) -> Result<Vec<String>, String> {
     tokio::fs::create_dir_all(partial).await.map_err(|e| e.to_string())?;
     let mut roots: Vec<String> = Vec::new();
+    // Nothing is written below or onto a link: following it could lead elsewhere
+    let mut links: Vec<String> = Vec::new();
     let mut buf = vec![0; CHUNK];
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -198,13 +214,31 @@ async fn receive_into(
         }
         let entry = files::decode_entry(&header).ok_or("invalid entry")?;
         let path = files::safe_join(partial, &entry.path).ok_or("unsafe path")?;
+        if links
+            .iter()
+            .any(|l| entry.path == *l || entry.path.starts_with(&format!("{l}/")))
+        {
+            return Err("unsafe path".into());
+        }
         let root = entry.path.split('/').next().unwrap_or_default().to_string();
         if !roots.contains(&root) {
             roots.push(root);
         }
-        match entry.kind {
+        match &entry.kind {
             Kind::Dir => tokio::fs::create_dir_all(&path).await.map_err(|e| e.to_string())?,
-            Kind::File => {
+            Kind::Link(target) => {
+                if !files::link_ok(&entry.path, target) {
+                    return Err("unsafe link".into());
+                }
+                links.push(entry.path.clone());
+                if let Some(parent) = path.parent() {
+                    tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+                }
+                // Windows makes links only for administrators: left out there
+                #[cfg(unix)]
+                tokio::fs::symlink(target, &path).await.map_err(|e| e.to_string())?;
+            }
+            Kind::File | Kind::Executable => {
                 if let Some(parent) = path.parent() {
                     tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                 }
@@ -224,6 +258,13 @@ async fn receive_into(
                     progress.add(n);
                 }
                 file.flush().await.map_err(|e| e.to_string())?;
+                #[cfg(unix)]
+                if entry.kind == Kind::Executable {
+                    use std::os::unix::fs::PermissionsExt;
+                    tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
             }
         }
     }

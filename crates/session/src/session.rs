@@ -1471,7 +1471,8 @@ fn send_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64) {
     tokio::spawn(async move {
         let progress_shared = shared.clone();
         let mut progress = Progress::new(move |done| update_transfer(&progress_shared, id, |t| t.done = done));
-        let result = transfer::send(&shared.node, &peer, id, &listing, &cancel, &mut progress).await;
+        let links = shared.peer_knows(&peer.to_string(), layout_file::knows_links);
+        let result = transfer::send(&shared.node, &peer, id, &listing, links, &cancel, &mut progress).await;
         let cancelled = cancel.load(std::sync::atomic::Ordering::SeqCst);
         shared.files.lock().expect("files lock").cancels.finished(id);
         update_transfer(&shared, id, |t| {

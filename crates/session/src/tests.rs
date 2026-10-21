@@ -407,6 +407,14 @@ async fn copied_files_arrive_when_saved() {
     std::fs::write(source.join("Fotos/Urlaub/big.bin"), &big).unwrap();
     std::fs::write(source.join("Fotos/a.txt"), "Grüße").unwrap();
     std::fs::write(source.join("notes.txt"), "hello").unwrap();
+    // A program and a link inside, as in an app
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(source.join("Fotos/show.sh"), "#!/bin/sh").unwrap();
+        std::fs::set_permissions(source.join("Fotos/show.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink("Urlaub/big.bin", source.join("Fotos/latest")).unwrap();
+    }
     let target = dir("files-target");
     // Only this test uses the variable
     unsafe { std::env::set_var("TC_DOWNLOAD_DIR", &target) };
@@ -436,6 +444,19 @@ async fn copied_files_arrive_when_saved() {
     assert_eq!(std::fs::read(target.join("Fotos/Urlaub/big.bin")).unwrap(), big);
     assert_eq!(std::fs::read_to_string(target.join("Fotos/a.txt")).unwrap(), "Grüße");
     assert_eq!(std::fs::read_to_string(target.join("notes.txt")).unwrap(), "hello");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(target.join("Fotos/show.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_ne!(mode & 0o111, 0, "the program still runs");
+        assert_eq!(
+            std::fs::read_link(target.join("Fotos/latest")).unwrap(),
+            PathBuf::from("Urlaub/big.bin")
+        );
+    }
     assert_ne!(
         b.clipboard.get(),
         Read::Files(vec![target.join("Fotos"), target.join("notes.txt")]),

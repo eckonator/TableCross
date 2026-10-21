@@ -7,6 +7,8 @@
 //! is cancelled or fails.
 //!
 //! On the stream every entry is a length-prefixed header (`Entry`) followed by the file's bytes.
+//! Programs keep their permission to run, and symbolic links travel where they point inside what was
+//! copied (an app is full of them); links that lead out of it are left behind.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -21,10 +23,15 @@ const SHOWN_NAMES: usize = 8;
 /// At most this many top-level names travel in an offer (each becomes an item to paste).
 const OFFERED_NAMES: usize = 2000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     Dir,
     File,
+    /// A file that runs as a program. Only for peers that know it (see `layout_file::knows_links`).
+    Executable,
+    /// A symbolic link to this target, which stays inside what was copied (see `link_ok`). Only for
+    /// peers that know it.
+    Link(String),
 }
 
 /// One file or folder, with its path relative to the copied top level ('/' separated).
@@ -33,6 +40,45 @@ pub struct Entry {
     pub path: String,
     pub kind: Kind,
     pub size: u64,
+}
+
+impl Entry {
+    /// Whether bytes follow this entry on the stream.
+    pub fn has_content(&self) -> bool {
+        matches!(self.kind, Kind::File | Kind::Executable)
+    }
+
+    /// The entry as a peer before 0.4.26 understands it: a program as a plain file, no links.
+    pub fn plain(&self) -> Option<Entry> {
+        match self.kind {
+            Kind::Link(_) => None,
+            Kind::Executable => Some(Entry {
+                kind: Kind::File,
+                ..self.clone()
+            }),
+            _ => Some(self.clone()),
+        }
+    }
+}
+
+/// Whether a link at `link_path` may point to `target`: a relative path with `..` only at its
+/// start, rising no higher than the copied top level, then at least one name; never the top level
+/// itself a link. Followed on the disk it stays inside, as no entry lies below a link.
+pub fn link_ok(link_path: &str, target: &str) -> bool {
+    let depth = link_path.split('/').count();
+    if depth < 2 {
+        return false;
+    }
+    let (mut ups, mut names) = (0, 0);
+    for part in target.split('/') {
+        match part {
+            ".." if names == 0 => ups += 1,
+            "" | "." | ".." => return false,
+            part if part.contains(['\\', ':']) => return false,
+            _ => names += 1,
+        }
+    }
+    names > 0 && ups <= depth - 2
 }
 
 /// What was copied: the entries in order (folders before their content) and where they are.
@@ -44,7 +90,7 @@ pub struct Listing {
 
 impl Listing {
     pub fn count(&self) -> u64 {
-        self.entries.iter().filter(|(e, _)| e.kind == Kind::File).count() as u64
+        self.entries.iter().filter(|(e, _)| e.has_content()).count() as u64
     }
 
     pub fn size(&self) -> u64 {
@@ -95,7 +141,7 @@ fn nfc(name: &str) -> String {
     name.nfc().collect()
 }
 
-/// Walks the copied files and folders. Symbolic links are skipped (they could point anywhere).
+/// Walks the copied files and folders. Symbolic links come along where they stay inside (`link_ok`).
 pub fn list(paths: &[PathBuf]) -> std::io::Result<Listing> {
     let mut entries = Vec::new();
     let mut roots = Vec::new();
@@ -112,6 +158,19 @@ pub fn list(paths: &[PathBuf]) -> std::io::Result<Listing> {
 fn walk(path: &Path, relative: String, out: &mut Vec<(Entry, PathBuf)>) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
+        #[cfg(unix)]
+        if let Some(target) = std::fs::read_link(path).ok().and_then(|t| t.to_str().map(nfc))
+            && link_ok(&relative, &target)
+        {
+            out.push((
+                Entry {
+                    path: relative,
+                    kind: Kind::Link(target),
+                    size: 0,
+                },
+                path.to_path_buf(),
+            ));
+        }
         return Ok(());
     }
     if meta.is_dir() {
@@ -130,10 +189,14 @@ fn walk(path: &Path, relative: String, out: &mut Vec<(Entry, PathBuf)>) -> std::
             walk(&child.path(), format!("{relative}/{name}"), out)?;
         }
     } else if meta.is_file() {
+        #[cfg(unix)]
+        let runs = std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0;
+        #[cfg(not(unix))]
+        let runs = false;
         out.push((
             Entry {
                 path: relative,
-                kind: Kind::File,
+                kind: if runs { Kind::Executable } else { Kind::File },
                 size: meta.len(),
             },
             path.to_path_buf(),
@@ -218,6 +281,57 @@ mod tests {
     }
 
     #[test]
+    fn links_stay_inside() {
+        assert!(link_ok(
+            "App.app/Contents/Frameworks/X.framework/X",
+            "Versions/Current/X"
+        ));
+        assert!(link_ok("App.app/Contents/Frameworks/X.framework/Versions/Current", "A"));
+        assert!(link_ok("Root/a/link", "../b"));
+        for (link, target) in [
+            ("Root/link", "../outside"),
+            ("Root/a/link", "../../outside"),
+            ("Root/link", "/etc"),
+            ("Root/link", ".."),
+            ("Root/link", "a/../b"),
+            ("Root/link", "./a"),
+            ("Root/link", "a//b"),
+            ("Root/link", "C:\\x"),
+            ("Root", "a"),
+        ] {
+            assert!(!link_ok(link, target), "{link} -> {target}");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn programs_and_inner_links_come_along() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("app");
+        std::fs::create_dir_all(dir.join("Tool/bin")).unwrap();
+        std::fs::write(dir.join("Tool/bin/run"), b"#!/bin/sh").unwrap();
+        std::fs::set_permissions(dir.join("Tool/bin/run"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink("bin/run", dir.join("Tool/start")).unwrap();
+        std::os::unix::fs::symlink("/etc", dir.join("Tool/etc")).unwrap();
+        let listing = list(&[dir.join("Tool")]).unwrap();
+        let kinds: Vec<_> = listing
+            .entries
+            .iter()
+            .map(|(e, _)| (e.path.as_str(), e.kind.clone()))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("Tool", Kind::Dir),
+                ("Tool/bin", Kind::Dir),
+                ("Tool/bin/run", Kind::Executable),
+                ("Tool/start", Kind::Link("bin/run".into())),
+            ]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn listing_folders_first_without_links() {
         let dir = temp("list");
         std::fs::create_dir_all(dir.join("Fotos/Urlaub")).unwrap();
@@ -226,7 +340,9 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), b"hi").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc", dir.join("Fotos/link")).unwrap();
-        let listing = list(&[dir.join("Fotos"), dir.join("notes.txt")]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.join("Fotos"), dir.join("Fotos-Link")).unwrap();
+        let listing = list(&[dir.join("Fotos"), dir.join("notes.txt"), dir.join("Fotos-Link")]).unwrap();
         let paths: Vec<_> = listing.entries.iter().map(|(e, _)| e.path.as_str()).collect();
         assert_eq!(
             paths,
@@ -240,7 +356,7 @@ mod tests {
         );
         assert_eq!(listing.count(), 3);
         assert_eq!(listing.size(), 10);
-        assert_eq!(listing.shown_names(), ["Fotos", "notes.txt"]);
+        assert_eq!(listing.shown_names()[..2], ["Fotos", "notes.txt"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

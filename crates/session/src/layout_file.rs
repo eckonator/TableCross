@@ -57,6 +57,9 @@ const DRAG_SINCE: (u32, u32, u32) = (0, 4, 14);
 /// First version that knows `Message::ScreenSizes`.
 const SIZES_SINCE: (u32, u32, u32) = (0, 4, 10);
 
+/// First version that receives programs and symbolic links in copied files (`files::Kind`).
+const LINKS_SINCE: (u32, u32, u32) = (0, 4, 26);
+
 fn version(app_version: &str) -> (u32, u32, u32) {
     let mut parts = app_version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
     (
@@ -84,6 +87,11 @@ pub fn knows_drag(app_version: &str) -> bool {
 /// Whether a peer running `app_version` understands `Message::ScreenSizes`.
 pub fn knows_sizes(app_version: &str) -> bool {
     version(app_version) >= SIZES_SINCE
+}
+
+/// Whether a peer running `app_version` receives programs and links in copied files.
+pub fn knows_links(app_version: &str) -> bool {
+    version(app_version) >= LINKS_SINCE
 }
 
 pub fn save(dir: &Path, file: &LayoutFile) -> Result<()> {
