@@ -940,6 +940,33 @@ fn start_capture(shared: &Arc<Shared>, capture: &mut Option<Box<dyn Capture>>) {
     shared.changed();
 }
 
+/// Holds the keep-awake request on a thread of its own: asking the power management can take
+/// seconds on a busy computer, and the session loop must not stand still that long (the links
+/// would take it for sleep).
+struct Awake(std::sync::mpsc::Sender<bool>);
+
+impl Awake {
+    fn start() -> Self {
+        let (wanted, requests) = std::sync::mpsc::channel::<bool>();
+        std::thread::spawn(move || {
+            let mut held = None;
+            // Ends with the session; the request goes with it
+            while let Ok(on) = requests.recv() {
+                if !on {
+                    held = None;
+                } else if held.is_none() {
+                    held = tc_input::system::KeepAwake::new();
+                }
+            }
+        });
+        Self(wanted)
+    }
+
+    fn set(&self, on: bool) {
+        let _ = self.0.send(on);
+    }
+}
+
 async fn run(
     shared: Arc<Shared>,
     mut capture: Option<Box<dyn Capture>>,
@@ -950,7 +977,7 @@ async fn run(
     start_capture(&shared, &mut capture);
     let mut role = Role::Idle;
     // Both computers stay awake while one controls the other
-    let mut awake: Option<tc_input::system::KeepAwake> = None;
+    let awake = Awake::start();
     let mut problems: Vec<Problem> = Vec::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
@@ -1041,11 +1068,7 @@ async fn run(
                         Role::Controlling(id) => Notice::Controlling(shared.name_of(id)),
                         Role::ControlledBy(id) => Notice::ControlledBy(shared.name_of(id)),
                     };
-                    if now == Role::Idle {
-                        awake = None;
-                    } else if awake.is_none() {
-                        awake = tc_input::system::KeepAwake::new();
-                    }
+                    awake.set(now != Role::Idle);
                     role = now;
                     shared.refresh();
                     shared.notice(notice);
