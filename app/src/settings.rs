@@ -82,7 +82,9 @@ pub struct Settings {
     pub edges: EdgeSetting,
     /// No switching at left and right edges this close to a corner (points).
     pub corner: u32,
-    /// Computers (machine ids) whose area on the desk got their physical size once.
+    /// Computers (machine ids) whose area on the desk got their physical size once. Stored under
+    /// a new key since 0.4.20: the sizes taken over before trusted displays with made-up sizes.
+    #[serde(rename = "physical_sizes_2")]
     pub physical_sizes: Vec<String>,
 }
 
@@ -160,7 +162,7 @@ impl Settings {
                 _ => field(&fields, "edges", d.edges),
             },
             corner: field(&fields, "corner", d.corner).min(200),
-            physical_sizes: field(&fields, "physical_sizes", d.physical_sizes),
+            physical_sizes: field(&fields, "physical_sizes_2", d.physical_sizes),
         }
     }
 
@@ -249,11 +251,18 @@ mod tests {
     }
 
     #[test]
+    fn physical_sizes_before_0_4_20_are_taken_over_once_more() {
+        assert!(Settings::parse(r#"{"physical_sizes":["a"]}"#).physical_sizes.is_empty());
+        assert_eq!(Settings::parse(r#"{"physical_sizes_2":["a"]}"#).physical_sizes, ["a"]);
+    }
+
+    #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("tablecross-settings-{}", std::process::id()));
         let s = Settings {
             name: "Office".into(),
             setup_done: true,
+            physical_sizes: vec!["a".into()],
             ..Settings::default()
         };
         s.save(&dir);
