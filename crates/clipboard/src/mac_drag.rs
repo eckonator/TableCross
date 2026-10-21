@@ -21,8 +21,8 @@ use objc2_foundation::{NSArray, NSError, NSOperationQueue, NSPoint, NSRect, NSSi
 
 use crate::Fulfil;
 
-/// Size of the window that catches the press (points).
-const CATCHER: f64 = 64.0;
+/// Size of the window that catches the press (points): the pointer moves on meanwhile.
+const CATCHER: f64 = 160.0;
 /// Time for the window to appear before the button is pressed in it.
 const SETTLE: Duration = Duration::from_millis(80);
 
@@ -247,8 +247,8 @@ fn finish() {
 
 /// Continues a drag of `names` that came over the edge: shows the catching window under the
 /// pointer, then calls `press` (which presses the left button there). `fulfil` fetches the files
-/// when they are dropped.
-pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>) {
+/// when they are dropped; `gave_up` is called when the press did not start the drag.
+pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>, gave_up: Box<dyn FnOnce() + Send>) {
     DispatchQueue::main().exec_async(move || {
         let Some(mtm) = MainThreadMarker::new() else { return };
         finish();
@@ -281,6 +281,13 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
         WINDOW.with(|w| *w.borrow_mut() = Some(window));
         std::thread::spawn(move || {
             std::thread::sleep(SETTLE);
+            // Under the pointer where it is now: a quick drag has moved on since the window came
+            DispatchQueue::main().exec_sync(|| {
+                if let Some(window) = WINDOW.with(|w| w.borrow().clone()) {
+                    let at = NSEvent::mouseLocation();
+                    window.setFrameOrigin(NSPoint::new(at.x - CATCHER / 2.0, at.y - CATCHER / 2.0));
+                }
+            });
             press();
             // The press did not reach the window (moved away meanwhile): give up
             std::thread::sleep(Duration::from_secs(3));
@@ -295,6 +302,7 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
                 if unused {
                     tracing::warn!("the drag from another computer did not start here");
                     finish();
+                    gave_up();
                 }
             });
         });

@@ -297,6 +297,8 @@ enum Internal {
     LockAll,
     /// Promised files are being pasted: fetch them.
     Fetch(u64),
+    /// Files dragged over the edge whose drag did not start here: into Downloads with them.
+    DragGaveUp(u64),
 }
 
 /// How long pasting promised files waits for their transfer to start.
@@ -1136,6 +1138,13 @@ async fn run(
                 }
                 Internal::LockAll => lock_all(&shared),
                 Internal::Fetch(id) => fetch_promised(&shared, id),
+                Internal::DragGaveUp(id) => {
+                    let offered = shared.files.lock().expect("files lock").remote.as_ref().is_some_and(|r| r.1 == id);
+                    if offered {
+                        tracing::info!("files dragged over the edge go to Downloads: the drag did not start here");
+                        request_files(&shared);
+                    }
+                }
                 Internal::PairDone(result) => {
                     shared.status.lock().expect("status lock").pairing_busy = false;
                     match result {
@@ -1347,6 +1356,7 @@ fn continue_drag(shared: &Arc<Shared>, peer: Fingerprint, id: u64, names: &[Stri
         return false;
     }
     let fulfil = new_promise(shared, id);
+    let shared_internal = shared.internal.clone();
     let shared = shared.clone();
     let press = Box::new(move || {
         // Let go meanwhile: nothing to drag
@@ -1360,8 +1370,12 @@ fn continue_drag(shared: &Arc<Shared>, peer: Fingerprint, id: u64, names: &[Stri
         let actions = shared.engine.lock().expect("engine lock").received(&from, down);
         shared.execute(actions);
     });
+    let internal = shared_internal;
+    let gave_up = Box::new(move || {
+        let _ = internal.send(Internal::DragGaveUp(id));
+    });
     tracing::info!("files dragged over the edge, the drag goes on here");
-    tc_clipboard::drag::continue_drag(names.to_vec(), fulfil, press);
+    tc_clipboard::drag::continue_drag(names.to_vec(), fulfil, press, gave_up);
     true
 }
 

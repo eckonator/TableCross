@@ -86,12 +86,18 @@ pub mod drag {
 
     /// Continues a drag of files that came over the edge: presses the left button (`press`) in a
     /// window under the pointer and drags `names` from there; where they are dropped, `fulfil`
-    /// fetches them. Does nothing where `can_continue` is false.
-    pub fn continue_drag(names: Vec<String>, fulfil: super::Fulfil, press: Box<dyn FnOnce() + Send>) {
+    /// fetches them; `gave_up` is called when the drag did not start. Does nothing where
+    /// `can_continue` is false.
+    pub fn continue_drag(
+        names: Vec<String>,
+        fulfil: super::Fulfil,
+        press: Box<dyn FnOnce() + Send>,
+        gave_up: Box<dyn FnOnce() + Send>,
+    ) {
         #[cfg(target_os = "macos")]
-        crate::mac_drag::start(names, fulfil, press);
+        crate::mac_drag::start(names, fulfil, press, gave_up);
         #[cfg(not(target_os = "macos"))]
-        let _ = (names, fulfil, press);
+        let _ = (names, fulfil, press, gave_up);
     }
 
     /// The files dragged since `change_count` returned `before`.
