@@ -1361,8 +1361,10 @@ fn continue_drag(shared: &Arc<Shared>, peer: Fingerprint, id: u64, names: &[Stri
     let press = Box::new(move || {
         // Let go meanwhile: nothing to drag
         if shared.files.lock().expect("files lock").left_up_seen {
+            tracing::info!("the button was let go before the drag could start here");
             return;
         }
+        tracing::info!("pressing the button here to go on with the drag");
         let down = Message::MouseButton {
             button: MouseButton::Left,
             down: true,

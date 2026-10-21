@@ -14,10 +14,10 @@ use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession,
-    NSDraggingSource, NSEvent, NSFilePromiseProvider, NSFilePromiseProviderDelegate, NSImage,
-    NSImageNameMultipleDocuments, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowStyleMask,
+    NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSFilePromiseProvider, NSFilePromiseProviderDelegate,
+    NSImage, NSImageNameMultipleDocuments, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{NSArray, NSError, NSOperationQueue, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{NSArray, NSError, NSOperationQueue, NSPoint, NSProcessInfo, NSRect, NSSize, NSString, NSURL};
 
 use crate::Fulfil;
 
@@ -25,6 +25,8 @@ use crate::Fulfil;
 const CATCHER: f64 = 160.0;
 /// Time for the window to appear before the button is pressed in it.
 const SETTLE: Duration = Duration::from_millis(80);
+/// Time for the press to reach the window before the drag is started without it.
+const PRESS_ARRIVES: Duration = Duration::from_millis(150);
 
 struct FileIvars {
     /// Which of the fetched files this one is.
@@ -147,6 +149,7 @@ define_class!(
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: &NSEvent) {
+            tracing::info!("the press for the drag reached its window");
             self.begin(event);
         }
 
@@ -289,7 +292,43 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
                 }
             });
             press();
-            // The press did not reach the window (moved away meanwhile): give up
+            // The press did not reach the window: the button is down now all the same, so the drag
+            // starts from an event of our own
+            std::thread::sleep(PRESS_ARRIVES);
+            DispatchQueue::main().exec_async(|| {
+                let Some(window) = WINDOW.with(|w| w.borrow().clone()) else { return };
+                let Some(view) = window.contentView().and_then(|v| v.downcast::<DragView>().ok()) else {
+                    return;
+                };
+                if view.ivars().started.get() {
+                    return;
+                }
+                let middle = NSPoint::new(CATCHER / 2.0, CATCHER / 2.0);
+                let event =
+                    NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                        NSEventType::LeftMouseDown,
+                        middle,
+                        NSEventModifierFlags::empty(),
+                        NSProcessInfo::processInfo().systemUptime(),
+                        window.windowNumber(),
+                        None,
+                        0,
+                        1,
+                        1.0,
+                    );
+                match event {
+                    Some(event) => {
+                        tracing::info!(
+                            "the press for the drag did not reach its window (pointer {:?}, window {:?}), starting it anyway",
+                            NSEvent::mouseLocation(),
+                            window.frame()
+                        );
+                        view.begin(&event);
+                    }
+                    None => tracing::warn!("cannot make an event to start the drag"),
+                }
+            });
+            // The drag did not start at all: give up
             std::thread::sleep(Duration::from_secs(3));
             DispatchQueue::main().exec_async(|| {
                 let unused = WINDOW.with(|w| {
