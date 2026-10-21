@@ -792,10 +792,13 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 let _ = shared.internal.send(Internal::Dropped(files));
                 // A computer that drags them on gets the button: letting go drops the files there
                 let mut engine = shared.engine.lock().expect("engine lock");
-                if let Role::Controlling(target) = engine.role()
-                    && shared.peer_knows(&target, layout_file::knows_drag)
-                {
-                    engine.hand_over_button(MouseButton::Left);
+                if let Role::Controlling(target) = engine.role() {
+                    if shared.peer_knows(&target, layout_file::knows_drag) {
+                        engine.hand_over_button(MouseButton::Left);
+                        tracing::info!("files dragged over the edge, the button goes over with them");
+                    } else {
+                        tracing::info!("files dragged over the edge to an older version");
+                    }
                 }
             }
         }
@@ -1181,12 +1184,21 @@ fn new_promise(shared: &Arc<Shared>, id: u64) -> tc_clipboard::Fulfil {
 /// into Downloads).
 fn continue_drag(shared: &Arc<Shared>, peer: Fingerprint, id: u64, names: &[String]) -> bool {
     let from = peer.to_string();
-    if !tc_clipboard::drag::can_continue()
-        || names.is_empty()
-        || shared.engine.lock().expect("engine lock").role() != Role::ControlledBy(from.clone())
-        || !shared.peer_knows(&from, layout_file::knows_drag)
-        || shared.files.lock().expect("files lock").left_up_seen
-    {
+    let refused = if !tc_clipboard::drag::can_continue() {
+        Some("not on this system")
+    } else if names.is_empty() {
+        Some("no names")
+    } else if shared.engine.lock().expect("engine lock").role() != Role::ControlledBy(from.clone()) {
+        Some("not controlled by the sender")
+    } else if !shared.peer_knows(&from, layout_file::knows_drag) {
+        Some("the sender's version does not hand the button over")
+    } else if shared.files.lock().expect("files lock").left_up_seen {
+        Some("the button was let go already")
+    } else {
+        None
+    };
+    if let Some(why) = refused {
+        tracing::info!("files dragged over the edge go to Downloads: {why}");
         return false;
     }
     let fulfil = new_promise(shared, id);
@@ -1752,7 +1764,13 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 Message::MouseButton {
                     button: MouseButton::Left,
                     down: false,
-                } => shared.files.lock().expect("files lock").left_up_seen = true,
+                } => {
+                    let mut files = shared.files.lock().expect("files lock");
+                    if !files.left_up_seen {
+                        tracing::info!("left button let go on the controlling computer");
+                    }
+                    files.left_up_seen = true;
+                }
                 _ => {}
             }
             let actions = shared
