@@ -865,8 +865,10 @@ fn physical_factor(screens: &[Screen], sizes: &[(u32, u32)]) -> Option<f32> {
             (mm_h as f32, mm_w as f32)
         };
         let shape = (w / h) / (mm_w / mm_h);
+        // Below 60 points per inch a display would be huge for its points: some displays report
+        // a made-up size in their data (a 27-inch one claimed 62 inches)
         let per_inch = w / (mm_w / 25.4);
-        if !(0.85..=1.15).contains(&shape) || !(40.0..=350.0).contains(&per_inch) {
+        if !(0.85..=1.15).contains(&shape) || !(60.0..=350.0).contains(&per_inch) {
             continue;
         }
         sum += mm_w * POINTS_PER_MM / w * w * h;
@@ -913,6 +915,18 @@ mod tests {
         assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(2000, 1125)]), None);
         // Lists out of step
         assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[]), None);
+    }
+
+    #[test]
+    fn a_display_claiming_a_giant_size_does_not_inflate_the_others() {
+        // Two 27-inch displays, one of them reporting 1383 × 778 mm (measured on a real desk)
+        let factor = physical_factor(
+            &[screen(2560, 1440, 1.0), screen(2560, 1440, 1.0)],
+            &[(619, 340), (1383, 778)],
+        )
+        .expect("the honest display counts");
+        let honest = physical_factor(&[screen(2560, 1440, 1.0)], &[(619, 340)]).expect("plausible");
+        assert!((factor - honest).abs() < 0.001, "{factor} against {honest}");
     }
 
     fn area(m: &str, x: f32, y: f32, w: f32, h: f32) -> Area {
