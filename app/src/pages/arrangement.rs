@@ -308,9 +308,13 @@ impl App {
                 ),
             );
         }
-        if status.size_unsure {
-            ui.add_space(6.0);
-            self.diagonal(ui);
+        let sizes_id = egui::Id::new("tc-screen-sizes-open");
+        let sizes_open = ui.ctx().data(|d| d.get_temp::<bool>(sizes_id)).unwrap_or(false);
+        if sizes_open || status.size_unsure {
+            ui.add_space(12.0);
+            if self.screen_sizes(ui, status) {
+                ui.ctx().data_mut(|d| d.insert_temp(sizes_id, false));
+            }
         }
         match change {
             Some(Change::Move(id, x, y)) => {
@@ -345,6 +349,10 @@ impl App {
                     self.arrange(resized);
                 }
             }
+            Some(Change::ScreenSizes) => {
+                ui.ctx().data_mut(|d| d.insert_temp(sizes_id, true));
+            }
+            Some(Change::ArrangeScreens) => open_display_settings(),
             Some(Change::Swap(peer, swap)) => self.send(Command::SwapCmdCtrl { peer, swap }),
             Some(Change::GoTo(peer)) => self.send(Command::SwitchTo(Some(peer))),
             None => {}
@@ -425,24 +433,43 @@ impl App {
         ctx.request_repaint_after(EDGES_EVERY);
     }
 
-    /// A screen here reports a size that cannot be right: its diagonal can be typed in. Without
-    /// it, the size of a screen with the same points on another computer counts, else the points.
-    fn diagonal(&mut self, ui: &mut egui::Ui) {
-        theme::note(
-            ui,
-            theme::Tone::Info,
-            tr(
-                "A screen of this computer reports a size that cannot be right. Without its diagonal it counts \
-                as large as a screen with the same resolution on another computer.",
-            ),
-        );
+    /// The screens of this computer with the size they report; a diagonal typed in for one of
+    /// them counts instead. True when the list is to be closed.
+    fn screen_sizes(&mut self, ui: &mut egui::Ui, status: &Status) -> bool {
+        let p = theme::colors(ui);
+        ui.label(RichText::new(tr("Screens of this computer")).strong());
         ui.add_space(4.0);
-        let mut by_hand = self.settings.screen_diagonal.is_some();
-        let mut inches = self.settings.screen_diagonal.unwrap_or(27.0);
-        let edited = ui
-            .horizontal(|ui| {
-                let mut edited = ui.checkbox(&mut by_hand, tr("Its diagonal:")).changed();
-                edited |= ui
+        if status.size_unsure {
+            theme::note(
+                ui,
+                theme::Tone::Info,
+                tr(
+                    "A screen of this computer reports a size that cannot be right. Without a diagonal typed in it \
+                     counts as large as a screen with the same resolution on another computer.",
+                ),
+            );
+            ui.add_space(4.0);
+        }
+        if status.reported_sizes.len() != status.screens.len() {
+            ui.label(RichText::new(tr("This system does not tell the size of its screens.")).color(p.muted));
+        }
+        let mut edited: Option<((u32, u32), Option<f32>)> = None;
+        for (i, (screen, &mm)) in status.screens.iter().zip(&status.reported_sizes).enumerate() {
+            let typed = self.settings.screen_diagonals.iter().find(|t| t.fits(mm)).copied();
+            let counted = status.screen_sizes.get(i).copied().unwrap_or(mm);
+            let mut by_hand = typed.is_some();
+            let mut inches = typed.map_or((screen_size::inches(counted) * 10.0).round() / 10.0, |t| t.inches);
+            ui.horizontal(|ui| {
+                ui.label(trf(
+                    "Screen {}: {} × {} points",
+                    &[
+                        &(i + 1),
+                        &(screen.width as f32 / screen.scale).round(),
+                        &(screen.height as f32 / screen.scale).round(),
+                    ],
+                ));
+                let mut changed = ui.checkbox(&mut by_hand, tr("diagonal by hand:")).changed();
+                changed |= ui
                     .add_enabled(
                         by_hand,
                         egui::DragValue::new(&mut inches)
@@ -452,14 +479,34 @@ impl App {
                             .suffix(tr(" inches")),
                     )
                     .changed();
-                edited
-            })
-            .inner;
-        if edited {
-            self.settings.screen_diagonal = by_hand.then_some(inches);
-            self.save_settings();
-            self.send(Command::ScreenDiagonal(self.settings.screen_diagonal));
+                let reported = if screen_size::plausible(screen, mm) {
+                    trf("reports {}", &[&inch_text(screen_size::inches(mm))])
+                } else if mm == (0, 0) {
+                    tr("reports no size").to_string()
+                } else {
+                    trf(
+                        "reports {}, which cannot be right",
+                        &[&inch_text(screen_size::inches(mm))],
+                    )
+                };
+                ui.label(RichText::new(reported).color(p.muted));
+                if changed {
+                    edited = Some((mm, by_hand.then_some(inches)));
+                }
+            });
         }
+        if let Some((mm, inches)) = edited {
+            self.settings.screen_diagonals.retain(|t| !t.fits(mm));
+            if let Some(inches) = inches {
+                self.settings
+                    .screen_diagonals
+                    .push(screen_size::Typed { reported: mm, inches });
+            }
+            self.save_settings();
+            self.send(Command::ScreenDiagonals(self.settings.screen_diagonals.clone()));
+        }
+        ui.add_space(4.0);
+        !status.size_unsure && ui.button(tr("Done")).clicked()
     }
 
     fn arrange(&mut self, desk: Vec<Area>) {
@@ -475,6 +522,8 @@ enum Change {
     Move(String, f32, f32),
     Remove(String),
     Resize(String),
+    ScreenSizes,
+    ArrangeScreens,
     Swap(Fingerprint, bool),
     GoTo(Fingerprint),
 }
@@ -511,10 +560,56 @@ fn tile_menu(ui: &mut egui::Ui, status: &Status, me: &str, id: &str) -> Option<C
     {
         change = Some(Change::Resize(id.to_string()));
     }
+    if id == me {
+        if ui.button(tr("Screen sizes …")).clicked() {
+            change = Some(Change::ScreenSizes);
+        }
+        if ui
+            .button(tr("Arrange screens …"))
+            .on_hover_text(tr(
+                "Opens the display settings of the system: where the screens of this computer lie there is where \
+                 the pointer moves between them, and the desk shows it a moment later.",
+            ))
+            .clicked()
+        {
+            change = Some(Change::ArrangeScreens);
+        }
+    }
     if id != me && ui.button(tr("Take off the desk")).clicked() {
         change = Some(Change::Remove(id.to_string()));
     }
     change
+}
+
+/// A diagonal for people: one decimal, with the decimal comma in German.
+fn inch_text(inches: f32) -> String {
+    let text = format!("{inches:.1}″");
+    match crate::i18n::lang() {
+        crate::i18n::Lang::De => text.replace('.', ","),
+        crate::i18n::Lang::En => text,
+    }
+}
+
+/// Opens where the system arranges its displays.
+fn open_display_settings() {
+    #[cfg(target_os = "macos")]
+    super::open("/System/Library/PreferencePanes/Displays.prefPane");
+    #[cfg(windows)]
+    super::open("ms-settings:display");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let tried = [
+            &["gnome-control-center", "display"][..],
+            &["systemsettings", "kcm_kscreen"],
+            &["kcmshell6", "kcm_kscreen"],
+        ];
+        if !tried
+            .iter()
+            .any(|cmd| std::process::Command::new(cmd[0]).args(&cmd[1..]).spawn().is_ok())
+        {
+            tracing::warn!("no display settings found to open");
+        }
+    }
 }
 
 /// The size of a computer from its screens, in thousands of points (`None` while not known).

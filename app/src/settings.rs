@@ -82,9 +82,8 @@ pub struct Settings {
     pub edges: EdgeSetting,
     /// No switching at left and right edges this close to a corner (points).
     pub corner: u32,
-    /// Diagonal in inches of the screens here that report a size that cannot be right (`None`:
-    /// the size of a screen with the same points on another computer, else the points).
-    pub screen_diagonal: Option<f32>,
+    /// Diagonals typed in for screens of this computer, by the size they report.
+    pub screen_diagonals: Vec<tc_session::screen_size::Typed>,
 }
 
 impl Default for Settings {
@@ -108,7 +107,7 @@ impl Default for Settings {
             screen_stays_on: false,
             edges: EdgeSetting::AtOnce,
             corner: 16,
-            screen_diagonal: None,
+            screen_diagonals: Vec::new(),
         }
     }
 }
@@ -161,8 +160,7 @@ impl Settings {
                 _ => field(&fields, "edges", d.edges),
             },
             corner: field(&fields, "corner", d.corner).min(200),
-            screen_diagonal: field(&fields, "screen_diagonal", d.screen_diagonal)
-                .filter(|inches: &f32| (5.0..=150.0).contains(inches)),
+            screen_diagonals: field(&fields, "screen_diagonals", d.screen_diagonals),
         }
     }
 
@@ -251,9 +249,10 @@ mod tests {
     }
 
     #[test]
-    fn only_a_believable_diagonal_is_kept() {
-        assert_eq!(Settings::parse(r#"{"screen_diagonal":28}"#).screen_diagonal, Some(28.0));
-        assert_eq!(Settings::parse(r#"{"screen_diagonal":1000}"#).screen_diagonal, None);
+    fn diagonals_typed_in_are_kept() {
+        let s = Settings::parse(r#"{"screen_diagonals":[{"reported":[1393,784],"inches":28.0}]}"#);
+        assert_eq!(s.screen_diagonals.len(), 1);
+        assert!(s.screen_diagonals[0].fits((1383, 778)));
     }
 
     #[test]
@@ -262,7 +261,10 @@ mod tests {
         let s = Settings {
             name: "Office".into(),
             setup_done: true,
-            screen_diagonal: Some(27.5),
+            screen_diagonals: vec![tc_session::screen_size::Typed {
+                reported: (600, 340),
+                inches: 27.5,
+            }],
             ..Settings::default()
         };
         s.save(&dir);

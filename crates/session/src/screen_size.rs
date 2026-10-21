@@ -2,6 +2,7 @@
 //! on the desk. Each screen counts in its own size, so a laptop next to an external display shows
 //! both as they are, whatever their display setting.
 
+use serde::{Deserialize, Serialize};
 use tc_protocol::Screen;
 
 /// Points per millimeter a screen of known physical size counts on the desk: about what macOS
@@ -86,8 +87,8 @@ pub fn footprint(screens: &[Screen], mm: &[(u32, u32)]) -> Vec<Rect> {
                 let (ri, pi) = (logical[i]?, placed[i]?);
                 let f = factors[i];
                 let (w, h) = size(j);
-                let along_y = |rj: Rect| pi[1] + (rj[1] - ri[1]) * f;
-                let along_x = |rj: Rect| pi[0] + (rj[0] - ri[0]) * f;
+                let along_y = |rj: Rect| pi[1] + along(rj[1] - ri[1], (ri[3], rj[3]), (pi[3], h), f);
+                let along_x = |rj: Rect| pi[0] + along(rj[0] - ri[0], (ri[2], rj[2]), (pi[2], w), f);
                 let overlaps_y = rj[1] < ri[1] + ri[3] && ri[1] < rj[1] + rj[3];
                 let overlaps_x = rj[0] < ri[0] + ri[2] && ri[0] < rj[0] + rj[2];
                 if overlaps_y && (rj[0] - (ri[0] + ri[2])).abs() < TOUCH {
@@ -129,6 +130,20 @@ pub fn footprint(screens: &[Screen], mm: &[(u32, u32)]) -> Vec<Rect> {
         .collect()
 }
 
+/// Where a screen starts along the edge of its neighbor, from where it starts in points: lying
+/// within the neighbor's length (or the neighbor within its own), the share of the room to move
+/// is kept, so flush at the top or bottom stays flush; else the points count in the neighbor's
+/// size (`factor`).
+fn along(offset: f32, (len, len_next): (f32, f32), (size, size_next): (f32, f32), factor: f32) -> f32 {
+    let room = len - len_next;
+    let share = offset / room;
+    if room.abs() >= 1.0 && (-1e-3..=1.0 + 1e-3).contains(&share) {
+        share * (size - size_next)
+    } else {
+        offset * factor
+    }
+}
+
 /// Width and height of all screens together on the desk, in thousands of points (`None` without screens).
 pub fn desk_size(screens: &[Screen], mm: &[(u32, u32)]) -> Option<(f32, f32)> {
     let rects = footprint(screens, mm);
@@ -137,13 +152,35 @@ pub fn desk_size(screens: &[Screen], mm: &[(u32, u32)]) -> Option<(f32, f32)> {
     (!rects.is_empty()).then_some((w / 1000.0, h / 1000.0))
 }
 
-/// The sizes this computer tells the others: what a screen reports where that is plausible;
-/// otherwise the diagonal typed in (inches); otherwise the size of a screen with the same points
-/// elsewhere on the desk (often the same model); otherwise what it reports.
+/// A diagonal typed in for the screens that report about this size (one model reports its own
+/// size whatever its display setting, give or take a few percent).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Typed {
+    /// What the screen reports, in millimeters.
+    pub reported: (u32, u32),
+    pub inches: f32,
+}
+
+impl Typed {
+    /// Whether this is meant for a screen reporting `mm`.
+    pub fn fits(&self, mm: (u32, u32)) -> bool {
+        let near = |a: u32, b: u32| (a as f32 - b as f32).abs() <= 0.03 * b.max(1) as f32;
+        near(mm.0, self.reported.0) && near(mm.1, self.reported.1)
+    }
+}
+
+/// The diagonal in inches of a size in millimeters.
+pub fn inches((mm_w, mm_h): (u32, u32)) -> f32 {
+    (mm_w as f32).hypot(mm_h as f32) / 25.4
+}
+
+/// The sizes this computer tells the others: the diagonal typed in for a screen; else what it
+/// reports where that is plausible; else the size of a screen with the same points elsewhere on
+/// the desk (often the same model); else what it reports.
 pub fn effective(
     screens: &[Screen],
     reported: &[(u32, u32)],
-    diagonal: Option<f32>,
+    typed: &[Typed],
     others: &[(Screen, (u32, u32))],
 ) -> Vec<(u32, u32)> {
     if reported.len() != screens.len() {
@@ -153,13 +190,13 @@ pub fn effective(
         .iter()
         .zip(reported)
         .map(|(s, &mm)| {
+            let Some((w, h)) = points(s) else { return mm };
+            if let Some(t) = typed.iter().find(|t| t.fits(mm) && (5.0..=150.0).contains(&t.inches)) {
+                let per_point = t.inches * 25.4 / w.hypot(h);
+                return ((w * per_point).round() as u32, (h * per_point).round() as u32);
+            }
             if plausible(s, mm) {
                 return mm;
-            }
-            let Some((w, h)) = points(s) else { return mm };
-            if let Some(inches) = diagonal.filter(|d| (5.0..=150.0).contains(d)) {
-                let per_point = inches * 25.4 / w.hypot(h);
-                return ((w * per_point).round() as u32, (h * per_point).round() as u32);
             }
             others
                 .iter()
@@ -237,6 +274,27 @@ mod tests {
     }
 
     #[test]
+    fn a_laptop_flush_with_the_bottom_of_a_display_stays_flush() {
+        // As arranged in the display settings: the laptop to the right, bottoms in line
+        let screens = [screen(0, 0, 2560, 1440, 1.0), screen(2560, 323, 1728, 1117, 1.0)];
+        let rects = footprint(&screens, &[(619, 340), (344, 223)]);
+        let bottom = |r: Rect| r[1] + r[3];
+        assert!((bottom(rects[0]) - bottom(rects[1])).abs() < 0.01, "{rects:?}");
+        // Flush at the top stays so as well, halfway stays halfway
+        let rects = footprint(
+            &[screens[0], screen(2560, 0, 1728, 1117, 1.0)],
+            &[(619, 340), (344, 223)],
+        );
+        assert!((rects[0][1] - rects[1][1]).abs() < 0.01, "{rects:?}");
+        let rects = footprint(
+            &[screens[0], screen(2560, 161, 1728, 1117, 1.0)],
+            &[(619, 340), (344, 223)],
+        );
+        let middle = |r: Rect| r[1] + r[3] / 2.0;
+        assert!((middle(rects[0]) - middle(rects[1])).abs() < 1.0, "{rects:?}");
+    }
+
+    #[test]
     fn a_display_left_of_the_main_one_ends_where_the_main_one_starts() {
         let screens = [screen(0, 0, 2560, 1440, 1.0), screen(-2560, 0, 2560, 1440, 1.0)];
         let rects = footprint(&screens, &[(619, 340), (619, 340)]);
@@ -252,16 +310,34 @@ mod tests {
         let on_the_other_desk = [(screen(1728, 0, 1920, 1080, 1.0), (621, 341))];
         // The same display elsewhere tells the size
         assert_eq!(
-            effective(&[lenovo], &[(1393, 784)], None, &on_the_other_desk),
+            effective(&[lenovo], &[(1393, 784)], &[], &on_the_other_desk),
             [(621, 341)]
         );
-        // A diagonal typed in goes first: 28 inches at 16:9
-        let typed = effective(&[lenovo], &[(1393, 784)], Some(28.0), &on_the_other_desk);
-        assert_eq!(typed, [(620, 349)]);
+        // A diagonal typed in goes first: 28 inches at 16:9, also when the display setting
+        // changed what the screen reports a little
+        let typed = [Typed {
+            reported: (1383, 778),
+            inches: 28.0,
+        }];
+        assert_eq!(
+            effective(&[lenovo], &[(1393, 784)], &typed, &on_the_other_desk),
+            [(620, 349)]
+        );
         // Nothing to go by: as reported (counts in points)
-        assert_eq!(effective(&[lenovo], &[(1393, 784)], None, &[]), [(1393, 784)]);
-        // A plausible size stays, whatever else is known
-        assert_eq!(effective(&[lenovo], &[(621, 341)], Some(40.0), &[]), [(621, 341)]);
+        assert_eq!(effective(&[lenovo], &[(1393, 784)], &[], &[]), [(1393, 784)]);
+        // A diagonal typed in corrects a plausible size as well, but only for that screen
+        let laptop = screen(1920, 0, 1728, 1117, 1.0);
+        let corrected = effective(
+            &[lenovo, laptop],
+            &[(621, 341), (344, 223)],
+            &[Typed {
+                reported: (620, 340),
+                inches: 32.0,
+            }],
+            &[],
+        );
+        assert_eq!(corrected[1], (344, 223));
+        assert!((inches(corrected[0]) - 32.0).abs() < 0.1, "{corrected:?}");
         assert!(any_implausible(&[lenovo], &[(1393, 784)]));
     }
 }

@@ -115,8 +115,8 @@ pub enum Command {
     SaveFiles(PathBuf),
     /// Collect the logs of the connected computers in `logs/peers` (troubleshooting), or stop.
     CollectLogs(bool),
-    /// The diagonal in inches of the screens here that report no plausible size (`None`: find out).
-    ScreenDiagonal(Option<f32>),
+    /// Diagonals typed in for screens here, by what they report (see `screen_size::Typed`).
+    ScreenDiagonals(Vec<screen_size::Typed>),
     Shutdown,
 }
 
@@ -231,6 +231,8 @@ pub struct Status {
     /// unknown, empty where the system does not tell. Sizes that cannot be right are replaced
     /// as far as possible (see `screen_size::effective`).
     pub screen_sizes: Vec<(u32, u32)>,
+    /// What the screens report about their size themselves, in the order of `screens`.
+    pub reported_sizes: Vec<(u32, u32)>,
     /// One of the screens reports a size that cannot be right (its diagonal can be typed in).
     pub size_unsure: bool,
     pub notices: VecDeque<(SystemTime, Notice)>,
@@ -392,9 +394,8 @@ struct Shared {
     measure_at: Mutex<Option<Instant>>,
 }
 
-/// What this computer's screens report about their size in millimeters, and the diagonal typed
-/// in (inches) for those that report nonsense.
-type Reported = (Vec<(u32, u32)>, Option<f32>);
+/// What this computer's screens report about their size in millimeters, and the diagonals typed in.
+type Reported = (Vec<(u32, u32)>, Vec<screen_size::Typed>);
 
 /// Log collection: whether this computer collects, and who collects ours.
 #[derive(Default)]
@@ -639,10 +640,11 @@ impl Shared {
                 .flat_map(|(screens, mm)| screens.into_iter().zip(mm))
                 .collect()
         };
-        let (reported, diagonal) = self.reported_sizes.lock().expect("sizes lock").clone();
+        let (reported, typed) = self.reported_sizes.lock().expect("sizes lock").clone();
         let mut status = self.status.lock().expect("status lock");
-        let sizes = screen_size::effective(&status.screens, &reported, diagonal, &others);
+        let sizes = screen_size::effective(&status.screens, &reported, &typed, &others);
         status.size_unsure = screen_size::any_implausible(&status.screens, &reported);
+        status.reported_sizes = reported.clone();
         let changed = sizes != status.screen_sizes;
         status.screen_sizes = sizes.clone();
         drop(status);
@@ -1002,7 +1004,7 @@ impl Session {
             files: Mutex::new(FileState::default()),
             logs: Mutex::new(LogState::default()),
             peer_sizes: Mutex::new(HashMap::new()),
-            reported_sizes: Mutex::new((screen_sizes, None)),
+            reported_sizes: Mutex::new((screen_sizes, Vec::new())),
             measure_at: Mutex::new(None),
         });
         shared.reload_layout();
@@ -2001,9 +2003,9 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             shared.engine.lock().expect("engine lock").set_edge_rule(rule);
             tracing::info!("top and bottom edges: {rule:?}");
         }
-        Command::ScreenDiagonal(inches) => {
-            tracing::info!("diagonal of screens without a plausible size: {inches:?} inches");
-            shared.reported_sizes.lock().expect("sizes lock").1 = inches;
+        Command::ScreenDiagonals(typed) => {
+            tracing::info!("screen diagonals typed in: {typed:?}");
+            shared.reported_sizes.lock().expect("sizes lock").1 = typed;
             shared.update_sizes(false);
             shared.refresh();
             shared.changed();

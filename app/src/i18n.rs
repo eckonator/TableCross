@@ -104,10 +104,24 @@ fn de(en: &str) -> Option<&'static str> {
         "Takes the screens it has now; each computer also does this by itself when its screens change." => {
             "Übernimmt die Bildschirme, die er gerade hat; das macht jeder Computer auch selbst, wenn sich seine Bildschirme ändern."
         }
-        "A screen of this computer reports a size that cannot be right. Without its diagonal it counts as large as a screen with the same resolution on another computer." => {
-            "Ein Bildschirm dieses Computers meldet eine Größe, die nicht stimmen kann. Ohne seine Diagonale zählt er so groß wie ein Bildschirm mit derselben Auflösung an einem anderen Computer."
+        "A screen of this computer reports a size that cannot be right. Without a diagonal typed in it counts as large as a screen with the same resolution on another computer." => {
+            "Ein Bildschirm dieses Computers meldet eine Größe, die nicht stimmen kann. Ohne eingetragene Diagonale zählt er so groß wie ein Bildschirm mit derselben Auflösung an einem anderen Computer."
         }
-        "Its diagonal:" => "Seine Diagonale:",
+        "Screens of this computer" => "Bildschirme dieses Computers",
+        "This system does not tell the size of its screens." => {
+            "Dieses System verrät die Größe seiner Bildschirme nicht."
+        }
+        "Screen {}: {} × {} points" => "Bildschirm {}: {} × {} Punkte",
+        "diagonal by hand:" => "Diagonale von Hand:",
+        "reports {}" => "meldet {}",
+        "reports no size" => "meldet keine Größe",
+        "reports {}, which cannot be right" => "meldet {}, das kann nicht stimmen",
+        "Done" => "Fertig",
+        "Screen sizes …" => "Bildschirmgrößen …",
+        "Arrange screens …" => "Bildschirme anordnen …",
+        "Opens the display settings of the system: where the screens of this computer lie there is where the pointer moves between them, and the desk shows it a moment later." => {
+            "Öffnet die Anzeige-Einstellungen des Systems: Wie die Bildschirme dieses Computers dort liegen, so wechselt der Zeiger zwischen ihnen, und der Schreibtisch zeigt es kurz darauf."
+        }
         " inches" => " Zoll",
         "No computer is paired yet." => "Noch kein Computer gekoppelt.",
         "Pair new computers and manage the paired ones." => "Neue Computer koppeln und gekoppelte verwalten.",
@@ -143,7 +157,6 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "Dark" => "Dunkel",
         "Diagnostics copied to the clipboard." => "Diagnose in die Zwischenablage kopiert.",
-        "Done" => "Fertig",
         "Done." => "Erledigt.",
         "Drag each computer to the side where it stands on your desk." => {
             "Zieh jeden Computer auf die Seite, auf der er auf deinem Schreibtisch steht."

@@ -74,6 +74,7 @@ pub fn status() -> Status {
         problems: vec![tc_input::Problem::HelperMissing],
         screens: vec![screen(1512, 982, 1.0)],
         screen_sizes: vec![(302, 196)],
+        reported_sizes: vec![(302, 196)],
         size_unsure: false,
         notices: [
             (ago(3600), Notice::Connected("Office-PC".into())),
