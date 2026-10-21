@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use tc_core::{Area, STAND_IN};
 use tc_net::Fingerprint;
+use tc_protocol::Screen;
 use tc_session::{Command, Status, layout_file};
 
 use super::card;
@@ -23,6 +24,9 @@ const MAX_SCALE: f32 = 150.0;
 const NARROW: f32 = 76.0;
 /// Positions closer than this are the same (thousands of points).
 const EPS: f32 = 1e-3;
+/// Points per millimeter a screen of known physical size counts on the desk: about what macOS
+/// shows by default (110 points per inch), so sizes from both sources fit together.
+const POINTS_PER_MM: f32 = 110.0 / 25.4;
 /// How often the bars on the other computers are refreshed while dragging.
 const EDGES_EVERY: Duration = Duration::from_millis(150);
 
@@ -347,11 +351,16 @@ impl App {
     }
 
     /// Computers still shown in a stand-in size get their real one as soon as their screens are
-    /// known; the desk keeps its shape around this computer.
+    /// known, and once more when their physical size becomes known (measured in points before
+    /// 0.4.10); the desk keeps its shape around this computer.
     fn measure(&mut self, ctx: &egui::Context, status: &Status, me: &str, desk: &[Area]) {
+        let physical = |id: &str| {
+            screens_and_sizes(status, me, id)
+                .is_some_and(|(screens, sizes)| physical_factor(&screens, &sizes).is_some())
+        };
         let sizes: Vec<(String, (f32, f32))> = desk
             .iter()
-            .filter(|a| !a.measured)
+            .filter(|a| !a.measured || (!self.settings.physical_sizes.contains(&a.machine) && physical(&a.machine)))
             .filter_map(|a| real_size(status, me, &a.machine).map(|s| (a.machine.clone(), s)))
             .collect();
         if sizes.is_empty() {
@@ -364,7 +373,11 @@ impl App {
             return;
         }
         ctx.data_mut(|d| d.insert_temp(id, status.layout.revision));
-        let size = |a: &Area| sizes.iter().find(|(m, _)| *m == a.machine).map(|(_, s)| *s);
+        // Computers sharing a place use the same screens: they get the size as well
+        let size = |a: &Area| {
+            let of = |m: &str| sizes.iter().find(|(s, _)| s == m).map(|(_, s)| *s);
+            of(&a.machine).or_else(|| desk.iter().filter(|b| same(a, b)).find_map(|b| of(&b.machine)))
+        };
         let resized = tc_core::resized(desk, size, me)
             .into_iter()
             .map(|a| Area {
@@ -374,6 +387,11 @@ impl App {
             .collect();
         tracing::info!("arrangement: real sizes of {} computer(s) taken over", sizes.len());
         self.arrange(resized);
+        let taken: Vec<String> = sizes.into_iter().map(|(m, _)| m).filter(|m| physical(m)).collect();
+        if !taken.is_empty() {
+            self.settings.physical_sizes.extend(taken);
+            self.save_settings();
+        }
     }
 
     /// While a computer is dragged: green bars at the real screen edges here and, through the
@@ -544,9 +562,8 @@ fn draw_computer(ui: &egui::Ui, rect: egui::Rect, view: &MachineView, screens: O
     let painter = ui.painter();
     painter.rect_filled(rect, 8.0, p.card);
     painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-    // A strip at the top for the number, the keyboard and the menu
-    let top = if rect.height() > 70.0 { 22.0 } else { 6.0 };
-    let inner = egui::Rect::from_min_max(rect.min + egui::vec2(6.0, top), rect.max - egui::vec2(6.0, 6.0));
+    // The same margin all around; number, keyboard and menu sit on plates above the screens
+    let inner = rect.shrink(6.0);
     let (frame, fill) = (view.frame(ui), view.screen(ui));
     match screens.and_then(|s| Some((s, s.iter().copied().reduce(|a, b| a.union(b))?))) {
         Some((screens, bounds)) if bounds.width() > 0.0 && bounds.height() > 0.0 => {
@@ -752,6 +769,8 @@ fn badge(ui: &egui::Ui, rect: egui::Rect, number: Option<usize>) {
 fn input_symbol(ui: &egui::Ui, at: egui::Pos2) {
     let p = theme::colors(ui);
     let painter = ui.painter();
+    let plate = egui::Rect::from_min_size(at, egui::vec2(25.5, 9.5)).expand(3.0);
+    painter.rect_filled(plate, 4.0, p.card.gamma_multiply(0.92));
     let keyboard = egui::Rect::from_min_size(at, egui::vec2(16.0, 9.0));
     painter.rect_filled(keyboard, 2.0, p.accent);
     for row in 0..2 {
@@ -777,29 +796,19 @@ fn input_symbol(ui: &egui::Ui, at: egui::Pos2) {
 /// Three dots that open the menu of a computer.
 fn dots(ui: &egui::Ui, rect: egui::Rect, hovered: bool) {
     let p = theme::colors(ui);
-    if hovered {
-        ui.painter().rect_filled(rect, 4.0, p.field);
-    }
+    let plate = if hovered { p.field } else { p.card.gamma_multiply(0.92) };
+    ui.painter().rect_filled(rect, 4.0, plate);
     for i in -1..=1 {
         ui.painter()
             .circle_filled(rect.center() + egui::vec2(i as f32 * 4.5, 0.0), 1.6, p.muted);
     }
 }
 
-/// The screens of this computer or of a connected peer, in logical points.
+/// The screens of this computer or of a connected peer, in logical points, scaled to their
+/// physical size where it is known (so a scaled display setting does not shrink a computer).
 fn screens_of(status: &Status, me: &str, id: &str) -> Option<Vec<egui::Rect>> {
-    let screens = if id == me {
-        status.screens.clone()
-    } else {
-        status
-            .peers
-            .iter()
-            .find(|peer| layout_file::machine_id(&peer.fingerprint) == id)?
-            .link
-            .as_ref()?
-            .screens
-            .clone()
-    };
+    let (screens, sizes) = screens_and_sizes(status, me, id)?;
+    let factor = physical_factor(&screens, &sizes).unwrap_or(1.0);
     let rects: Vec<egui::Rect> = screens
         .iter()
         .filter(|s| s.width > 0 && s.height > 0 && s.scale > 0.0)
@@ -811,12 +820,97 @@ fn screens_of(status: &Status, me: &str, id: &str) -> Option<Vec<egui::Rect>> {
         })
         .collect();
     let bounds = rects.iter().copied().reduce(|a, b| a.union(b))?;
-    Some(rects.iter().map(|r| r.translate(-bounds.min.to_vec2())).collect())
+    Some(
+        rects
+            .iter()
+            .map(|r| {
+                let r = r.translate(-bounds.min.to_vec2());
+                egui::Rect::from_min_size((r.min.to_vec2() * factor).to_pos2(), r.size() * factor)
+            })
+            .collect(),
+    )
+}
+
+/// The screens of this computer or of a connected peer and their physical sizes.
+fn screens_and_sizes(status: &Status, me: &str, id: &str) -> Option<(Vec<Screen>, Vec<(u32, u32)>)> {
+    if id == me {
+        return Some((status.screens.clone(), status.screen_sizes.clone()));
+    }
+    let peer = status
+        .peers
+        .iter()
+        .find(|peer| layout_file::machine_id(&peer.fingerprint) == id)?;
+    Some((peer.link.as_ref()?.screens.clone(), peer.screen_sizes.clone()))
+}
+
+/// How much larger a computer is than its logical points say: physical size against points,
+/// weighted by screen area. `None` without plausible sizes (virtual machines, some displays).
+fn physical_factor(screens: &[Screen], sizes: &[(u32, u32)]) -> Option<f32> {
+    if sizes.len() != screens.len() {
+        return None;
+    }
+    let (mut sum, mut weight) = (0.0f32, 0.0f32);
+    for (s, &(mm_w, mm_h)) in screens.iter().zip(sizes) {
+        if mm_w == 0 || mm_h == 0 || s.width == 0 || s.height == 0 || s.scale <= 0.0 {
+            continue;
+        }
+        let (w, h) = (s.width as f32 / s.scale, s.height as f32 / s.scale);
+        // Displays report their size unrotated
+        let (mm_w, mm_h) = if (w > h) == (mm_w >= mm_h) {
+            (mm_w as f32, mm_h as f32)
+        } else {
+            (mm_h as f32, mm_w as f32)
+        };
+        let shape = (w / h) / (mm_w / mm_h);
+        let per_inch = w / (mm_w / 25.4);
+        if !(0.85..=1.15).contains(&shape) || !(40.0..=350.0).contains(&per_inch) {
+            continue;
+        }
+        sum += mm_w * POINTS_PER_MM / w * w * h;
+        weight += w * h;
+    }
+    (weight > 0.0).then(|| sum / weight)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Area, shared_edge, snap};
+    use super::{Area, physical_factor, shared_edge, snap};
+    use tc_protocol::Screen;
+
+    fn screen(width: u32, height: u32, scale: f32) -> Screen {
+        Screen {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            scale,
+        }
+    }
+
+    #[test]
+    fn scaled_displays_count_in_their_physical_size() {
+        // A 27-inch display looking like 2560 × 1440 by default and like 2048 × 1152 when scaled:
+        // both come out the same size on the desk
+        let default = physical_factor(&[screen(2560, 1440, 1.0)], &[(597, 336)]).expect("plausible");
+        let scaled = physical_factor(&[screen(2048, 1152, 1.0)], &[(597, 336)]).expect("plausible");
+        assert!((default - 1.0).abs() < 0.02, "{default}");
+        assert!((2560.0 * default - 2048.0 * scaled).abs() < 1.0);
+        // Windows at 150 %: logical points count
+        let windows = physical_factor(&[screen(3840, 2160, 1.5)], &[(597, 336)]).expect("plausible");
+        assert!((2560.0 * default - 2560.0 * windows).abs() < 1.0);
+        // A display turned upright reports its size lying
+        assert!(physical_factor(&[screen(1440, 2560, 1.0)], &[(597, 336)]).is_some());
+    }
+
+    #[test]
+    fn implausible_sizes_are_ignored() {
+        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(0, 0)]), None);
+        // Virtual machines: made-up sizes that do not fit the shape or the density
+        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(100, 100)]), None);
+        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(2000, 1125)]), None);
+        // Lists out of step
+        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[]), None);
+    }
 
     fn area(m: &str, x: f32, y: f32, w: f32, h: f32) -> Area {
         Area {

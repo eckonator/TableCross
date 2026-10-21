@@ -1,7 +1,7 @@
 //! The running session: network node, engine and input backend, driven by one loop. The app and
 //! the command line tool send [`Command`]s and read a [`Status`] snapshot plus [`Notice`]s.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -189,6 +189,8 @@ pub struct PeerView {
     pub refusal: Option<Refusal>,
     pub side: Option<Side>,
     pub swap_cmd_ctrl: bool,
+    /// Physical size of its screens in millimeters (see `Status::screen_sizes`).
+    pub screen_sizes: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -215,6 +217,9 @@ pub struct Status {
     pub input: InputState,
     pub problems: Vec<Problem>,
     pub screens: Vec<Screen>,
+    /// Physical size of each screen in millimeters, in the order of `screens`; `(0, 0)` where
+    /// unknown, empty where the system does not tell.
+    pub screen_sizes: Vec<(u32, u32)>,
     pub notices: VecDeque<(SystemTime, Notice)>,
     pub layout: LayoutFile,
     /// File transfers, newest last.
@@ -292,6 +297,8 @@ struct Shared {
     clip: Mutex<ClipSync>,
     files: Mutex<FileState>,
     logs: Mutex<LogState>,
+    /// What the peers told about the physical size of their screens.
+    peer_sizes: Mutex<HashMap<Fingerprint, Vec<(u32, u32)>>>,
 }
 
 /// Log collection: whether this computer collects, and who collects ours.
@@ -492,6 +499,28 @@ impl Shared {
         }
     }
 
+    /// Tells the physical size of this computer's screens to `to`, or to every connected peer,
+    /// where the peer understands it.
+    fn send_sizes(&self, to: Option<&Fingerprint>) {
+        let mm = self.status.lock().expect("status lock").screen_sizes.clone();
+        if mm.is_empty() {
+            return;
+        }
+        for peer in self.node.status() {
+            if to.is_some_and(|to| *to != peer.peer.fingerprint) {
+                continue;
+            }
+            if peer
+                .link
+                .as_ref()
+                .is_some_and(|link| layout_file::knows_sizes(&link.app_version))
+            {
+                self.node
+                    .send(&peer.peer.fingerprint, Message::ScreenSizes { mm: mm.clone() });
+            }
+        }
+    }
+
     /// Keeps the pointer on the computer it is on, or lets it go again (`None`: the other way round).
     fn toggle_pin(&self, pin: Option<bool>) {
         let mut engine = self.engine.lock().expect("engine lock");
@@ -510,6 +539,7 @@ impl Shared {
     fn refresh(&self) {
         let file = self.status.lock().expect("status lock").layout.clone();
         let me = self.node.fingerprint();
+        let sizes = self.peer_sizes.lock().expect("sizes lock").clone();
         let peers: Vec<PeerView> = self
             .node
             .status()
@@ -517,6 +547,7 @@ impl Shared {
             .map(|s| PeerView {
                 side: layout_file::side_of(&file, &me, self.node.name(), &s.peer.fingerprint, &s.peer.name),
                 swap_cmd_ctrl: layout_file::swaps(&file, &s.peer.fingerprint, &s.peer.name),
+                screen_sizes: sizes.get(&s.peer.fingerprint).cloned().unwrap_or_default(),
                 fingerprint: s.peer.fingerprint,
                 name: s.peer.name,
                 link: s.link,
@@ -722,6 +753,8 @@ impl Session {
         on_change: Option<OnChange>,
     ) -> Result<(SessionHandle, JoinHandle<()>)> {
         let screens = backend.as_ref().map(|b| b.inject.screens()).unwrap_or_default();
+        let screen_sizes = backend.as_ref().map(|b| b.inject.sizes()).unwrap_or_default();
+        tracing::info!("screens of this computer: {screens:?}, physical sizes (mm): {screen_sizes:?}");
         let (inject, capture) = match backend {
             Some(b) => (Some(b.inject), Some(b.capture)),
             None => (None, None),
@@ -731,6 +764,7 @@ impl Session {
             fingerprint: Some(node.fingerprint()),
             port: node.local_addr().port(),
             screens: screens.clone(),
+            screen_sizes,
             ..Status::default()
         }));
         let (commands_tx, commands) = mpsc::unbounded_channel();
@@ -754,6 +788,7 @@ impl Session {
             clip: Mutex::new(ClipSync::default()),
             files: Mutex::new(FileState::default()),
             logs: Mutex::new(LogState::default()),
+            peer_sizes: Mutex::new(HashMap::new()),
         });
         shared.reload_layout();
         shared.refresh();
@@ -921,9 +956,12 @@ async fn run(
                     let mut status = shared.status.lock().expect("status lock");
                     if !now.is_empty() && now != status.screens {
                         status.screens = now.clone();
+                        status.screen_sizes = inject.sizes();
+                        tracing::info!("physical screen sizes (mm): {:?}", status.screen_sizes);
                         drop(status);
                         shared.engine.lock().expect("engine lock").set_local_screens(&now);
                         shared.screens_changed(now);
+                        shared.send_sizes(None);
                     }
                 }
             }
@@ -1291,6 +1329,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .peer_online(&peer.to_string(), &screens);
             shared.reload_layout();
             shared.share_layout_with(&peer);
+            shared.send_sizes(Some(&peer));
             if shared.logs.lock().expect("logs lock").collect {
                 shared.node.send(&peer, Message::LogSubscribe { on: true });
             }
@@ -1385,6 +1424,15 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             peer,
             message: message @ (Message::Layout { .. } | Message::Tiles { .. } | Message::Desk { .. }),
         } => shared.layout_received(peer, message),
+        Event::Message {
+            peer,
+            message: Message::ScreenSizes { mm },
+        } => {
+            tracing::info!("screen sizes of {} (mm): {mm:?}", shared.name_of(&peer.to_string()));
+            shared.peer_sizes.lock().expect("sizes lock").insert(peer, mm);
+            shared.refresh();
+            shared.changed();
+        }
         Event::Message {
             peer,
             message: Message::Screens { screens },

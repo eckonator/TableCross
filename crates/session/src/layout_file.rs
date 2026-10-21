@@ -50,6 +50,9 @@ pub fn load(dir: &Path) -> Result<LayoutFile> {
 /// First version that knows `Message::Screens`.
 const SCREENS_SINCE: (u32, u32, u32) = (0, 4, 7);
 
+/// First version that knows `Message::ScreenSizes`.
+const SIZES_SINCE: (u32, u32, u32) = (0, 4, 10);
+
 fn version(app_version: &str) -> (u32, u32, u32) {
     let mut parts = app_version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
     (
@@ -67,6 +70,11 @@ pub fn knows_desk(app_version: &str) -> bool {
 /// Whether a peer running `app_version` understands `Message::Screens`.
 pub fn knows_screens(app_version: &str) -> bool {
     version(app_version) >= SCREENS_SINCE
+}
+
+/// Whether a peer running `app_version` understands `Message::ScreenSizes`.
+pub fn knows_sizes(app_version: &str) -> bool {
+    version(app_version) >= SIZES_SINCE
 }
 
 pub fn save(dir: &Path, file: &LayoutFile) -> Result<()> {
@@ -440,6 +448,7 @@ mod tests {
         assert!(!knows_desk("0.3.10"));
         assert!(!knows_desk(""));
         assert!(knows_screens("0.4.7") && !knows_screens("0.4.6"));
+        assert!(knows_sizes("0.4.10") && !knows_sizes("0.4.9"));
     }
 
     #[test]

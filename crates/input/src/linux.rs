@@ -520,6 +520,20 @@ impl Inject for X11Inject {
             })
             .collect()
     }
+
+    fn sizes(&self) -> Vec<(u32, u32)> {
+        let state = self.shared.inject.lock().expect("inject lock");
+        state
+            .conn
+            .randr_get_monitors(state.root, true)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|r| r.monitors)
+            .unwrap_or_default()
+            .iter()
+            .map(|m| (m.width_in_millimeters, m.height_in_millimeters))
+            .collect()
+    }
 }
 
 #[cfg(test)]

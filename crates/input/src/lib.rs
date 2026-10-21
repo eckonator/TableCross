@@ -130,6 +130,11 @@ pub trait Inject: Send + Sync {
     /// Releases everything injected so far (safety net when shutting down).
     fn release_all(&self);
     fn screens(&self) -> Vec<Screen>;
+    /// Physical size of each screen in millimeters, in the order of `screens`; `(0, 0)` where the
+    /// display does not tell. Empty: not known on this system.
+    fn sizes(&self) -> Vec<(u32, u32)> {
+        Vec::new()
+    }
 }
 
 /// Capture and injection of one system.

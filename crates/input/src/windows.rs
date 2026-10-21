@@ -12,7 +12,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use tc_core::{Captured, Point};
 use tc_protocol::{Message, MouseButton, Screen};
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
+use windows_sys::Win32::Graphics::Gdi::{
+    CreateDCW, DeleteDC, EnumDisplayMonitors, GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZSIZE, MONITORINFO,
+    MONITORINFOEXW, VERTSIZE,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::HiDpi::{
@@ -581,5 +584,44 @@ impl Inject for WinInject {
             );
         }
         screens
+    }
+
+    fn sizes(&self) -> Vec<(u32, u32)> {
+        unsafe extern "system" fn collect(monitor: HMONITOR, _dc: HDC, _rect: *mut RECT, data: LPARAM) -> i32 {
+            unsafe {
+                let sizes = &mut *(data as *mut Vec<(u32, u32)>);
+                let mut info: MONITORINFOEXW = std::mem::zeroed();
+                info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+                // Skipped like in `screens`, so both lists stay in step
+                if GetMonitorInfoW(monitor, &mut info as *mut MONITORINFOEXW as *mut MONITORINFO) == 0 {
+                    return 1;
+                }
+                // The device context of the monitor tells its size from the display's own data
+                let dc = CreateDCW(
+                    info.szDevice.as_ptr(),
+                    info.szDevice.as_ptr(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                );
+                if dc.is_null() {
+                    sizes.push((0, 0));
+                    return 1;
+                }
+                let (w, h) = (GetDeviceCaps(dc, HORZSIZE as i32), GetDeviceCaps(dc, VERTSIZE as i32));
+                DeleteDC(dc);
+                sizes.push((w.max(0) as u32, h.max(0) as u32));
+                1
+            }
+        }
+        let mut sizes: Vec<(u32, u32)> = Vec::new();
+        unsafe {
+            EnumDisplayMonitors(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                Some(collect),
+                &mut sizes as *mut Vec<(u32, u32)> as LPARAM,
+            );
+        }
+        sizes
     }
 }

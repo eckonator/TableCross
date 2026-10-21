@@ -48,6 +48,7 @@ pub fn status() -> Status {
                 refusal: None,
                 side: Some(Side::Right),
                 swap_cmd_ctrl: true,
+                screen_sizes: vec![(597, 336)],
             },
             PeerView {
                 fingerprint: Fingerprint([0x22; 32]),
@@ -57,6 +58,7 @@ pub fn status() -> Status {
                 refusal: None,
                 side: None,
                 swap_cmd_ctrl: false,
+                screen_sizes: Vec::new(),
             },
         ],
         discovered: vec![Discovered {
@@ -71,6 +73,7 @@ pub fn status() -> Status {
         input: InputState::Running,
         problems: vec![tc_input::Problem::HelperMissing],
         screens: vec![screen(1512, 982, 1.0)],
+        screen_sizes: vec![(302, 196)],
         notices: [
             (ago(3600), Notice::Connected("Office-PC".into())),
             (

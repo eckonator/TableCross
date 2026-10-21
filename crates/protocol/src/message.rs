@@ -266,6 +266,12 @@ pub enum Message {
     Screens {
         screens: Vec<Screen>,
     },
+    /// Physical size of the sender's screens in millimeters, in the order of its screens; `(0, 0)`
+    /// where unknown. Sent with every change of the screens, from 0.4.10 on only to peers that
+    /// announced it.
+    ScreenSizes {
+        mm: Vec<(u32, u32)>,
+    },
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -316,6 +322,7 @@ impl Message {
             Message::Desk { areas, names, .. } => areas.len() <= MAX_PLACEMENTS && names.len() <= MAX_PLACEMENTS,
             Message::ShowEdges { marks } => marks.len() <= MAX_PLACEMENTS,
             Message::Screens { screens } => screens.len() <= MAX_PLACEMENTS,
+            Message::ScreenSizes { mm } => mm.len() <= MAX_PLACEMENTS,
             Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
             _ => true,
         }
@@ -489,6 +496,9 @@ mod tests {
                     height: 1440,
                     scale: 1.0,
                 }],
+            },
+            Message::ScreenSizes {
+                mm: vec![(1196, 336), (0, 0)],
             },
         ]
     }

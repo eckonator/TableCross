@@ -80,6 +80,8 @@ pub struct Settings {
     pub edges: EdgeSetting,
     /// No switching at left and right edges this close to a corner (points).
     pub corner: u32,
+    /// Computers (machine ids) whose area on the desk got their physical size once.
+    pub physical_sizes: Vec<String>,
 }
 
 impl Default for Settings {
@@ -102,6 +104,7 @@ impl Default for Settings {
             screen_stays_on: false,
             edges: EdgeSetting::AtOnce,
             corner: 16,
+            physical_sizes: Vec::new(),
         }
     }
 }
@@ -153,6 +156,7 @@ impl Settings {
                 _ => field(&fields, "edges", d.edges),
             },
             corner: field(&fields, "corner", d.corner).min(200),
+            physical_sizes: field(&fields, "physical_sizes", d.physical_sizes),
         }
     }
 

@@ -91,6 +91,7 @@ unsafe extern "C" {
     fn CGCursorIsVisible() -> bool;
     fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(display: u32) -> CGRect;
+    fn CGDisplayScreenSize(display: u32) -> CGSize;
     fn AXIsProcessTrusted() -> bool;
     fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> bool;
     static kAXTrustedCheckOptionPrompt: CFStringRef;
@@ -897,12 +898,7 @@ impl Inject for MacInject {
     }
 
     fn screens(&self) -> Vec<Screen> {
-        let mut ids = [0u32; 16];
-        let mut count = 0u32;
-        if unsafe { CGGetActiveDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) } != 0 {
-            return Vec::new();
-        }
-        ids[..count as usize]
+        displays()
             .iter()
             .map(|id| {
                 let b = unsafe { CGDisplayBounds(*id) };
@@ -916,6 +912,26 @@ impl Inject for MacInject {
             })
             .collect()
     }
+
+    fn sizes(&self) -> Vec<(u32, u32)> {
+        displays()
+            .iter()
+            .map(|id| {
+                let s = unsafe { CGDisplayScreenSize(*id) };
+                (s.width.max(0.0).round() as u32, s.height.max(0.0).round() as u32)
+            })
+            .collect()
+    }
+}
+
+/// The active displays, in the order of `CGGetActiveDisplayList`.
+fn displays() -> Vec<u32> {
+    let mut ids = [0u32; 16];
+    let mut count = 0u32;
+    if unsafe { CGGetActiveDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) } != 0 {
+        return Vec::new();
+    }
+    ids[..count as usize].to_vec()
 }
 
 /// Media keys: system events of subtype 8 ("aux control buttons"); `data1` holds the key type in
