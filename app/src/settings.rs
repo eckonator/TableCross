@@ -82,10 +82,9 @@ pub struct Settings {
     pub edges: EdgeSetting,
     /// No switching at left and right edges this close to a corner (points).
     pub corner: u32,
-    /// Computers (machine ids) whose area on the desk got their physical size once. Stored under
-    /// a new key since 0.4.20: the sizes taken over before trusted displays with made-up sizes.
-    #[serde(rename = "physical_sizes_2")]
-    pub physical_sizes: Vec<String>,
+    /// Diagonal in inches of the screens here that report a size that cannot be right (`None`:
+    /// the size of a screen with the same points on another computer, else the points).
+    pub screen_diagonal: Option<f32>,
 }
 
 impl Default for Settings {
@@ -109,7 +108,7 @@ impl Default for Settings {
             screen_stays_on: false,
             edges: EdgeSetting::AtOnce,
             corner: 16,
-            physical_sizes: Vec::new(),
+            screen_diagonal: None,
         }
     }
 }
@@ -162,7 +161,8 @@ impl Settings {
                 _ => field(&fields, "edges", d.edges),
             },
             corner: field(&fields, "corner", d.corner).min(200),
-            physical_sizes: field(&fields, "physical_sizes_2", d.physical_sizes),
+            screen_diagonal: field(&fields, "screen_diagonal", d.screen_diagonal)
+                .filter(|inches: &f32| (5.0..=150.0).contains(inches)),
         }
     }
 
@@ -251,9 +251,9 @@ mod tests {
     }
 
     #[test]
-    fn physical_sizes_before_0_4_20_are_taken_over_once_more() {
-        assert!(Settings::parse(r#"{"physical_sizes":["a"]}"#).physical_sizes.is_empty());
-        assert_eq!(Settings::parse(r#"{"physical_sizes_2":["a"]}"#).physical_sizes, ["a"]);
+    fn only_a_believable_diagonal_is_kept() {
+        assert_eq!(Settings::parse(r#"{"screen_diagonal":28}"#).screen_diagonal, Some(28.0));
+        assert_eq!(Settings::parse(r#"{"screen_diagonal":1000}"#).screen_diagonal, None);
     }
 
     #[test]
@@ -262,7 +262,7 @@ mod tests {
         let s = Settings {
             name: "Office".into(),
             setup_done: true,
-            physical_sizes: vec!["a".into()],
+            screen_diagonal: Some(27.5),
             ..Settings::default()
         };
         s.save(&dir);

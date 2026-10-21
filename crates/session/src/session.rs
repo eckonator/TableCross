@@ -23,6 +23,7 @@ use crate::clip::{self, ClipAction, ClipSync, Clipboard, Skip};
 use crate::files::{self, Listing};
 use crate::layout_file;
 use crate::peer_logs;
+use crate::screen_size;
 use crate::transfer::{self, Cancels, Progress, TransferState, TransferView};
 
 const ESCAPE: u16 = 0x29;
@@ -40,6 +41,9 @@ const ARROWS: [(u16, Side); 4] = [
 const PREFIX: [(u16, u16); 3] = [(0xE0, 0xE4), (0xE1, 0xE5), (0xE2, 0xE6)];
 const MAX_NOTICES: usize = 200;
 const STATUS_EVERY: Duration = Duration::from_millis(500);
+/// This computer's area on the desk is measured anew this long after its screens or their sizes
+/// changed (the system rearranges the displays for a moment).
+const MEASURE_AFTER: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -111,6 +115,8 @@ pub enum Command {
     SaveFiles(PathBuf),
     /// Collect the logs of the connected computers in `logs/peers` (troubleshooting), or stop.
     CollectLogs(bool),
+    /// The diagonal in inches of the screens here that report no plausible size (`None`: find out).
+    ScreenDiagonal(Option<f32>),
     Shutdown,
 }
 
@@ -222,8 +228,11 @@ pub struct Status {
     pub problems: Vec<Problem>,
     pub screens: Vec<Screen>,
     /// Physical size of each screen in millimeters, in the order of `screens`; `(0, 0)` where
-    /// unknown, empty where the system does not tell.
+    /// unknown, empty where the system does not tell. Sizes that cannot be right are replaced
+    /// as far as possible (see `screen_size::effective`).
     pub screen_sizes: Vec<(u32, u32)>,
+    /// One of the screens reports a size that cannot be right (its diagonal can be typed in).
+    pub size_unsure: bool,
     pub notices: VecDeque<(SystemTime, Notice)>,
     pub layout: LayoutFile,
     /// File transfers, newest last.
@@ -378,7 +387,14 @@ struct Shared {
     logs: Mutex<LogState>,
     /// What the peers told about the physical size of their screens.
     peer_sizes: Mutex<HashMap<Fingerprint, Vec<(u32, u32)>>>,
+    reported_sizes: Mutex<Reported>,
+    /// When this computer's area is to be measured anew.
+    measure_at: Mutex<Option<Instant>>,
 }
+
+/// What this computer's screens report about their size in millimeters, and the diagonal typed
+/// in (inches) for those that report nonsense.
+type Reported = (Vec<(u32, u32)>, Option<f32>);
 
 /// Log collection: whether this computer collects, and who collects ours.
 #[derive(Default)]
@@ -608,6 +624,83 @@ impl Shared {
                     .send(&peer.peer.fingerprint, Message::ScreenSizes { mm: mm.clone() });
             }
         }
+    }
+
+    /// Works out the sizes this computer tells about its screens (see `screen_size::effective`):
+    /// when they change, the peers hear of it, and when they or the screens change, this
+    /// computer's area on the desk is measured anew a moment later.
+    fn update_sizes(&self, screens_changed: bool) {
+        let others: Vec<(Screen, (u32, u32))> = {
+            let sizes = self.peer_sizes.lock().expect("sizes lock");
+            self.node
+                .status()
+                .into_iter()
+                .filter_map(|p| Some((p.link?.screens, sizes.get(&p.peer.fingerprint)?.clone())))
+                .flat_map(|(screens, mm)| screens.into_iter().zip(mm))
+                .collect()
+        };
+        let (reported, diagonal) = self.reported_sizes.lock().expect("sizes lock").clone();
+        let mut status = self.status.lock().expect("status lock");
+        let sizes = screen_size::effective(&status.screens, &reported, diagonal, &others);
+        status.size_unsure = screen_size::any_implausible(&status.screens, &reported);
+        let changed = sizes != status.screen_sizes;
+        status.screen_sizes = sizes.clone();
+        drop(status);
+        if changed {
+            tracing::info!("screen sizes told to the others (mm): {sizes:?}, reported: {reported:?}");
+            self.send_sizes(None);
+        }
+        if changed || screens_changed {
+            *self.measure_at.lock().expect("measure lock") = Some(Instant::now() + MEASURE_AFTER);
+        }
+    }
+
+    /// Gives this computer's area on the desk the size of its screens now, and computers used in
+    /// turn at the same place along with it; the others move along so the desk keeps its shape.
+    /// Only each computer measures itself, so two of them never take turns at changing a size.
+    fn measure_me(&self) {
+        let (screens, mm) = {
+            let status = self.status.lock().expect("status lock");
+            (status.screens.clone(), status.screen_sizes.clone())
+        };
+        let Some(size) = screen_size::desk_size(&screens, &mm) else {
+            return;
+        };
+        let file = match layout_file::load(&self.dir) {
+            Ok(file) => file,
+            Err(e) => return tracing::warn!("layout: {e}"),
+        };
+        let me = layout_file::machine_id(&self.node.fingerprint());
+        let resolve = self.resolver();
+        let desk = layout_file::desk(&file, |entry| {
+            resolve(entry).map_or_else(|| entry.to_string(), |fp| layout_file::machine_id(&fp))
+        });
+        let Some(mine) = desk.iter().find(|a| a.machine == me).cloned() else {
+            return;
+        };
+        if (mine.w - size.0).abs() < 0.005 && (mine.h - size.1).abs() < 0.005 {
+            return;
+        }
+        let here: Vec<String> = desk
+            .iter()
+            .filter(|a| (a.x - mine.x).abs() < 1e-3 && (a.y - mine.y).abs() < 1e-3)
+            .map(|a| a.machine.clone())
+            .collect();
+        let areas: Vec<Area> = tc_core::resized(&desk, |a| here.contains(&a.machine).then_some(size), &me)
+            .into_iter()
+            .map(|a| Area {
+                measured: a.measured || here.contains(&a.machine),
+                ..a
+            })
+            .collect();
+        tracing::info!(
+            "arrangement: this computer measured anew, {:.2} × {:.2} instead of {:.2} × {:.2} (thousand points)",
+            size.0,
+            size.1,
+            mine.w,
+            mine.h
+        );
+        self.edit_layout(|file| file.set_areas(areas));
     }
 
     /// Keeps the pointer on the computer it is on, or lets it go again (`None`: the other way round).
@@ -884,7 +977,7 @@ impl Session {
             fingerprint: Some(node.fingerprint()),
             port: node.local_addr().port(),
             screens: screens.clone(),
-            screen_sizes,
+            screen_sizes: screen_sizes.clone(),
             ..Status::default()
         }));
         let (commands_tx, commands) = mpsc::unbounded_channel();
@@ -909,8 +1002,11 @@ impl Session {
             files: Mutex::new(FileState::default()),
             logs: Mutex::new(LogState::default()),
             peer_sizes: Mutex::new(HashMap::new()),
+            reported_sizes: Mutex::new((screen_sizes, None)),
+            measure_at: Mutex::new(None),
         });
         shared.reload_layout();
+        shared.update_sizes(true);
         shared.refresh();
         let handle = SessionHandle {
             commands: commands_tx,
@@ -1100,13 +1196,18 @@ async fn run(
                     let mut status = shared.status.lock().expect("status lock");
                     if !now.is_empty() && now != status.screens {
                         status.screens = now.clone();
-                        status.screen_sizes = inject.sizes();
-                        tracing::info!("physical screen sizes (mm): {:?}", status.screen_sizes);
                         drop(status);
+                        let reported = inject.sizes();
+                        tracing::info!("physical screen sizes (mm): {reported:?}");
+                        shared.reported_sizes.lock().expect("sizes lock").0 = reported;
                         shared.engine.lock().expect("engine lock").set_local_screens(&now);
                         shared.screens_changed(now);
-                        shared.send_sizes(None);
+                        shared.update_sizes(true);
                     }
+                }
+                let due = shared.measure_at.lock().expect("measure lock").take_if(|at| *at <= Instant::now());
+                if due.is_some() {
+                    shared.measure_me();
                 }
             }
         }
@@ -1619,6 +1720,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             shared.reload_layout();
             shared.share_layout_with(&peer);
             shared.send_sizes(Some(&peer));
+            shared.update_sizes(false);
             if shared.logs.lock().expect("logs lock").collect {
                 shared.node.send(&peer, Message::LogSubscribe { on: true });
             }
@@ -1730,6 +1832,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
         } => {
             tracing::info!("screen sizes of {} (mm): {mm:?}", shared.name_of(&peer.to_string()));
             shared.peer_sizes.lock().expect("sizes lock").insert(peer, mm);
+            shared.update_sizes(false);
             shared.refresh();
             shared.changed();
         }
@@ -1744,6 +1847,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 .expect("engine lock")
                 .peer_online(&peer.to_string(), &screens);
             shared.reload_layout();
+            shared.update_sizes(false);
             shared.refresh();
             shared.changed();
         }
@@ -1896,6 +2000,13 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
         Command::EdgeRule(rule) => {
             shared.engine.lock().expect("engine lock").set_edge_rule(rule);
             tracing::info!("top and bottom edges: {rule:?}");
+        }
+        Command::ScreenDiagonal(inches) => {
+            tracing::info!("diagonal of screens without a plausible size: {inches:?} inches");
+            shared.reported_sizes.lock().expect("sizes lock").1 = inches;
+            shared.update_sizes(false);
+            shared.refresh();
+            shared.changed();
         }
         Command::Corner(points) => shared.engine.lock().expect("engine lock").set_corner(points),
         Command::Pin(pin) => shared.toggle_pin(pin),

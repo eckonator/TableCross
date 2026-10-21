@@ -101,9 +101,14 @@ fn de(en: &str) -> Option<&'static str> {
             "Zieh die Computer dorthin, wo sie auf deinem Schreibtisch stehen, in ihrer echten Größe. Wo sich zwei berühren, wechselt der Zeiger (grün); beim Ziehen zeigen das auch die Bildschirme an ihren Kanten. Zieh einen Computer auf einen anderen, wenn beide abwechselnd am selben Platz stehen."
         }
         "Take over the current size" => "Aktuelle Größe übernehmen",
-        "The size is kept when screens are switched off or on; this takes the screens it has now." => {
-            "Die Größe bleibt, wenn Bildschirme ab- oder angeschaltet werden; das hier übernimmt die Bildschirme, die er gerade hat."
+        "Takes the screens it has now; each computer also does this by itself when its screens change." => {
+            "Übernimmt die Bildschirme, die er gerade hat; das macht jeder Computer auch selbst, wenn sich seine Bildschirme ändern."
         }
+        "A screen of this computer reports a size that cannot be right. Without its diagonal it counts as large as a screen with the same resolution on another computer." => {
+            "Ein Bildschirm dieses Computers meldet eine Größe, die nicht stimmen kann. Ohne seine Diagonale zählt er so groß wie ein Bildschirm mit derselben Auflösung an einem anderen Computer."
+        }
+        "Its diagonal:" => "Seine Diagonale:",
+        " inches" => " Zoll",
         "No computer is paired yet." => "Noch kein Computer gekoppelt.",
         "Pair new computers and manage the paired ones." => "Neue Computer koppeln und gekoppelte verwalten.",
         "Pairing" => "Kopplung",

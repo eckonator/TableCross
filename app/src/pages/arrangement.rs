@@ -9,7 +9,7 @@ use eframe::egui::{self, Color32, RichText, Vec2};
 use tc_core::{Area, STAND_IN};
 use tc_net::Fingerprint;
 use tc_protocol::Screen;
-use tc_session::{Command, Status, layout_file};
+use tc_session::{Command, Status, layout_file, screen_size};
 
 use super::card;
 use crate::app::App;
@@ -24,9 +24,6 @@ const MAX_SCALE: f32 = 150.0;
 const NARROW: f32 = 76.0;
 /// Positions closer than this are the same (thousands of points).
 const EPS: f32 = 1e-3;
-/// Points per millimeter a screen of known physical size counts on the desk: about what macOS
-/// shows by default (110 points per inch), so sizes from both sources fit together.
-const POINTS_PER_MM: f32 = 110.0 / 25.4;
 /// How often the bars on the other computers are refreshed while dragging.
 const EDGES_EVERY: Duration = Duration::from_millis(150);
 
@@ -311,6 +308,10 @@ impl App {
                 ),
             );
         }
+        if status.size_unsure {
+            ui.add_space(6.0);
+            self.diagonal(ui);
+        }
         match change {
             Some(Change::Move(id, x, y)) => {
                 let (w, h, measured) = desk
@@ -351,16 +352,12 @@ impl App {
     }
 
     /// Computers still shown in a stand-in size get their real one as soon as their screens are
-    /// known, and once more when their physical size becomes known (measured in points before
-    /// 0.4.10); the desk keeps its shape around this computer.
+    /// known; the desk keeps its shape around this computer. Later on each computer measures
+    /// itself when its screens change.
     fn measure(&mut self, ctx: &egui::Context, status: &Status, me: &str, desk: &[Area]) {
-        let physical = |id: &str| {
-            screens_and_sizes(status, me, id)
-                .is_some_and(|(screens, sizes)| physical_factor(&screens, &sizes).is_some())
-        };
         let sizes: Vec<(String, (f32, f32))> = desk
             .iter()
-            .filter(|a| !a.measured || (!self.settings.physical_sizes.contains(&a.machine) && physical(&a.machine)))
+            .filter(|a| !a.measured)
             .filter_map(|a| real_size(status, me, &a.machine).map(|s| (a.machine.clone(), s)))
             .collect();
         if sizes.is_empty() {
@@ -387,11 +384,6 @@ impl App {
             .collect();
         tracing::info!("arrangement: real sizes of {} computer(s) taken over", sizes.len());
         self.arrange(resized);
-        let taken: Vec<String> = sizes.into_iter().map(|(m, _)| m).filter(|m| physical(m)).collect();
-        if !taken.is_empty() {
-            self.settings.physical_sizes.extend(taken);
-            self.save_settings();
-        }
     }
 
     /// While a computer is dragged: green bars at the real screen edges here and, through the
@@ -431,6 +423,43 @@ impl App {
             ctx.data_mut(|d| d.insert_temp(id, Instant::now()));
         }
         ctx.request_repaint_after(EDGES_EVERY);
+    }
+
+    /// A screen here reports a size that cannot be right: its diagonal can be typed in. Without
+    /// it, the size of a screen with the same points on another computer counts, else the points.
+    fn diagonal(&mut self, ui: &mut egui::Ui) {
+        theme::note(
+            ui,
+            theme::Tone::Info,
+            tr(
+                "A screen of this computer reports a size that cannot be right. Without its diagonal it counts \
+                as large as a screen with the same resolution on another computer.",
+            ),
+        );
+        ui.add_space(4.0);
+        let mut by_hand = self.settings.screen_diagonal.is_some();
+        let mut inches = self.settings.screen_diagonal.unwrap_or(27.0);
+        let edited = ui
+            .horizontal(|ui| {
+                let mut edited = ui.checkbox(&mut by_hand, tr("Its diagonal:")).changed();
+                edited |= ui
+                    .add_enabled(
+                        by_hand,
+                        egui::DragValue::new(&mut inches)
+                            .range(5.0..=150.0)
+                            .speed(0.1)
+                            .max_decimals(1)
+                            .suffix(tr(" inches")),
+                    )
+                    .changed();
+                edited
+            })
+            .inner;
+        if edited {
+            self.settings.screen_diagonal = by_hand.then_some(inches);
+            self.save_settings();
+            self.send(Command::ScreenDiagonal(self.settings.screen_diagonal));
+        }
     }
 
     fn arrange(&mut self, desk: Vec<Area>) {
@@ -476,7 +505,7 @@ fn tile_menu(ui: &mut egui::Ui, status: &Status, me: &str, id: &str) -> Option<C
         && ui
             .button(tr("Take over the current size"))
             .on_hover_text(tr(
-                "The size is kept when screens are switched off or on; this takes the screens it has now.",
+                "Takes the screens it has now; each computer also does this by itself when its screens change.",
             ))
             .clicked()
     {
@@ -804,37 +833,21 @@ fn dots(ui: &egui::Ui, rect: egui::Rect, hovered: bool) {
     }
 }
 
-/// The screens of this computer or of a connected peer, in logical points, scaled to their
-/// physical size where it is known (so a scaled display setting does not shrink a computer).
+/// The screens of this computer or of a connected peer, each in its physical size where it is
+/// known (so a scaled display setting does not shrink a computer), in points.
 fn screens_of(status: &Status, me: &str, id: &str) -> Option<Vec<egui::Rect>> {
     let (screens, sizes) = screens_and_sizes(status, me, id)?;
-    let factor = physical_factor(&screens, &sizes).unwrap_or(1.0);
-    let rects: Vec<egui::Rect> = screens
-        .iter()
-        .filter(|s| s.width > 0 && s.height > 0 && s.scale > 0.0)
-        .map(|s| {
-            egui::Rect::from_min_size(
-                egui::pos2(s.x as f32 / s.scale, s.y as f32 / s.scale),
-                egui::vec2(s.width as f32 / s.scale, s.height as f32 / s.scale),
-            )
-        })
+    let rects: Vec<egui::Rect> = screen_size::footprint(&screens, &sizes)
+        .into_iter()
+        .map(|[x, y, w, h]| egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h)))
         .collect();
-    let bounds = rects.iter().copied().reduce(|a, b| a.union(b))?;
-    Some(
-        rects
-            .iter()
-            .map(|r| {
-                let r = r.translate(-bounds.min.to_vec2());
-                egui::Rect::from_min_size((r.min.to_vec2() * factor).to_pos2(), r.size() * factor)
-            })
-            .collect(),
-    )
+    (!rects.is_empty()).then_some(rects)
 }
 
-/// The screens of this computer or of a connected peer and their physical sizes.
 /// Screens and their physical sizes in millimeters, in the same order.
 type ScreensAndSizes = (Vec<Screen>, Vec<(u32, u32)>);
 
+/// The screens of this computer or of a connected peer and their physical sizes.
 fn screens_and_sizes(status: &Status, me: &str, id: &str) -> Option<ScreensAndSizes> {
     if id == me {
         return Some((status.screens.clone(), status.screen_sizes.clone()));
@@ -846,88 +859,9 @@ fn screens_and_sizes(status: &Status, me: &str, id: &str) -> Option<ScreensAndSi
     Some((peer.link.as_ref()?.screens.clone(), peer.screen_sizes.clone()))
 }
 
-/// How much larger a computer is than its logical points say: physical size against points,
-/// weighted by screen area. `None` without plausible sizes (virtual machines, some displays).
-fn physical_factor(screens: &[Screen], sizes: &[(u32, u32)]) -> Option<f32> {
-    if sizes.len() != screens.len() {
-        return None;
-    }
-    let (mut sum, mut weight) = (0.0f32, 0.0f32);
-    for (s, &(mm_w, mm_h)) in screens.iter().zip(sizes) {
-        if mm_w == 0 || mm_h == 0 || s.width == 0 || s.height == 0 || s.scale <= 0.0 {
-            continue;
-        }
-        let (w, h) = (s.width as f32 / s.scale, s.height as f32 / s.scale);
-        // Displays report their size unrotated
-        let (mm_w, mm_h) = if (w > h) == (mm_w >= mm_h) {
-            (mm_w as f32, mm_h as f32)
-        } else {
-            (mm_h as f32, mm_w as f32)
-        };
-        let shape = (w / h) / (mm_w / mm_h);
-        // Below 60 points per inch a display would be huge for its points: some displays report
-        // a made-up size in their data (a 27-inch one claimed 62 inches)
-        let per_inch = w / (mm_w / 25.4);
-        if !(0.85..=1.15).contains(&shape) || !(60.0..=350.0).contains(&per_inch) {
-            continue;
-        }
-        sum += mm_w * POINTS_PER_MM / w * w * h;
-        weight += w * h;
-    }
-    (weight > 0.0).then(|| sum / weight)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Area, physical_factor, shared_edge, snap};
-    use tc_protocol::Screen;
-
-    fn screen(width: u32, height: u32, scale: f32) -> Screen {
-        Screen {
-            x: 0,
-            y: 0,
-            width,
-            height,
-            scale,
-        }
-    }
-
-    #[test]
-    fn scaled_displays_count_in_their_physical_size() {
-        // A 27-inch display looking like 2560 × 1440 by default and like 2048 × 1152 when scaled:
-        // both come out the same size on the desk
-        let default = physical_factor(&[screen(2560, 1440, 1.0)], &[(597, 336)]).expect("plausible");
-        let scaled = physical_factor(&[screen(2048, 1152, 1.0)], &[(597, 336)]).expect("plausible");
-        assert!((default - 1.0).abs() < 0.02, "{default}");
-        assert!((2560.0 * default - 2048.0 * scaled).abs() < 1.0);
-        // Windows at 150 %: logical points count
-        let windows = physical_factor(&[screen(3840, 2160, 1.5)], &[(597, 336)]).expect("plausible");
-        assert!((2560.0 * default - 2560.0 * windows).abs() < 1.0);
-        // A display turned upright reports its size lying
-        assert!(physical_factor(&[screen(1440, 2560, 1.0)], &[(597, 336)]).is_some());
-    }
-
-    #[test]
-    fn implausible_sizes_are_ignored() {
-        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(0, 0)]), None);
-        // Virtual machines: made-up sizes that do not fit the shape or the density
-        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(100, 100)]), None);
-        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[(2000, 1125)]), None);
-        // Lists out of step
-        assert_eq!(physical_factor(&[screen(1920, 1080, 1.0)], &[]), None);
-    }
-
-    #[test]
-    fn a_display_claiming_a_giant_size_does_not_inflate_the_others() {
-        // Two 27-inch displays, one of them reporting 1383 × 778 mm (measured on a real desk)
-        let factor = physical_factor(
-            &[screen(2560, 1440, 1.0), screen(2560, 1440, 1.0)],
-            &[(619, 340), (1383, 778)],
-        )
-        .expect("the honest display counts");
-        let honest = physical_factor(&[screen(2560, 1440, 1.0)], &[(619, 340)]).expect("plausible");
-        assert!((factor - honest).abs() < 0.001, "{factor} against {honest}");
-    }
+    use super::{Area, shared_edge, snap};
 
     fn area(m: &str, x: f32, y: f32, w: f32, h: f32) -> Area {
         Area {

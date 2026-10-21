@@ -279,6 +279,7 @@ impl App {
                 }
                 handle.send(Command::EdgeRule(self.settings.edges.rule()));
                 handle.send(Command::Corner(f64::from(self.settings.corner)));
+                handle.send(Command::ScreenDiagonal(self.settings.screen_diagonal));
                 *self.tray_session.lock().expect("tray session lock") = Some(handle.clone());
                 self.session = Some(handle);
                 self.task = Some(task);

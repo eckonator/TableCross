@@ -7,6 +7,7 @@ mod files;
 pub mod helper_install;
 pub mod layout_file;
 pub mod peer_logs;
+pub mod screen_size;
 mod session;
 mod transfer;
 
