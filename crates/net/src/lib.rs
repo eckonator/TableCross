@@ -17,6 +17,7 @@ mod pairing;
 mod store;
 mod tls;
 mod wire;
+mod wired;
 
 #[cfg(test)]
 mod tests;

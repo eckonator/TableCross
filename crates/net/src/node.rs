@@ -249,7 +249,7 @@ struct Inner {
     changed: watch::Sender<()>,
     /// Bumped when the computer woke from sleep.
     woke: watch::Sender<u64>,
-    discovery: Option<Discovery>,
+    discovery: Option<Arc<Discovery>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     next_link_id: AtomicU64,
 }
@@ -541,7 +541,7 @@ impl Node {
 
     /// TableCross instances found on the network (empty without discovery).
     pub fn discovered(&self) -> Vec<Discovered> {
-        self.inner.discovery.as_ref().map(Discovery::found).unwrap_or_default()
+        self.inner.discovery.as_ref().map(|d| d.found()).unwrap_or_default()
     }
 
     /// Closes all links, tells the peers, and stops.
@@ -868,7 +868,7 @@ async fn supervise(inner: Arc<Inner>, peer: Fingerprint) {
     let mut gave_head_start = false;
     loop {
         changed.borrow_and_update();
-        let discovered = inner.discovery.as_ref().map(Discovery::found).unwrap_or_default();
+        let discovered = inner.discovery.as_ref().map(|d| d.found()).unwrap_or_default();
         let candidates = {
             let state = inner.lock();
             if state.shut_down {
@@ -916,14 +916,21 @@ async fn supervise(inner: Arc<Inner>, peer: Fingerprint) {
     }
 }
 
-/// Remembered addresses first (latest success first), then what discovery found.
+/// Addresses the peer announces as on a cable first, then remembered ones (latest success
+/// first), then the rest of what discovery found.
 fn candidates(paired: &PairedPeer, discovered: &[Discovered]) -> Vec<SocketAddr> {
-    let mut list = paired.addresses.clone();
-    for found in discovered.iter().filter(|d| d.fingerprint == paired.fingerprint) {
-        for address in &found.addresses {
-            if !list.contains(address) {
-                list.push(*address);
-            }
+    let found: Vec<&Discovered> = discovered
+        .iter()
+        .filter(|d| d.fingerprint == paired.fingerprint)
+        .collect();
+    let mut list: Vec<SocketAddr> = found
+        .iter()
+        .flat_map(|d| d.addresses.iter().filter(|a| d.wired.contains(&a.ip())))
+        .copied()
+        .collect();
+    for address in paired.addresses.iter().chain(found.iter().flat_map(|d| &d.addresses)) {
+        if !list.contains(address) {
+            list.push(*address);
         }
     }
     list

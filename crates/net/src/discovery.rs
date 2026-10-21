@@ -1,17 +1,23 @@
 //! Finding peers on the local network with mDNS (`_tablecross._udp`).
 //!
 //! Every node announces itself on all interfaces with its fingerprint in the TXT record and collects
-//! the announcements of others. All addresses of a peer are kept; the caller tries them all.
+//! the announcements of others. All addresses of a peer are kept; the caller tries them all, those
+//! the peer announces as on a cable first (announced anew when they change, as on docking).
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use tc_protocol::PROTOCOL_VERSION;
 use tokio::sync::watch;
 
 use crate::identity::Fingerprint;
+use crate::wired;
+
+/// How often this computer looks whether its addresses on a cable changed.
+const WIRED_EVERY: Duration = Duration::from_secs(5);
 
 pub const SERVICE_TYPE: &str = "_tablecross._udp.local.";
 
@@ -25,6 +31,8 @@ pub struct Discovered {
     /// It currently shows a pairing code.
     pub pairing: bool,
     pub version: u16,
+    /// Its addresses on a cable (they are dialed first).
+    pub wired: Vec<IpAddr>,
 }
 
 pub(crate) struct Discovery {
@@ -34,11 +42,18 @@ pub(crate) struct Discovery {
     port: u16,
     fullname: Mutex<Option<String>>,
     found: Arc<Mutex<HashMap<String, Discovered>>>,
+    /// What was announced last: the pairing flag and the addresses on a cable.
+    announced: Mutex<(bool, Vec<IpAddr>)>,
 }
 
 impl Discovery {
     /// Starts announcing and browsing. `changed` is bumped whenever the list of found peers changes.
-    pub fn start(own: Fingerprint, name: &str, port: u16, changed: watch::Sender<()>) -> Result<Self, mdns_sd::Error> {
+    pub fn start(
+        own: Fingerprint,
+        name: &str,
+        port: u16,
+        changed: watch::Sender<()>,
+    ) -> Result<Arc<Self>, mdns_sd::Error> {
         let daemon = ServiceDaemon::new()?;
         let found = Arc::new(Mutex::new(HashMap::new()));
         let receiver = daemon.browse(SERVICE_TYPE)?;
@@ -62,20 +77,41 @@ impl Discovery {
                 }
             }
         });
-        let discovery = Self {
+        let discovery = Arc::new(Self {
             daemon,
             own,
             name: name.to_string(),
             port,
             fullname: Mutex::new(None),
             found,
-        };
+            announced: Mutex::new((false, Vec::new())),
+        });
         discovery.announce(false)?;
+        let weak = Arc::downgrade(&discovery);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(WIRED_EVERY).await;
+                let Some(discovery) = weak.upgrade() else { return };
+                let wired = tokio::task::spawn_blocking(wired::addresses).await.unwrap_or_default();
+                let (pairing, before) = discovery.announced.lock().expect("discovery lock").clone();
+                if wired != before {
+                    tracing::info!("addresses on a cable now: {wired:?}");
+                    if let Err(e) = discovery.announce_with(pairing, wired) {
+                        tracing::warn!("cannot announce this computer: {e}");
+                    }
+                }
+            }
+        });
         Ok(discovery)
     }
 
     /// (Re-)announces this node, with the pairing flag set while a code is shown.
     pub fn announce(&self, pairing: bool) -> Result<(), mdns_sd::Error> {
+        let wired = self.announced.lock().expect("discovery lock").1.clone();
+        self.announce_with(pairing, wired)
+    }
+
+    fn announce_with(&self, pairing: bool, wired: Vec<IpAddr>) -> Result<(), mdns_sd::Error> {
         let short = self.own.short();
         let name: String = self.name.chars().take(40).collect();
         let properties: HashMap<String, String> = [
@@ -83,8 +119,10 @@ impl Discovery {
             ("v".to_string(), PROTOCOL_VERSION.to_string()),
             ("name".to_string(), name.clone()),
             ("pair".to_string(), if pairing { "1" } else { "0" }.to_string()),
+            ("wired".to_string(), wired::announced(&wired)),
         ]
         .into();
+        *self.announced.lock().expect("discovery lock") = (pairing, wired);
         let info = ServiceInfo::new(
             SERVICE_TYPE,
             &format!("{name} ({short})"),
@@ -139,11 +177,16 @@ fn parse(service: &mdns_sd::ResolvedService) -> Option<Discovered> {
         IpAddr::V6(v6) if v6.is_unicast_link_local() => 2,
         IpAddr::V6(_) => 1,
     });
+    let wired = props
+        .get_property_val_str("wired")
+        .map(wired::parse)
+        .unwrap_or_default();
     Some(Discovered {
         fingerprint,
         name,
         addresses,
         pairing,
         version,
+        wired,
     })
 }

@@ -67,6 +67,7 @@ pub fn status() -> Status {
             addresses: vec!["192.168.178.31:24800".parse().expect("valid")],
             pairing: true,
             version: tc_protocol::PROTOCOL_VERSION,
+            wired: Vec::new(),
         }],
         pairing: None,
         pairing_busy: false,
