@@ -458,6 +458,50 @@ async fn copied_files_arrive_when_saved() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn copied_files_come_when_pasted() {
+    let _guard = DOWNLOAD_DIR.lock().await;
+    let source = dir("paste-source");
+    std::fs::create_dir_all(source.join("Fotos")).unwrap();
+    std::fs::write(source.join("Fotos/a.txt"), "Grüße").unwrap();
+    std::fs::write(source.join("notes.txt"), "hello").unwrap();
+    let cache = dir("paste-cache");
+    unsafe { std::env::set_var("TC_PROMISE_DIR", &cache) };
+
+    let (a, b) = paired_pair("paste-a", "paste-b").await;
+    a.clipboard
+        .set(Read::Files(vec![source.join("Fotos"), source.join("notes.txt")]));
+    until("Beta has them on its clipboard", || {
+        b.session.status().files_waiting.is_some_and(|w| w.pasteable)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        std::fs::read_dir(&cache).unwrap().next().is_none(),
+        "nothing moves before pasting"
+    );
+
+    // The file manager pastes (and waits)
+    let clipboard = b.clipboard.clone();
+    let pasted = tokio::task::spawn_blocking(move || clipboard.paste_promise())
+        .await
+        .unwrap()
+        .expect("the files came");
+    assert_eq!(pasted.len(), 2);
+    assert!(pasted.iter().all(|p| p.starts_with(&cache)));
+    assert_eq!(std::fs::read_to_string(pasted[0].join("a.txt")).unwrap(), "Grüße");
+    assert_eq!(std::fs::read_to_string(&pasted[1]).unwrap(), "hello");
+    // Pasting again hands out the same files without fetching them again
+    let clipboard = b.clipboard.clone();
+    let again = tokio::task::spawn_blocking(move || clipboard.paste_promise())
+        .await
+        .unwrap();
+    assert_eq!(again, Some(pasted));
+    assert_eq!(b.session.status().transfers.len(), 1);
+    a.session.send(Command::Shutdown);
+    b.session.send(Command::Shutdown);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn cancelling_a_transfer_leaves_nothing_behind() {
     let _guard = DOWNLOAD_DIR.lock().await;
     let source = dir("cancel-source");

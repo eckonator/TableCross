@@ -1,18 +1,20 @@
 //! macOS: the general pasteboard (`NSPasteboard`).
 
-use objc2::rc::autoreleasepool;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-use objc2::runtime::ProtocolObject;
+use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardItem, NSPasteboardNameDrag,
-    NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString,
-    NSPasteboardTypeTIFF, NSPasteboardWriting,
+    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardItem, NSPasteboardItemDataProvider,
+    NSPasteboardNameDrag, NSPasteboardType, NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypePNG,
+    NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardWriting,
 };
 use objc2_foundation::{NSArray, NSData, NSDictionary, NSString, NSURL};
 
-use crate::{ClipContent, ClipError, Read, SystemClipboard};
+use crate::{ClipContent, ClipError, Fulfil, Read, SystemClipboard};
 
 /// Markers of password managers and of clipboard tools (nspasteboard.org): never sent anywhere.
 const PRIVATE_TYPES: [&str; 2] = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"];
@@ -64,6 +66,53 @@ pub fn drag_change_count() -> u64 {
 pub fn drag_files() -> Vec<PathBuf> {
     autoreleasepool(|_| files_of(&drag_board()))
 }
+
+fn file_url(path: &Path) -> Option<Retained<NSString>> {
+    NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy())).absoluteString()
+}
+
+struct PromiseIvars {
+    /// Which of the promised files this item stands for.
+    index: usize,
+    fulfil: Fulfil,
+}
+
+define_class!(
+    /// Hands out the file URL of one promised file when it is pasted, after fetching the files.
+    #[unsafe(super(NSObject))]
+    #[name = "TableCrossFilePromise"]
+    #[ivars = PromiseIvars]
+    struct FilePromise;
+
+    unsafe impl NSObjectProtocol for FilePromise {}
+
+    unsafe impl NSPasteboardItemDataProvider for FilePromise {
+        #[unsafe(method(pasteboard:item:provideDataForType:))]
+        fn provide(&self, _board: Option<&NSPasteboard>, item: &NSPasteboardItem, _kind: &NSPasteboardType) {
+            let ivars = self.ivars();
+            let Some(paths) = (ivars.fulfil)() else {
+                tracing::warn!("promised files could not be fetched");
+                return;
+            };
+            if let Some(url) = paths.get(ivars.index).and_then(|p| file_url(p)) {
+                unsafe { item.setString_forType(&url, NSPasteboardTypeFileURL) };
+            }
+        }
+    }
+);
+
+impl FilePromise {
+    fn new(index: usize, fulfil: Fulfil) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(PromiseIvars { index, fulfil });
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// The providers of the promise on the pasteboard, kept alive until the next one.
+struct Providers(#[allow(dead_code)] Vec<Retained<FilePromise>>);
+// Only kept and dropped here; AppKit calls them on its own thread
+unsafe impl Send for Providers {}
+static PROVIDERS: Mutex<Option<Providers>> = Mutex::new(None);
 
 /// TIFF (what many Mac programs put there for images) to PNG.
 fn tiff_to_png(tiff: &NSData) -> Option<Vec<u8>> {
@@ -149,6 +198,34 @@ impl SystemClipboard for MacClipboard {
     fn write_files(&self, files: &[PathBuf]) -> Result<u64, ClipError> {
         self.write_files_inner(files)
     }
+
+    fn can_promise(&self) -> bool {
+        true
+    }
+
+    fn write_file_promise(&self, count: usize, fulfil: Fulfil) -> Option<Result<u64, ClipError>> {
+        Some(autoreleasepool(|_| {
+            let board = self.board();
+            board.clearContents();
+            let types = NSArray::from_slice(&[unsafe { NSPasteboardTypeFileURL }]);
+            let providers: Vec<Retained<FilePromise>> = (0..count)
+                .map(|index| FilePromise::new(index, fulfil.clone()))
+                .collect();
+            let items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = providers
+                .iter()
+                .map(|provider| {
+                    let item = NSPasteboardItem::new();
+                    item.setDataProvider_forTypes(ProtocolObject::from_ref(&**provider), &types);
+                    ProtocolObject::from_retained(item)
+                })
+                .collect();
+            *PROVIDERS.lock().expect("providers lock") = Some(Providers(providers));
+            if !board.writeObjects(&NSArray::from_retained_slice(&items)) {
+                return Err(ClipError::System("the pasteboard refused the promised files".into()));
+            }
+            Ok(board.changeCount() as u64)
+        }))
+    }
 }
 
 impl MacClipboard {
@@ -159,9 +236,8 @@ impl MacClipboard {
             let items: Vec<objc2::rc::Retained<ProtocolObject<dyn NSPasteboardWriting>>> = files
                 .iter()
                 .map(|path| {
-                    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
                     let item = NSPasteboardItem::new();
-                    if let Some(text) = url.absoluteString() {
+                    if let Some(text) = file_url(path) {
                         unsafe { item.setString_forType(&text, NSPasteboardTypeFileURL) };
                     }
                     ProtocolObject::from_retained(item)
@@ -201,6 +277,31 @@ mod tests {
         let files = vec![PathBuf::from("/tmp/notes.txt"), PathBuf::from("/tmp/a folder")];
         clip.write_files(&files).unwrap();
         assert_eq!(clip.read().unwrap(), Read::Files(files));
+    }
+
+    #[test]
+    fn promised_files_are_fetched_when_pasted() {
+        let clip = MacClipboard {
+            name: Some(format!("de.eckonator.tablecross.promise.{}", std::process::id())),
+        };
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = calls.clone();
+        let fulfil: Fulfil = std::sync::Arc::new(move || {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(vec![PathBuf::from("/tmp/one.txt"), PathBuf::from("/tmp/two")])
+        });
+        clip.write_file_promise(2, fulfil).unwrap().unwrap();
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "nothing fetched before pasting"
+        );
+        assert_eq!(
+            clip.read().unwrap(),
+            Read::Files(vec![PathBuf::from("/tmp/one.txt"), PathBuf::from("/tmp/two")])
+        );
+        assert!(calls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+        clip.board().clearContents();
     }
 
     #[test]

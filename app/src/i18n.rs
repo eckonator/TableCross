@@ -434,6 +434,9 @@ fn de(en: &str) -> Option<&'static str> {
         "{} s ago" => "vor {} s",
         "{} was refused: {}" => "{} wurde abgewiesen: {}",
         "Copied on {}: {}." => "Auf {} kopiert: {}.",
+        "Copied on {}: {}. Paste them where you want them, with ⌘V in the Finder." => {
+            "Auf {} kopiert: {}. Mit ⌘V im Finder dort einsetzen, wo du sie haben möchtest."
+        }
         "Save files …" => "Dateien speichern …",
         "This desktop shows no status icons, so the TableCross symbol and its menu are missing. On GNOME, install the AppIndicator extension, log out and in again and switch it on in the app “Extensions” (on Debian and Ubuntu:" => {
             "Diese Oberfläche zeigt keine Symbole in der Leiste, deshalb fehlen das TableCross-Symbol und sein Menü. Unter GNOME die Erweiterung AppIndicator installieren, ab- und wieder anmelden und sie in der App „Erweiterungen“ einschalten (unter Debian und Ubuntu:"

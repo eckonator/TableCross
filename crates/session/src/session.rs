@@ -4,6 +4,7 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Condvar;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -266,6 +267,8 @@ pub struct FilesWaiting {
     pub label: String,
     pub count: u64,
     pub size: u64,
+    /// On the clipboard here, fetched when pasted in the file manager (else saved on request).
+    pub pasteable: bool,
 }
 
 /// Called whenever the status changed (the app repaints).
@@ -281,6 +284,61 @@ enum Internal {
     Dropped(Vec<PathBuf>),
     DropListed(Result<Listing, String>),
     LockAll,
+    /// Promised files are being pasted: fetch them.
+    Fetch(u64),
+}
+
+/// How long pasting promised files waits for their transfer to start.
+const PROMISE_START: Duration = Duration::from_secs(15);
+
+/// Files copied on another computer, on this clipboard as a promise: fetched when pasted.
+struct Promise {
+    id: u64,
+    dir: PathBuf,
+    state: Mutex<Promised>,
+    changed: Condvar,
+}
+
+enum Promised {
+    Offered,
+    Requested(Instant),
+    Running,
+    Done(Vec<PathBuf>),
+    Failed,
+}
+
+impl Promise {
+    fn set(&self, state: Promised) {
+        *self.state.lock().expect("promise lock") = state;
+        self.changed.notify_all();
+    }
+
+    /// Called by the file manager pasting (it waits): fetches the files once, then hands out where
+    /// they are.
+    fn fulfil(&self, internal: &mpsc::UnboundedSender<Internal>) -> Option<Vec<PathBuf>> {
+        let mut state = self.state.lock().expect("promise lock");
+        loop {
+            match &*state {
+                Promised::Done(paths) => return Some(paths.clone()),
+                Promised::Failed => return None,
+                Promised::Offered => {
+                    *state = Promised::Requested(Instant::now());
+                    let _ = internal.send(Internal::Fetch(self.id));
+                }
+                Promised::Requested(at) if at.elapsed() > PROMISE_START => {
+                    // The other computer did not answer; pasting again tries again
+                    *state = Promised::Offered;
+                    return None;
+                }
+                Promised::Requested(_) | Promised::Running => {}
+            }
+            state = self
+                .changed
+                .wait_timeout(state, Duration::from_millis(250))
+                .expect("promise lock")
+                .0;
+        }
+    }
 }
 
 /// Copied files and running transfers.
@@ -293,6 +351,8 @@ struct FileState {
     requested: Option<u64>,
     /// Where the requested files go (copied files, chosen by the user).
     save_to: Option<PathBuf>,
+    /// The copied files on this clipboard as a promise.
+    promise: Option<Arc<Promise>>,
     /// What we put on the clipboard after a transfer (not announced again).
     written: Vec<PathBuf>,
     cancels: Cancels,
@@ -755,6 +815,8 @@ impl Session {
         node_config.discovery = config.discovery;
         node_config.screens = screens.clone();
         let (node, events) = Node::start(node_config, identity, store).await?;
+        // Files fetched for pasting last time are no longer on the clipboard
+        let _ = std::fs::remove_dir_all(files::promise_dir());
         Self::with_node(node, events, config.dir, backend, clipboard, on_change).await
     }
 
@@ -905,6 +967,7 @@ async fn run(
                     }
                 }
                 Internal::LockAll => lock_all(&shared),
+                Internal::Fetch(id) => fetch_promised(&shared, id),
                 Internal::PairDone(result) => {
                     shared.status.lock().expect("status lock").pairing_busy = false;
                     match result {
@@ -1009,7 +1072,7 @@ fn send_log_lines(shared: &Arc<Shared>) {
 fn files_offer(id: u64, listing: &Listing, dropped: bool) -> Message {
     Message::FilesOffer {
         id,
-        names: listing.shown_names(),
+        names: listing.offered_names(),
         count: listing.count(),
         size: listing.size(),
         dropped,
@@ -1042,6 +1105,67 @@ fn files_listed(shared: &Arc<Shared>, listing: Result<Listing, String>, dropped:
     for peer in shared.node.status().into_iter().filter(|p| p.link.is_some()) {
         shared.node.send(&peer.peer.fingerprint, offer.clone());
     }
+}
+
+/// Puts files copied on a peer on this clipboard as a promise. Returns false where the clipboard
+/// cannot hold a promise.
+fn promise_files(shared: &Arc<Shared>, id: u64, items: usize) -> bool {
+    let Some(clipboard) = &shared.clipboard else {
+        return false;
+    };
+    if !clipboard.system.can_promise() {
+        return false;
+    }
+    let promise = Arc::new(Promise {
+        id,
+        dir: files::promise_dir().join(format!("{id:x}")),
+        state: Mutex::new(Promised::Offered),
+        changed: Condvar::new(),
+    });
+    let old = shared
+        .files
+        .lock()
+        .expect("files lock")
+        .promise
+        .replace(promise.clone());
+    let internal = shared.internal.clone();
+    let fulfil: tc_clipboard::Fulfil = Arc::new(move || promise.fulfil(&internal));
+    shared.clip.lock().expect("clip lock").writing();
+    let system = clipboard.system.clone();
+    let shared = shared.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(old) = old {
+            let _ = std::fs::remove_dir_all(&old.dir);
+        }
+        let count = match system.write_file_promise(items, fulfil) {
+            Some(Ok(count)) => Some(count),
+            Some(Err(e)) => {
+                tracing::warn!("cannot put the copied files on the clipboard: {e}");
+                None
+            }
+            None => None,
+        };
+        shared.clip.lock().expect("clip lock").write_done(count);
+    });
+    true
+}
+
+/// Promised files are being pasted here: ask the peer for them.
+fn fetch_promised(shared: &Arc<Shared>, id: u64) {
+    let mut state = shared.files.lock().expect("files lock");
+    let Some(promise) = state.promise.clone().filter(|p| p.id == id) else {
+        return;
+    };
+    if !state.remote.as_ref().is_some_and(|r| r.1 == id) {
+        drop(state);
+        tracing::warn!("promised files are no longer offered");
+        promise.set(Promised::Failed);
+        return;
+    }
+    state.save_to = Some(promise.dir.clone());
+    drop(state);
+    tracing::info!("files pasted here, fetching them");
+    request_files(shared);
 }
 
 /// Asks for files dragged over the edge from a peer (the pointer just arrived here). Copied files
@@ -1131,7 +1255,7 @@ fn send_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64) {
 }
 
 fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_net::InStream) {
-    let (label, count, total, dropped, target, cancel) = {
+    let (label, count, total, dropped, target, promise, cancel) = {
         let mut state = shared.files.lock().expect("files lock");
         match &state.remote {
             Some((from, newest, label, count, size, dropped)) if *from == peer && *newest == id => {
@@ -1139,9 +1263,10 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
                 state.remote = None;
                 let target = match state.save_to.take() {
                     Some(dir) if !dropped => dir,
-                    _ => files::download_dir(),
+                    _ => files::downloads(),
                 };
-                (label, count, size, dropped, target, state.cancels.add(id))
+                let promise = state.promise.clone().filter(|p| p.id == id && p.dir == target);
+                (label, count, size, dropped, target, promise, state.cancels.add(id))
             }
             _ => {
                 drop(state);
@@ -1151,6 +1276,9 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
         }
     };
     shared.status.lock().expect("status lock").files_waiting = None;
+    if let Some(promise) = &promise {
+        promise.set(Promised::Running);
+    }
     let peer_name = shared.name_of(&peer.to_string());
     add_transfer(
         shared,
@@ -1175,7 +1303,18 @@ fn receive_files(shared: &Arc<Shared>, peer: Fingerprint, id: u64, stream: tc_ne
         };
         let cancelled = cancel.load(std::sync::atomic::Ordering::SeqCst);
         shared.files.lock().expect("files lock").cancels.finished(id);
+        if let Some(promise) = &promise {
+            match &result {
+                Ok(placed) => promise.set(Promised::Done(placed.clone())),
+                Err(_) => promise.set(Promised::Failed),
+            }
+        }
         match result {
+            Ok(_) if promise.is_some() => {
+                // Pasted: the file manager copies them from the hidden folder to where they belong
+                update_transfer(&shared, id, |t| t.state = TransferState::Done(None));
+                tracing::info!("{count} pasted file(s) from {peer_name} fetched");
+            }
             Ok(placed) => {
                 update_transfer(&shared, id, |t| t.state = TransferState::Done(Some(target.clone())));
                 // Dragged files go on the clipboard as well; saved ones were only meant for the folder
@@ -1417,7 +1556,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 },
         } => {
             shared.clip.lock().expect("clip lock").clear_remote();
-            let label = names.join(", ");
+            let label = files::label(&names);
             {
                 let mut state = shared.files.lock().expect("files lock");
                 state.local = None;
@@ -1425,11 +1564,13 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 state.requested = None;
                 state.save_to = None;
             }
+            let pasteable = !dropped && promise_files(shared, id, names.len());
             shared.status.lock().expect("status lock").files_waiting = (!dropped).then(|| FilesWaiting {
                 peer: shared.name_of(&peer.to_string()),
                 label,
                 count,
                 size,
+                pasteable,
             });
             if dropped && matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_)) {
                 request_files(shared);

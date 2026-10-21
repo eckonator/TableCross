@@ -75,11 +75,19 @@ impl App {
 
     fn transfers(&mut self, ui: &mut egui::Ui, status: &Status) {
         if let Some(waiting) = &status.files_waiting {
-            let text = trf("Copied on {}: {}.", &[&waiting.peer, &waiting.label]);
-            theme::note(ui, theme::Tone::Info, &text);
-            ui.add_space(4.0);
-            if ui.button(tr("Save files …")).clicked() {
-                self.save_files();
+            if waiting.pasteable {
+                let text = trf(
+                    "Copied on {}: {}. Paste them where you want them, with ⌘V in the Finder.",
+                    &[&waiting.peer, &waiting.label],
+                );
+                theme::note(ui, theme::Tone::Info, &text);
+            } else {
+                let text = trf("Copied on {}: {}.", &[&waiting.peer, &waiting.label]);
+                theme::note(ui, theme::Tone::Info, &text);
+                ui.add_space(4.0);
+                if ui.button(tr("Save files …")).clicked() {
+                    self.save_files();
+                }
             }
             ui.add_space(8.0);
         }

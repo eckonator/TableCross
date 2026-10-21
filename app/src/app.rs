@@ -569,7 +569,7 @@ impl App {
                 .map(|n| n.version.as_str());
             tray.set_update(version);
             tray.set_pinned(self.status.pinned);
-            tray.set_files_waiting(self.status.files_waiting.is_some());
+            tray.set_files_waiting(self.status.files_waiting.as_ref().is_some_and(|w| !w.pasteable));
         }
         if self.update_flag.swap(false, Ordering::SeqCst) {
             self.install_update(ctx);
@@ -785,7 +785,7 @@ impl App {
 
     /// Asks where the files copied on another computer go, then fetches them.
     pub fn save_files(&mut self) {
-        if self.status.files_waiting.is_some() {
+        if self.status.files_waiting.as_ref().is_some_and(|w| !w.pasteable) {
             self.save_files_to = Some(tc_session::downloads());
         } else {
             self.show_info(tr("No files are copied on another computer."));

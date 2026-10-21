@@ -116,7 +116,7 @@ pub fn status() -> Status {
                 count: 1,
                 done: 350_000,
                 total: 350_000,
-                state: tc_session::TransferState::Done(Some("/Users/demo/Downloads/TableCross".into())),
+                state: tc_session::TransferState::Done(Some("/Users/demo/Downloads".into())),
             },
         ],
         files_waiting: Some(tc_session::FilesWaiting {
@@ -124,6 +124,7 @@ pub fn status() -> Status {
             label: "Fotos, notes.txt".into(),
             count: 1201,
             size: 2_000_000_000,
+            pasteable: false,
         }),
     }
 }

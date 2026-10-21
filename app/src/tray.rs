@@ -19,7 +19,8 @@ pub struct Tray {
     update: MenuItem,
     update_shown: std::cell::Cell<bool>,
     show: MenuItem,
-    /// "Save files from the clipboard …", active while another computer has files copied.
+    /// "Save files from the clipboard …", active while another computer has files copied that
+    /// cannot simply be pasted here (not on macOS, where ⌘V in the Finder fetches them).
     save_files: MenuItem,
     release: MenuItem,
     pin: CheckMenuItem,
@@ -122,9 +123,11 @@ impl Tray {
         let power_off_all = MenuItem::new(tr("Shut down all computers …"), true, None);
         let quit = MenuItem::new(tr("Quit TableCross"), true, None);
         let menu = Menu::new();
+        menu.append_items(&[&show]).ok()?;
+        if !cfg!(target_os = "macos") {
+            menu.append_items(&[&save_files]).ok()?;
+        }
         menu.append_items(&[
-            &show,
-            &save_files,
             &release,
             &pin,
             &lock,

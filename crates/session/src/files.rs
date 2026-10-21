@@ -18,6 +18,8 @@ const HEADER: &[u8; 4] = b"file";
 const MAX_ENTRY_HEADER: usize = 16 * 1024;
 /// Top-level names announced for display.
 const SHOWN_NAMES: usize = 8;
+/// At most this many top-level names travel in an offer (each becomes an item to paste).
+const OFFERED_NAMES: usize = 2000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
@@ -52,6 +54,32 @@ impl Listing {
     pub fn shown_names(&self) -> Vec<String> {
         self.roots.iter().take(SHOWN_NAMES).cloned().collect()
     }
+
+    /// The top-level names for an offer: the receiver pastes one item per name.
+    pub fn offered_names(&self) -> Vec<String> {
+        self.roots.iter().take(OFFERED_NAMES).cloned().collect()
+    }
+}
+
+/// The first names of an offer, for showing.
+pub fn label(names: &[String]) -> String {
+    let mut label = names.iter().take(SHOWN_NAMES).cloned().collect::<Vec<_>>().join(", ");
+    if names.len() > SHOWN_NAMES {
+        label.push_str(", …");
+    }
+    label
+}
+
+/// Where files promised to the clipboard are fetched to when pasted (emptied at start).
+pub fn promise_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("TC_PROMISE_DIR") {
+        return PathBuf::from(dir);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join("Library/Caches/TableCross/clipboard");
+    }
+    std::env::temp_dir().join("tablecross-clipboard")
 }
 
 pub fn header(id: u64) -> Vec<u8> {
@@ -161,14 +189,6 @@ pub fn downloads() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     home.join("Downloads")
-}
-
-/// Where files dragged over the edge go (`TC_DOWNLOAD_DIR` overrides it, for tests).
-pub fn download_dir() -> PathBuf {
-    match std::env::var_os("TC_DOWNLOAD_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => downloads().join("TableCross"),
-    }
 }
 
 pub fn encode_entry(entry: &Entry) -> Vec<u8> {

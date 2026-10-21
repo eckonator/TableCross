@@ -246,6 +246,11 @@ impl ClipSync {
         Some(ClipAction::Write { id, content })
     }
 
+    /// We are about to write something of our own (finished with `write_done`).
+    pub fn writing(&mut self) {
+        self.busy = true;
+    }
+
     /// Our write finished with this change count.
     pub fn write_done(&mut self, count: Option<u64>) {
         self.busy = false;
