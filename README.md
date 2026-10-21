@@ -13,7 +13,7 @@ on the next computer.
 *The screenshots show made-up computers (`TC_DEMO=1`).*
 
 > **Status: first release.** Downloads are on the
-> [releases page](https://github.com/eckonator/TableCross/releases). So far it is tested most on macOS;
+> [releases page](https://github.com/eckonator/tablecross/releases). So far it is tested most on macOS;
 > Windows and Linux may still have rough edges. The *test build* there is the newest state of
 > development, replaced with every change.
 
@@ -22,7 +22,7 @@ on the next computer.
 **macOS 11 or newer** (Apple silicon and Intel):
 
 1. Download `TableCross-…-macOS.dmg` from the
-   [releases page](https://github.com/eckonator/TableCross/releases), open it and drag TableCross into
+   [releases page](https://github.com/eckonator/tablecross/releases), open it and drag TableCross into
    Applications.
 2. Open TableCross. TableCross does not come through Apple's paid developer program, so macOS refuses
    it the first time (“Apple could not verify …”). Click **Done**.
@@ -42,7 +42,7 @@ switching it off and on is not enough.
 Using Terminal instead: this installs the newest version without the Gatekeeper step
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/eckonator/TableCross/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/eckonator/tablecross/main/scripts/install-macos.sh | bash
 ```
 
 and this lets a copy from the `.dmg` or `.zip` start right away:

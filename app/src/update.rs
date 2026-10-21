@@ -17,7 +17,7 @@ use eframe::egui;
 /// All releases, the test build among them. GitHub lists them neither by version nor by date, and its
 /// "latest" release is the one published last, which is an older version when two versions were
 /// built together. So the highest version is picked from the list.
-const RELEASES_URL: &str = "https://api.github.com/repos/eckonator/TableCross/releases?per_page=30";
+const RELEASES_URL: &str = "https://api.github.com/repos/eckonator/tablecross/releases?per_page=30";
 
 /// Built from a release tag (not a test build from main).
 pub fn is_release() -> bool {
