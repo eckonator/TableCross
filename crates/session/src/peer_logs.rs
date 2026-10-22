@@ -93,6 +93,99 @@ fn chunks(text: &str) -> Vec<String> {
     out
 }
 
+/// macOS: the system helper and the program for the login screen write logs of their own (as
+/// root). Their new lines go out with this computer's log, each marked with where it comes from,
+/// so a collecting computer sees them too. How far each file was passed on is kept in
+/// `<settings>/logs/forwarded.txt`, so lines written while no one was logged in follow later.
+pub fn forward_system_logs(settings_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let sources = [
+        ("helper", crate::helper_install::LOG),
+        ("loginwindow", tc_input::helper_protocol::LOGIN_LOG),
+    ];
+    let state = settings_dir.join("logs").join("forwarded.txt");
+    let _ = std::thread::Builder::new().name("system logs".into()).spawn(move || {
+        let mut positions = read_positions(&state);
+        loop {
+            let before = positions.clone();
+            for (label, path) in sources {
+                let position = positions.entry(path.to_string()).or_insert(u64::MAX);
+                if let Some(text) = new_text(Path::new(path), position) {
+                    record(marked(label, &text).as_bytes());
+                }
+            }
+            if positions != before {
+                let lines: String = positions.iter().map(|(p, at)| format!("{at} {p}\n")).collect();
+                let _ = std::fs::write(&state, lines);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    });
+}
+
+/// How far each file was passed on (`<position> <path>` per line).
+fn read_positions(state: &Path) -> std::collections::BTreeMap<String, u64> {
+    std::fs::read_to_string(state)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let (at, path) = line.split_once(' ')?;
+            Some((path.to_string(), at.parse().ok()?))
+        })
+        .collect()
+}
+
+/// What `path` holds after `position` (whole lines only), moving `position` on. A file seen for the
+/// first time gives its last part; one that got shorter was started anew and is read from the
+/// beginning.
+fn new_text(path: &Path, position: &mut u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const FIRST_LOOK: u64 = 20 * 1024;
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if *position == u64::MAX {
+        *position = len.saturating_sub(FIRST_LOOK);
+    } else if len < *position {
+        *position = 0;
+    }
+    if len == *position {
+        return None;
+    }
+    file.seek(SeekFrom::Start(*position)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(len - *position).read_to_end(&mut bytes).ok()?;
+    let end = bytes.iter().rposition(|b| *b == b'\n')? + 1;
+    *position += end as u64;
+    Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+}
+
+/// `text` with every line marked by `label`, without terminal colors.
+fn marked(label: &str, text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    for line in text.lines() {
+        out.push('[');
+        out.push_str(label);
+        out.push_str("] ");
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip a color sequence up to its final letter
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// Where the logs of the peers go.
 pub fn folder(settings_dir: &Path) -> PathBuf {
     settings_dir.join("logs").join("peers")
@@ -132,6 +225,31 @@ pub fn store(folder: &Path, name: &str, text: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_logs_are_read_on_in_whole_lines_and_marked() {
+        let dir = std::env::temp_dir().join(format!("tc-system-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.log");
+        std::fs::write(&path, "old line\n\x1b[2mtime\x1b[0m warn: one\nhalf").unwrap();
+        let mut position = 0;
+        let text = new_text(&path, &mut position).unwrap();
+        assert_eq!(
+            marked("loginwindow", &text),
+            "[loginwindow] old line\n[loginwindow] time warn: one\n"
+        );
+        // The unfinished line follows once it is complete
+        assert_eq!(new_text(&path, &mut position), None);
+        std::fs::write(&path, "old line\n\x1b[2mtime\x1b[0m warn: one\nhalf done\n").unwrap();
+        assert_eq!(new_text(&path, &mut position).as_deref(), Some("half done\n"));
+        // Started anew: from the beginning
+        std::fs::write(&path, "new\n").unwrap();
+        assert_eq!(new_text(&path, &mut position).as_deref(), Some("new\n"));
+        // Seen for the first time: only the last part
+        let mut first = u64::MAX;
+        assert_eq!(new_text(&path, &mut first).as_deref(), Some("new\n"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn long_text_is_cut_at_line_ends() {

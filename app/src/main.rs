@@ -49,6 +49,9 @@ fn main() -> eframe::Result {
         logging::init(&dir)
     };
     tracing::info!("TableCross {} starting", env!("CARGO_PKG_VERSION"));
+    if log_file.is_some() {
+        tc_session::peer_logs::forward_system_logs(&dir);
+    }
     // The demo shows made-up values, not this computer's settings
     let mut settings = if dev.demo {
         Settings {
