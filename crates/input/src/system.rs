@@ -440,6 +440,76 @@ pub fn accessibility_fresh() -> Option<bool> {
     }
 }
 
+/// macOS: whether `program` (one of ours that answers [`ACCESS_CHECK_FLAG`]) has the Accessibility
+/// permission itself. A child normally counts as part of this app, so it is started as responsible
+/// for itself. `None` where it cannot be told.
+pub fn accessibility_of(program: &std::path::Path) -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::{CString, c_char, c_int, c_void};
+        use std::os::unix::ffi::OsStrExt;
+        unsafe extern "C" {
+            fn posix_spawnattr_init(attr: *mut *mut c_void) -> c_int;
+            fn posix_spawnattr_destroy(attr: *mut *mut c_void) -> c_int;
+            // Private but stable since macOS 10.14; without it the answer would be this app's
+            fn responsibility_spawnattrs_setdisclaim(attr: *mut *mut c_void, disclaim: c_int) -> c_int;
+            fn posix_spawn(
+                pid: *mut i32,
+                path: *const c_char,
+                actions: *const c_void,
+                attr: *const *mut c_void,
+                argv: *const *const c_char,
+                envp: *const *const c_char,
+            ) -> c_int;
+            fn waitpid(pid: i32, status: *mut c_int, options: c_int) -> i32;
+        }
+        let path = CString::new(program.as_os_str().as_bytes()).ok()?;
+        let flag = CString::new(ACCESS_CHECK_FLAG).ok()?;
+        let argv = [path.as_ptr(), flag.as_ptr(), std::ptr::null()];
+        let envp = [std::ptr::null()];
+        unsafe {
+            let mut attr = std::ptr::null_mut();
+            if posix_spawnattr_init(&mut attr) != 0 {
+                return None;
+            }
+            responsibility_spawnattrs_setdisclaim(&mut attr, 1);
+            let mut pid = 0;
+            let spawned = posix_spawn(
+                &mut pid,
+                path.as_ptr(),
+                std::ptr::null(),
+                &attr,
+                argv.as_ptr(),
+                envp.as_ptr(),
+            );
+            posix_spawnattr_destroy(&mut attr);
+            if spawned != 0 {
+                return None;
+            }
+            let mut status = 0;
+            while waitpid(pid, &mut status, 0) < 0 {
+                if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                    return None;
+                }
+            }
+            // Ended normally: the exit code is in the second byte
+            if status & 0x7f != 0 {
+                return None;
+            }
+            match (status >> 8) & 0xff {
+                0 => Some(true),
+                1 => Some(false),
+                _ => None,
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = program;
+        None
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;

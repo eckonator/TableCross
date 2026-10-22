@@ -135,6 +135,18 @@ pub fn problem(p: &Problem) -> String {
             trf(STALE_PERMISSION, &[&"de.eckonator.tablecross.helper"])
         ),
         Problem::HelperOutdated => tr("The system helper is older than the app; please update it.").into(),
+        Problem::LoginAgentNoAccess => format!(
+            "{} {} {}",
+            tr(
+                "To be controlled on the login screen, tablecross-loginwindow needs the Accessibility permission \
+                 (in newer macOS versions “Device control and data access”)."
+            ),
+            tr(
+                "The button opens the settings and a Finder window with the file: drag it into the list and \
+                 switch it on."
+            ),
+            trf(STALE_PERMISSION, &[&"tablecross-loginwindow"])
+        ),
         Problem::HelperKeyboardsBusy(n) => trf(
             "The system helper could not take {} keyboard(s); their keys also reach this Mac.",
             &[n],

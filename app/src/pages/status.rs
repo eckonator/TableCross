@@ -311,6 +311,12 @@ impl App {
                 }
             }
             #[cfg(target_os = "macos")]
+            Problem::LoginAgentNoAccess => {
+                if ui.button(tr("Open Accessibility settings")).clicked() {
+                    tc_session::helper_install::show_login_permission_place();
+                }
+            }
+            #[cfg(target_os = "macos")]
             Problem::UniversalControl => {
                 if ui.button(tr("Switch off Universal Control")).clicked() {
                     match tc_input::universal_control::turn_off() {

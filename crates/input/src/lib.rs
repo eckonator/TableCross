@@ -67,6 +67,9 @@ pub enum Problem {
     HelperNoAccess,
     /// macOS: the system helper is from another version.
     HelperOutdated,
+    /// macOS: control on the login screen is on, but its program lacks the Accessibility permission
+    /// (macOS then drops what it injects there without a word).
+    LoginAgentNoAccess,
     /// macOS: keyboards the helper could not take away from the system.
     HelperKeyboardsBusy(u16),
     /// Windows removed the hooks this many times (they were installed again).
@@ -90,6 +93,10 @@ impl std::fmt::Display for Problem {
             Problem::HelperMissing => write!(f, "the system helper is not running"),
             Problem::HelperNoAccess => write!(f, "the system helper lacks the Input Monitoring permission"),
             Problem::HelperOutdated => write!(f, "the system helper is outdated; install it again"),
+            Problem::LoginAgentNoAccess => write!(
+                f,
+                "tablecross-loginwindow lacks the Accessibility permission: no control on the login screen"
+            ),
             Problem::HelperKeyboardsBusy(n) => {
                 write!(
                     f,

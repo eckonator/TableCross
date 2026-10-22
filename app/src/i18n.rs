@@ -337,8 +337,14 @@ fn de(en: &str) -> Option<&'static str> {
         "Keyboard layout" => "Tastaturlayout",
         "Login screen" => "Anmeldebildschirm",
         "Can be controlled on the login screen" => "Auch am Anmeldebildschirm steuerbar",
-        "Before anyone logs in, this Mac can be used from the other computers as well, for example to type the password. Needs the system helper; macOS may ask for the Accessibility permission of tablecross-loginwindow once." => {
-            "Bevor sich jemand anmeldet, lässt sich dieser Mac ebenfalls von den anderen Computern aus bedienen, etwa um das Passwort einzutippen. Braucht den Systemhelfer; macOS fragt eventuell einmal nach den Bedienungshilfen für tablecross-loginwindow."
+        "Before anyone logs in, this Mac can be used from the other computers as well, for example to type the password. Needs the system helper, and tablecross-loginwindow needs the Accessibility permission (the status page shows how)." => {
+            "Bevor sich jemand anmeldet, lässt sich dieser Mac ebenfalls von den anderen Computern aus bedienen, etwa um das Passwort einzutippen. Braucht den Systemhelfer, und tablecross-loginwindow braucht das Recht „Bedienungshilfen“ (die Statusseite zeigt, wie)."
+        }
+        "To be controlled on the login screen, tablecross-loginwindow needs the Accessibility permission (in newer macOS versions “Device control and data access”)." => {
+            "Damit dieser Mac am Anmeldebildschirm steuerbar ist, braucht tablecross-loginwindow das Recht „Bedienungshilfen“ (in neueren macOS-Versionen „Gerätesteuerung und Datenzugriff“)."
+        }
+        "The button opens the settings and a Finder window with the file: drag it into the list and switch it on." => {
+            "Der Knopf öffnet die Einstellungen und ein Finder-Fenster mit der Datei: Datei in die Liste ziehen und einschalten."
         }
         "Use the layout of the computer in control" => "Layout des steuernden Computers verwenden",
         "While another computer controls this one, its keyboard layout (German, Swiss German, US …) is switched on here, so every key gives the same character. The layout used before comes back afterwards." => {

@@ -435,6 +435,8 @@ struct Shared {
     keyboard: Arc<Mutex<KeyboardSync>>,
     /// Control on the login screen (setting; `None` until the app tells).
     login_screen: Mutex<Option<bool>>,
+    /// Whether the program for the login screen has the Accessibility permission (`None`: unknown).
+    login_access: Mutex<Option<bool>>,
 }
 
 /// Keyboard layouts between the computer that controls and the one controlled.
@@ -1081,6 +1083,7 @@ impl Session {
             follow_layout: AtomicBool::new(false),
             keyboard: Arc::new(Mutex::new(KeyboardSync::default())),
             login_screen: Mutex::new(None),
+            login_access: Mutex::new(None),
         });
         shared.reload_layout();
         shared.update_sizes(true);
@@ -1155,6 +1158,7 @@ async fn run(
     let mut radio_quiet = false;
     let mut login_applied: Option<bool> = None;
     let mut access_check: Option<Instant> = None;
+    let mut login_access_check: Option<Instant> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
     let mut screen_tick = tokio::time::interval(Duration::from_secs(2));
@@ -1293,6 +1297,7 @@ async fn run(
                 check_access(&shared, &mut access_check);
                 read_own_layout(&shared, &role, false);
                 login_screen(&shared, &capture, &mut login_applied);
+                check_login_access(&shared, &mut login_access_check);
                 if let Some(capture) = &capture {
                     #[allow(unused_mut)]
                     let mut health = capture.health();
@@ -1300,6 +1305,10 @@ async fn run(
                     if crate::helper_install::outdated() && !health.problems.contains(&Problem::HelperOutdated) {
                         health.problems.retain(|p| !matches!(p, Problem::HelperMissing));
                         health.problems.push(Problem::HelperOutdated);
+                    }
+                    let login_on = *shared.login_screen.lock().expect("login lock") == Some(true);
+                    if login_on && *shared.login_access.lock().expect("login access lock") == Some(false) {
+                        health.problems.push(Problem::LoginAgentNoAccess);
                     }
                     for problem in health.problems.iter().filter(|p| !problems.contains(p)) {
                         shared.notice(Notice::Problem(problem.clone()));
@@ -1483,6 +1492,31 @@ fn check_access(shared: &Arc<Shared>, last: &mut Option<Instant>) {
         if let Some(granted) = tc_input::system::accessibility_fresh() {
             let _ = internal.send(Internal::Accessibility(granted));
         }
+    });
+}
+
+/// macOS: while control on the login screen is on, asks now and then whether its program has the
+/// Accessibility permission; without it macOS drops all its input there silently.
+fn check_login_access(shared: &Arc<Shared>, last: &mut Option<Instant>) {
+    const EVERY: Duration = Duration::from_secs(5);
+    let on = *shared.login_screen.lock().expect("login lock") == Some(true);
+    let program = std::path::Path::new(tc_input::helper_protocol::LOGIN_BINARY);
+    if !cfg!(target_os = "macos") || !on || !program.exists() {
+        *shared.login_access.lock().expect("login access lock") = None;
+        return;
+    }
+    if last.is_some_and(|t| t.elapsed() < EVERY) {
+        return;
+    }
+    *last = Some(Instant::now());
+    let shared = shared.clone();
+    tokio::task::spawn_blocking(move || {
+        let granted = tc_input::system::accessibility_of(std::path::Path::new(tc_input::helper_protocol::LOGIN_BINARY));
+        let mut known = shared.login_access.lock().expect("login access lock");
+        if *known != granted {
+            tracing::info!("Accessibility permission of the login screen program: {granted:?}");
+        }
+        *known = granted;
     });
 }
 

@@ -220,8 +220,8 @@ impl App {
                             )
                             .on_hover_text(tr(
                                 "Before anyone logs in, this Mac can be used from the other computers as well, for \
-                                 example to type the password. Needs the system helper; macOS may ask for the \
-                                 Accessibility permission of tablecross-loginwindow once.",
+                                 example to type the password. Needs the system helper, and tablecross-loginwindow \
+                                 needs the Accessibility permission (the status page shows how).",
                             ))
                             .changed()
                         {

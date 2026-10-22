@@ -24,6 +24,9 @@ unsafe extern "C" {
 /// Where to grant the helper its permission.
 pub const INPUT_MONITORING_SETTINGS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
+/// Where to grant the program for the login screen its permission.
+pub const ACCESSIBILITY_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
 /// The helper binary next to this program.
 fn built_helper() -> Result<PathBuf> {
@@ -213,6 +216,13 @@ pub fn show_permission_place() {
     let _ = std::process::Command::new("open")
         .args(["-R", INSTALLED_BINARY])
         .status();
+}
+
+/// The Accessibility settings and a Finder window with the program for the login screen, which
+/// has to be dragged into that list.
+pub fn show_login_permission_place() {
+    let _ = std::process::Command::new("open").arg(ACCESSIBILITY_SETTINGS).status();
+    let _ = std::process::Command::new("open").args(["-R", LOGIN_BINARY]).status();
 }
 
 pub fn uninstall() -> Result<()> {
