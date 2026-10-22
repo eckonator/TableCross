@@ -15,7 +15,7 @@ use tc_input::helper_protocol::{
 
 pub const INSTALLED_BINARY: &str = "/Library/PrivilegedHelperTools/de.eckonator.tablecross.helper";
 const PLIST: &str = "/Library/LaunchDaemons/de.eckonator.tablecross.helper.plist";
-pub const LOG: &str = "/Library/Logs/TableCross/helper.log";
+const LOG: &str = tc_input::helper_protocol::HELPER_LOG;
 
 unsafe extern "C" {
     fn getuid() -> u32;

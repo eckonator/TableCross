@@ -79,6 +79,8 @@ pub const LOGIN_AGENT_FILE: &str = "agent.json";
 /// The files copied from the user's settings folder.
 pub const LOGIN_FILES: [&str; 4] = ["device.key", "device.crt", "peers.json", "layout.json"];
 pub const LOGIN_LOG: &str = "/Library/Logs/TableCross/loginwindow.log";
+/// Log of the system helper itself.
+pub const HELPER_LOG: &str = "/Library/Logs/TableCross/helper.log";
 
 /// The launch agent that starts `LOGIN_BINARY` on the login screen only (macOS ends it when
 /// someone logs in).

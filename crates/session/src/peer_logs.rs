@@ -102,7 +102,7 @@ pub fn forward_system_logs(settings_dir: &Path) {
         return;
     }
     let sources = [
-        ("helper", crate::helper_install::LOG),
+        ("helper", tc_input::helper_protocol::HELPER_LOG),
         ("loginwindow", tc_input::helper_protocol::LOGIN_LOG),
     ];
     let state = settings_dir.join("logs").join("forwarded.txt");
