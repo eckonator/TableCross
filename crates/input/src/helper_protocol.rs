@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 
 /// Changed on incompatible changes. The app also works with a helper down to `OLDEST_HELPER`
 /// (without what came later); an older helper is offered for update.
-pub const HELPER_VERSION: u16 = 4;
+pub const HELPER_VERSION: u16 = 5;
 pub const OLDEST_HELPER: u16 = 3;
 /// The first helper that pauses AWDL (`ToHelper::QuietRadio`).
 pub const QUIET_RADIO_SINCE: u16 = 4;
+/// The first helper that sets up control on the login screen (`ToHelper::LoginScreen`).
+pub const LOGIN_SCREEN_SINCE: u16 = 5;
 pub const SOCKET_PATH: &str = "/var/run/de.eckonator.tablecross.helper.sock";
 
 /// `TC_HELPER_SOCKET` overrides the path (tests).
@@ -53,6 +55,66 @@ pub enum ToHelper {
     /// (`true`), or let it run again. It leaves the Wi-Fi channel every few seconds, and packets
     /// wait meanwhile. Only from helper version `QUIET_RADIO_SINCE`.
     QuietRadio(bool),
+    /// Let this Mac be controlled on the login screen (`Some`: as this name on this port), or no
+    /// longer. The helper copies the identity and pairings of the connected user for it, also
+    /// again later when they changed. Only from helper version `LOGIN_SCREEN_SINCE`.
+    LoginScreen(Option<LoginAgent>),
+}
+
+/// What the agent on the login screen needs besides the copied files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoginAgent {
+    pub name: String,
+    pub port: u16,
+}
+
+/// The program that runs on the login screen (a copy of the command line tool, put there with
+/// the helper by the administrator).
+pub const LOGIN_BINARY: &str = "/Library/PrivilegedHelperTools/tablecross-loginwindow";
+pub const LOGIN_LABEL: &str = "de.eckonator.tablecross.loginwindow";
+pub const LOGIN_PLIST: &str = "/Library/LaunchAgents/de.eckonator.tablecross.loginwindow.plist";
+/// Settings of the agent: identity and pairings copied from the user, `LOGIN_AGENT_FILE`.
+pub const LOGIN_DIR: &str = "/Library/Application Support/TableCross/LoginWindow";
+pub const LOGIN_AGENT_FILE: &str = "agent.json";
+/// The files copied from the user's settings folder.
+pub const LOGIN_FILES: [&str; 4] = ["device.key", "device.crt", "peers.json", "layout.json"];
+pub const LOGIN_LOG: &str = "/Library/Logs/TableCross/loginwindow.log";
+
+/// The launch agent that starts `LOGIN_BINARY` on the login screen only (macOS ends it when
+/// someone logs in).
+pub fn login_plist() -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LOGIN_LABEL}</string>
+    <key>LimitLoadToSessionType</key>
+    <string>LoginWindow</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{LOGIN_BINARY}</string>
+        <string>--config-dir</string>
+        <string>{LOGIN_DIR}</string>
+        <string>-v</string>
+        <string>login-agent</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>{LOGIN_LOG}</string>
+</dict>
+</plist>
+"#
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,6 +275,20 @@ mod tests {
         // Mission Control and friends stay function keys
         assert_eq!(top_row(F1 + 2, false, false), None);
         assert_eq!(top_row(0x04, false, false), None);
+    }
+
+    #[test]
+    fn the_login_agent_runs_only_on_the_login_screen() {
+        let plist = login_plist();
+        assert!(plist.contains("<string>LoginWindow</string>"));
+        assert!(plist.contains(LOGIN_BINARY) && plist.contains(LOGIN_DIR));
+        let mut buf = Vec::new();
+        let message = ToHelper::LoginScreen(Some(LoginAgent {
+            name: "MacBook".into(),
+            port: 24800,
+        }));
+        write_frame(&mut buf, &message).unwrap();
+        assert_eq!(read_frame::<ToHelper>(&mut io::Cursor::new(buf)).unwrap(), message);
     }
 
     #[test]

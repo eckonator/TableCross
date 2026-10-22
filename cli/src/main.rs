@@ -146,6 +146,10 @@ enum Command {
         #[arg(long, value_parser = parse_peer_addr)]
         addr: Vec<(String, SocketAddr)>,
     },
+    /// On the login screen of a Mac: only be controlled (started there by the system helper's
+    /// launch agent, with the settings folder it prepared)
+    #[command(hide = true)]
+    LoginAgent,
 }
 
 #[derive(Subcommand)]
@@ -196,6 +200,9 @@ async fn main() -> Result<()> {
         Some(dir) => dir.clone(),
         None => tc_net::default_config_dir().context("no settings folder found; use --config-dir")?,
     };
+    if let Command::LoginAgent = cli.command {
+        return login_agent(dir).await;
+    }
     let identity = Identity::load_or_create(&dir)?;
     let store = PeerStore::load(&dir).with_context(|| format!("cannot read the peer list in {}", dir.display()))?;
     let name = cli.name.clone().unwrap_or_else(host_name);
@@ -254,7 +261,12 @@ async fn main() -> Result<()> {
     }
     let (node, events) = Node::start(config, identity, store).await?;
     let result = match cli.command {
-        Command::Id | Command::Place { .. } | Command::Screens | Command::Helper { .. } | Command::Run { .. } => {
+        Command::Id
+        | Command::Place { .. }
+        | Command::Screens
+        | Command::Helper { .. }
+        | Command::Run { .. }
+        | Command::LoginAgent => {
             unreachable!("handled above")
         }
         Command::Peers => peers(&node).await,
@@ -361,6 +373,60 @@ async fn share(
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(_) => break,
             },
+            _ = tokio::signal::ctrl_c() => break,
+        }
+    }
+    session.send(SessionCommand::Shutdown);
+    let _ = task.await;
+    Ok(())
+}
+
+/// Runs on the login screen: the identity, pairings and arrangement were copied from the user by
+/// the system helper, so the other computers know this Mac. Input only arrives here, nothing is
+/// captured; macOS ends it when someone logs in.
+async fn login_agent(dir: PathBuf) -> Result<()> {
+    // Never a new identity here: the peers only know the one of the user
+    if !dir.join("device.key").exists() {
+        bail!(
+            "{} holds no identity; switch on control on the login screen in the app",
+            dir.display()
+        );
+    }
+    let agent: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.join(tc_input::helper_protocol::LOGIN_AGENT_FILE)).context("no agent settings")?,
+    )?;
+    let name = agent["name"].as_str().map_or_else(host_name, str::to_string);
+    let port = agent["port"]
+        .as_u64()
+        .and_then(|p| u16::try_from(p).ok())
+        .unwrap_or(tc_net::DEFAULT_PORT);
+    let backend = tc_input::Backend {
+        capture: Box::new(tc_input::NoCapture),
+        inject: tc_input::platform()?.inject,
+    };
+    let config = SessionConfig {
+        dir,
+        name: name.clone(),
+        port,
+        discovery: true,
+    };
+    let (session, task) = Session::start(config, Some(backend), None, None).await?;
+    tracing::warn!("{name} can be controlled on the login screen (port {port})");
+    let mut notices = session.notices();
+    #[cfg(unix)]
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    loop {
+        #[cfg(unix)]
+        let ended = terminate.recv();
+        #[cfg(not(unix))]
+        let ended = std::future::pending::<Option<()>>();
+        tokio::select! {
+            notice = notices.recv() => match notice {
+                Ok(notice) => tracing::warn!("{notice}"),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => break,
+            },
+            _ = ended => break,
             _ = tokio::signal::ctrl_c() => break,
         }
     }

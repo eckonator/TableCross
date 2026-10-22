@@ -407,6 +407,12 @@ impl Capture for MacCapture {
         }
     }
 
+    fn login_screen(&self, agent: Option<crate::helper_protocol::LoginAgent>) {
+        if let Some(helper) = self.shared.helper.lock().expect("helper lock").as_ref() {
+            helper.set_login_screen(agent);
+        }
+    }
+
     fn quiet_radio(&self, quiet: bool) {
         if let Some(helper) = self.shared.helper.lock().expect("helper lock").as_ref() {
             helper.set_quiet_radio(quiet);

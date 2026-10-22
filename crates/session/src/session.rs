@@ -88,6 +88,8 @@ pub enum Command {
     QuietRadio(bool),
     /// While controlled, switch to the keyboard layout of the computer that controls this one.
     FollowLayout(bool),
+    /// macOS: let this Mac be controlled on the login screen as well (through the system helper).
+    LoginScreen(bool),
     /// Keep the pointer on the computer it is on (`None`: the other way round).
     Pin(Option<bool>),
     /// While the arrangement is being changed here: where the pointer would cross, per connected
@@ -431,6 +433,8 @@ struct Shared {
     /// Take over the keyboard layout of the computer that controls this one (setting).
     follow_layout: AtomicBool,
     keyboard: Arc<Mutex<KeyboardSync>>,
+    /// Control on the login screen (setting; `None` until the app tells).
+    login_screen: Mutex<Option<bool>>,
 }
 
 /// Keyboard layouts between the computer that controls and the one controlled.
@@ -1076,6 +1080,7 @@ impl Session {
             quiet_radio: AtomicBool::new(false),
             follow_layout: AtomicBool::new(false),
             keyboard: Arc::new(Mutex::new(KeyboardSync::default())),
+            login_screen: Mutex::new(None),
         });
         shared.reload_layout();
         shared.update_sizes(true);
@@ -1148,6 +1153,7 @@ async fn run(
     let awake = Awake::start();
     let mut problems: Vec<Problem> = Vec::new();
     let mut radio_quiet = false;
+    let mut login_applied: Option<bool> = None;
     let mut access_check: Option<Instant> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
@@ -1286,6 +1292,7 @@ async fn run(
                 quiet_radio(&shared, &capture, &role, &mut radio_quiet);
                 check_access(&shared, &mut access_check);
                 read_own_layout(&shared, &role, false);
+                login_screen(&shared, &capture, &mut login_applied);
                 if let Some(capture) = &capture {
                     #[allow(unused_mut)]
                     let mut health = capture.health();
@@ -1419,6 +1426,24 @@ fn layout_back(shared: &Arc<Shared>) {
             tracing::info!("keyboard layout {} again", before.name);
         }
     });
+}
+
+/// Tells the system helper whether this Mac is to be controlled on the login screen, once the app
+/// said so and whenever it changes.
+fn login_screen(shared: &Shared, capture: &Option<Box<dyn Capture>>, applied: &mut Option<bool>) {
+    let wanted = *shared.login_screen.lock().expect("login lock");
+    let (Some(want), Some(capture)) = (wanted, capture) else {
+        return;
+    };
+    if *applied == Some(want) {
+        return;
+    }
+    let agent = want.then(|| tc_input::helper_protocol::LoginAgent {
+        name: shared.node.name().to_string(),
+        port: shared.node.local_addr().port(),
+    });
+    capture.login_screen(agent);
+    *applied = Some(want);
 }
 
 /// AWDL pauses while the pointer is shared and the setting asks for it.
@@ -2267,6 +2292,10 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             shared.changed();
         }
         Command::Corner(points) => shared.engine.lock().expect("engine lock").set_corner(points),
+        Command::LoginScreen(on) => {
+            tracing::info!("controlled on the login screen as well: {on}");
+            *shared.login_screen.lock().expect("login lock") = Some(on);
+        }
         Command::FollowLayout(follow) => {
             tracing::info!("the keyboard layout follows the controlling computer: {follow}");
             shared.follow_layout.store(follow, Ordering::SeqCst);

@@ -212,6 +212,24 @@ impl App {
 
                     #[cfg(target_os = "macos")]
                     {
+                        ui.label(tr("Login screen"));
+                        if ui
+                            .checkbox(
+                                &mut self.settings.login_screen,
+                                tr("Can be controlled on the login screen"),
+                            )
+                            .on_hover_text(tr(
+                                "Before anyone logs in, this Mac can be used from the other computers as well, for \
+                                 example to type the password. Needs the system helper; macOS may ask for the \
+                                 Accessibility permission of tablecross-loginwindow once.",
+                            ))
+                            .changed()
+                        {
+                            changed = true;
+                            self.send(Command::LoginScreen(self.settings.login_screen));
+                        }
+                        ui.end_row();
+
                         ui.label(tr("AirDrop radio"));
                         if ui
                             .checkbox(

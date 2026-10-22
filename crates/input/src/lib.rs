@@ -127,6 +127,24 @@ pub trait Capture: Send {
     /// macOS: pause AWDL (the radio of AirDrop, Handoff and AirPlay) through the system helper
     /// while the pointer is shared; it makes Wi-Fi packets wait every few seconds.
     fn quiet_radio(&self, _quiet: bool) {}
+    /// macOS: let the system helper set up control on the login screen as this computer (`None`:
+    /// no longer).
+    fn login_screen(&self, _agent: Option<helper_protocol::LoginAgent>) {}
+}
+
+/// No capture at all: a computer that is only controlled (the login screen of a Mac).
+pub struct NoCapture;
+
+impl Capture for NoCapture {
+    fn start(&mut self, _handler: Handler) -> Result<(), InputError> {
+        Ok(())
+    }
+
+    fn stop(&mut self) {}
+
+    fn health(&self) -> Health {
+        Health::default()
+    }
 }
 
 /// The local system's pointer and keyboard.

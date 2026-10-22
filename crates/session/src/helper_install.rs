@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use tc_input::helper_protocol::{FromHelper, HELPER_VERSION, LABEL, ToHelper, read_frame, socket_path, write_frame};
+use tc_input::helper_protocol::{
+    FromHelper, HELPER_VERSION, LABEL, LOGIN_BINARY, LOGIN_DIR, LOGIN_PLIST, ToHelper, read_frame, socket_path,
+    write_frame,
+};
 
 pub const INSTALLED_BINARY: &str = "/Library/PrivilegedHelperTools/de.eckonator.tablecross.helper";
 const PLIST: &str = "/Library/LaunchDaemons/de.eckonator.tablecross.helper.plist";
@@ -33,6 +36,25 @@ fn built_helper() -> Result<PathBuf> {
         );
     }
     Ok(path)
+}
+
+/// The command line tool next to `helper`, which also runs on the login screen.
+fn login_program(helper: &Path) -> Option<PathBuf> {
+    Some(helper.with_file_name("tablecross-cli")).filter(|p| p.exists())
+}
+
+/// Shell lines that put the program for the login screen in place (none without it).
+fn copy_login_program(helper: &Path) -> String {
+    match login_program(helper) {
+        Some(program) => format!(
+            "cp {program} {LOGIN_BINARY}
+chown root:wheel {LOGIN_BINARY}
+chmod 755 {LOGIN_BINARY}
+",
+            program = quote(&program)
+        ),
+        None => String::new(),
+    }
 }
 
 fn plist(uid: u32) -> String {
@@ -93,10 +115,11 @@ launchctl bootout system/{LABEL} 2>/dev/null || true
 cp {source} {INSTALLED_BINARY}
 chown root:wheel {INSTALLED_BINARY}
 chmod 755 {INSTALLED_BINARY}
-cp {plist} {PLIST}
+{login}cp {plist} {PLIST}
 chown root:wheel {PLIST}
 chmod 644 {PLIST}
 launchctl bootstrap system {PLIST}",
+        login = copy_login_program(&source),
         source = quote(&source),
         plist = quote(&plist_file),
     );
@@ -123,6 +146,17 @@ pub fn outdated() -> bool {
         (Some(Ok(built)), Ok(installed)) => built != installed,
         _ => false,
     };
+    // The program for the login screen came with the helper later and changes with the app
+    let login_differs = built_helper()
+        .ok()
+        .and_then(|helper| login_program(&helper))
+        .and_then(|program| std::fs::read(program).ok())
+        .is_some_and(|built| {
+            std::fs::read(LOGIN_BINARY)
+                .ok()
+                .is_none_or(|installed| installed != built)
+        });
+    let differs = differs || login_differs;
     *cache = Some((modified, differs));
     differs
 }
@@ -138,7 +172,8 @@ pub fn update_from(new: &Path) -> Result<()> {
 cp {new} {INSTALLED_BINARY}
 chown root:wheel {INSTALLED_BINARY}
 chmod 755 {INSTALLED_BINARY}
-launchctl kickstart -k system/{LABEL}",
+{login}launchctl kickstart -k system/{LABEL}",
+        login = copy_login_program(new),
         new = quote(new),
     ))
 }
@@ -153,12 +188,20 @@ pub fn installed() -> bool {
     Path::new(INSTALLED_BINARY).exists()
 }
 
-/// Whether `new` differs from the installed helper.
+/// Whether `new` (or the program for the login screen next to it) differs from what is installed.
 pub fn differs_from(new: &Path) -> bool {
-    match (std::fs::read(new), std::fs::read(INSTALLED_BINARY)) {
+    let helper = match (std::fs::read(new), std::fs::read(INSTALLED_BINARY)) {
         (Ok(a), Ok(b)) => a != b,
         _ => false,
-    }
+    };
+    let login = login_program(new)
+        .and_then(|program| std::fs::read(program).ok())
+        .is_some_and(|built| {
+            std::fs::read(LOGIN_BINARY)
+                .ok()
+                .is_none_or(|installed| installed != built)
+        });
+    helper || login
 }
 
 /// Opens the Input Monitoring settings and a Finder window with the helper file selected, so it
@@ -175,7 +218,8 @@ pub fn show_permission_place() {
 pub fn uninstall() -> Result<()> {
     as_admin(&format!(
         "launchctl bootout system/{LABEL} 2>/dev/null || true
-rm -f {PLIST} {INSTALLED_BINARY}
+rm -f {PLIST} {INSTALLED_BINARY} {LOGIN_BINARY} {LOGIN_PLIST}
+rm -rf '{LOGIN_DIR}'
 rm -rf /Library/Logs/TableCross
 tccutil reset ListenEvent {LABEL} 2>/dev/null || true"
     ))

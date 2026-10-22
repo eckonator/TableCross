@@ -20,8 +20,8 @@ use core_foundation_sys::runloop::{CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopR
 use core_foundation_sys::set::{CFSetGetCount, CFSetGetValues, CFSetRef};
 use core_foundation_sys::string::{CFStringCreateWithCString, CFStringRef, kCFStringEncodingUTF8};
 use tc_input::helper_protocol::{
-    AWDL, CONSUMER_KEYS, DeadManSwitch, F1, F12, FromHelper, HELPER_VERSION, ToHelper, interface_up, read_frame,
-    socket_path, write_frame,
+    AWDL, CONSUMER_KEYS, DeadManSwitch, F1, F12, FromHelper, HELPER_VERSION, LOGIN_AGENT_FILE, LOGIN_BINARY, LOGIN_DIR,
+    LOGIN_FILES, LOGIN_PLIST, LoginAgent, ToHelper, interface_up, login_plist, read_frame, socket_path, write_frame,
 };
 
 type Ref = *mut c_void;
@@ -386,8 +386,105 @@ fn quiet_radio() {
     }
 }
 
+/// The home folder of `uid`.
+fn home_of(uid: u32) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut buffer = vec![0 as libc::c_char; 16 * 1024];
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    let result = unsafe { libc::getpwuid_r(uid, &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found) };
+    if result != 0 || found.is_null() || entry.pw_dir.is_null() {
+        return None;
+    }
+    let dir = unsafe { std::ffi::CStr::from_ptr(entry.pw_dir) };
+    Some(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+}
+
+/// Writes `bytes` to `path` (only root may read it with `private`) unless it is there already;
+/// whether it changed.
+fn put(path: &std::path::Path, bytes: &[u8], private: bool) -> std::io::Result<bool> {
+    if std::fs::read(path).is_ok_and(|old| old == bytes) {
+        return Ok(false);
+    }
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::write(&tmp, bytes)?;
+    std::fs::set_permissions(
+        &tmp,
+        std::fs::Permissions::from_mode(if private { 0o600 } else { 0o644 }),
+    )?;
+    std::fs::rename(&tmp, path)?;
+    Ok(true)
+}
+
+/// Largest settings file copied for the login screen.
+const MAX_COPIED: u64 = 1024 * 1024;
+
+/// Sets up control on the login screen for the user `uid`: their identity, pairings and
+/// arrangement go to a folder only root can read, the launch agent starts the copy of the command
+/// line tool there. Runs again whenever the app asks, so later pairings follow. `None` takes it
+/// all away.
+fn login_screen(uid: u32, agent: Option<LoginAgent>) {
+    let dir = std::path::Path::new(LOGIN_DIR);
+    let Some(agent) = agent else {
+        let had = std::path::Path::new(LOGIN_PLIST).exists() || dir.exists();
+        if !dry_run() {
+            let _ = std::fs::remove_file(LOGIN_PLIST);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        if had {
+            log("control on the login screen switched off");
+        }
+        return;
+    };
+    if dry_run() {
+        log(&format!(
+            "dry run: the login screen would be set up as {} for user {uid}",
+            agent.name
+        ));
+        return;
+    }
+    if !std::path::Path::new(LOGIN_BINARY).exists() {
+        log("control on the login screen needs the helper installed anew (its program is missing)");
+        return;
+    }
+    let Some(home) = home_of(uid) else {
+        log(&format!("no home folder for user {uid}"));
+        return;
+    };
+    let source = home.join("Library/Application Support/TableCross");
+    let result = (|| -> std::io::Result<bool> {
+        std::fs::create_dir_all(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        let mut changed = false;
+        for name in LOGIN_FILES {
+            let from = source.join(name);
+            let to = dir.join(name);
+            // A link could point anywhere; only plain files of a sensible size are taken
+            match std::fs::symlink_metadata(&from) {
+                Ok(meta) if meta.is_file() && meta.len() <= MAX_COPIED => {
+                    changed |= put(&to, &std::fs::read(&from)?, true)?;
+                }
+                _ => {
+                    changed |= std::fs::remove_file(&to).is_ok();
+                }
+            }
+        }
+        let config = serde_json::json!({ "name": agent.name, "port": agent.port });
+        changed |= put(&dir.join(LOGIN_AGENT_FILE), config.to_string().as_bytes(), true)?;
+        std::fs::create_dir_all("/Library/LaunchAgents")?;
+        changed |= put(std::path::Path::new(LOGIN_PLIST), login_plist().as_bytes(), false)?;
+        Ok(changed)
+    })();
+    match result {
+        Ok(true) => log(&format!("login screen set up as {} for user {uid}", agent.name)),
+        Ok(false) => {}
+        Err(e) => log(&format!("cannot set up the login screen: {e}")),
+    }
+}
+
 enum Incoming {
-    Connected,
+    Connected(u32),
     Message(ToHelper),
     Gone,
 }
@@ -420,7 +517,7 @@ fn serve(events: Sender<Incoming>) {
         let Ok(reader) = stream.try_clone() else { continue };
         let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
         *CLIENT.lock().expect("client lock") = Some(BufWriter::new(stream));
-        let _ = events.send(Incoming::Connected);
+        let _ = events.send(Incoming::Connected(uid));
         let events = events.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(reader);
@@ -452,12 +549,14 @@ pub fn run() {
     let (tx, rx): (Sender<Incoming>, Receiver<Incoming>) = mpsc::channel();
     std::thread::spawn(move || serve(tx));
     let mut switch = DeadManSwitch::new(Instant::now());
+    let mut client_uid = 0;
     loop {
         unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, 0) };
         let now = Instant::now();
         while let Ok(event) = rx.try_recv() {
             match event {
-                Incoming::Connected => {
+                Incoming::Connected(uid) => {
+                    client_uid = uid;
                     switch.disconnected();
                     QUIET_WANTED.store(false, Ordering::SeqCst);
                     send(&FromHelper::Hello {
@@ -469,6 +568,10 @@ pub fn run() {
                 Incoming::Message(message) => {
                     if let ToHelper::QuietRadio(on) = message {
                         QUIET_WANTED.store(on, Ordering::SeqCst);
+                    }
+                    if let ToHelper::LoginScreen(agent) = &message {
+                        let (uid, agent) = (client_uid, agent.clone());
+                        std::thread::spawn(move || login_screen(uid, agent));
                     }
                     switch.message(&message, now);
                 }

@@ -131,7 +131,9 @@ permissions, starting with the system, the program; optionally settings and pair
   they are saved through the menu of the TableCross symbol. Files dragged from a Mac over the edge
   keep being dragged on another Mac and land where you drop them; elsewhere they land in
   `Downloads`, which opens.
-- **Windows sign-in screen.** An optional Windows service keeps control on the login and UAC screens.
+- **Sign-in screens.** An optional Windows service keeps control on the login and UAC screens. On a
+  Mac with the system helper, *Can be controlled on the login screen* lets the other computers use it
+  before anyone logs in (for example to type the password).
 
 Local network only, no cloud, no account, no telemetry. If you allow it, the app asks GitHub now and
 then whether a newer version exists.
@@ -193,6 +195,11 @@ tablecross-cli helper update    # after an update of TableCross (the app does th
 ```
 
 If TableCross stops or crashes, the helper gives the keyboard back within a second.
+
+The helper also sets up the login screen if you switch that on: it copies this Mac's identity and
+pairings into a folder only the system can read (`/Library/Application Support/TableCross/LoginWindow`)
+and a launch agent starts `tablecross-loginwindow` there while no one is logged in. It only receives
+input, it captures nothing. Its log is `/Library/Logs/TableCross/loginwindow.log`.
 
 On Windows, the optional service lets TableCross operate the sign-in screen, UAC prompts and programs
 started as administrator (run once in an administrator prompt):

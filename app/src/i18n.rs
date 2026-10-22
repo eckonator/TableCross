@@ -335,6 +335,11 @@ fn de(en: &str) -> Option<&'static str> {
         "AirDrop radio" => "AirDrop-Funk",
         "Crossings" => "Übergänge",
         "Keyboard layout" => "Tastaturlayout",
+        "Login screen" => "Anmeldebildschirm",
+        "Can be controlled on the login screen" => "Auch am Anmeldebildschirm steuerbar",
+        "Before anyone logs in, this Mac can be used from the other computers as well, for example to type the password. Needs the system helper; macOS may ask for the Accessibility permission of tablecross-loginwindow once." => {
+            "Bevor sich jemand anmeldet, lässt sich dieser Mac ebenfalls von den anderen Computern aus bedienen, etwa um das Passwort einzutippen. Braucht den Systemhelfer; macOS fragt eventuell einmal nach den Bedienungshilfen für tablecross-loginwindow."
+        }
         "Use the layout of the computer in control" => "Layout des steuernden Computers verwenden",
         "While another computer controls this one, its keyboard layout (German, Swiss German, US …) is switched on here, so every key gives the same character. The layout used before comes back afterwards." => {
             "Während ein anderer Computer diesen steuert, wird hier dessen Tastaturlayout (Deutsch, Schweizerdeutsch, US …) eingestellt, damit jede Taste dasselbe Zeichen ergibt. Danach kommt das vorherige Layout zurück."

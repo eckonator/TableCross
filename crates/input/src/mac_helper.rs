@@ -22,11 +22,13 @@ use core_foundation_sys::preferences::{
 use core_foundation_sys::string::{CFStringCreateWithCString, kCFStringEncodingUTF8};
 
 use crate::helper_protocol::{
-    ALIVE_INTERVAL, FromHelper, HELPER_VERSION, OLDEST_HELPER, QUIET_RADIO_SINCE, ToHelper, read_frame, socket_path,
-    top_row, write_frame,
+    ALIVE_INTERVAL, FromHelper, HELPER_VERSION, LOGIN_SCREEN_SINCE, LoginAgent, OLDEST_HELPER, QUIET_RADIO_SINCE,
+    ToHelper, read_frame, socket_path, top_row, write_frame,
 };
 
 const RECONNECT: Duration = Duration::from_secs(2);
+/// How often the helper is reminded of the login screen, so changed pairings reach it.
+const LOGIN_AGAIN: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HelperStatus {
@@ -46,6 +48,8 @@ pub struct HelperClient {
     writer: Mutex<Option<BufWriter<UnixStream>>>,
     want_seize: AtomicBool,
     want_quiet: AtomicBool,
+    /// Control on the login screen (`None`: not wanted, unknown at first).
+    want_login: Mutex<Option<Option<LoginAgent>>>,
     status: Mutex<HelperStatus>,
 }
 
@@ -56,6 +60,7 @@ impl HelperClient {
             writer: Mutex::new(None),
             want_seize: AtomicBool::new(false),
             want_quiet: AtomicBool::new(false),
+            want_login: Mutex::new(None),
             status: Mutex::new(HelperStatus::default()),
         });
         let on_key = Arc::new(on_key);
@@ -78,10 +83,15 @@ impl HelperClient {
         std::thread::Builder::new()
             .name("tablecross-helper-alive".into())
             .spawn(move || {
+                let mut login_sent = std::time::Instant::now();
                 loop {
                     std::thread::sleep(ALIVE_INTERVAL);
                     let Some(client) = weak.upgrade() else { return };
                     client.send(&ToHelper::Alive);
+                    if login_sent.elapsed() >= LOGIN_AGAIN {
+                        login_sent = std::time::Instant::now();
+                        client.send_login();
+                    }
                 }
             })
             .expect("thread");
@@ -120,6 +130,7 @@ impl HelperClient {
                     if self.want_quiet.load(Ordering::SeqCst) {
                         self.send_quiet(true);
                     }
+                    self.send_login();
                 }
                 FromHelper::Key { usage, down } => on_key(Captured::Key { usage, down }),
                 FromHelper::Media { key, down } => on_key(Captured::Media { key, down }),
@@ -184,6 +195,21 @@ impl HelperClient {
             self.send(&ToHelper::QuietRadio(quiet));
         } else if quiet && version > 0 {
             tracing::info!("the system helper {version} cannot pause AWDL yet; update it for that");
+        }
+    }
+
+    /// Control on the login screen as `agent` (helpers from `LOGIN_SCREEN_SINCE` on), or not.
+    pub fn set_login_screen(&self, agent: Option<LoginAgent>) {
+        *self.want_login.lock().expect("login lock") = Some(agent);
+        self.send_login();
+    }
+
+    fn send_login(&self) {
+        let Some(agent) = self.want_login.lock().expect("login lock").clone() else {
+            return;
+        };
+        if self.status().version >= LOGIN_SCREEN_SINCE {
+            self.send(&ToHelper::LoginScreen(agent));
         }
     }
 

@@ -8,7 +8,9 @@ use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use tc_input::helper_protocol::{AWDL, FromHelper, HELPER_VERSION, ToHelper, interface_up, read_frame, write_frame};
+use tc_input::helper_protocol::{
+    AWDL, FromHelper, HELPER_VERSION, LoginAgent, ToHelper, interface_up, read_frame, write_frame,
+};
 
 struct Helper(Child);
 
@@ -153,4 +155,46 @@ fn awdl_pauses_while_asked_and_runs_again_when_the_app_goes_away() {
     drop((stream, reader));
     wait_for("AWDL would go up");
     wait_for("AWDL runs again");
+}
+
+#[test]
+fn the_login_screen_is_set_up_for_the_connected_user() {
+    let socket = std::env::temp_dir().join(format!("tablecross-helper-login-{}.sock", std::process::id()));
+    let socket = socket.to_str().unwrap().to_string();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tablecross-helper"))
+        .env("TC_HELPER_SOCKET", &socket)
+        .env("TC_HELPER_DRY_RUN", "1")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut log = BufReader::new(child.stderr.take().unwrap());
+    let _helper = Helper(child);
+    let (mut stream, _reader) = connect(&socket);
+    write_frame(
+        &mut stream,
+        &ToHelper::Hello {
+            version: HELPER_VERSION,
+        },
+    )
+    .unwrap();
+    write_frame(
+        &mut stream,
+        &ToHelper::LoginScreen(Some(LoginAgent {
+            name: "Test-Mac".into(),
+            port: 24800,
+        })),
+    )
+    .unwrap();
+    let uid = unsafe { libc::getuid() };
+    let expected = format!("the login screen would be set up as Test-Mac for user {uid}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut line = String::new();
+    loop {
+        assert!(Instant::now() < deadline, "helper did not say: {expected}");
+        line.clear();
+        assert!(log.read_line(&mut line).unwrap() > 0, "helper ended");
+        if line.contains(&expected) {
+            break;
+        }
+    }
 }

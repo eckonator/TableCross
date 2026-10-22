@@ -88,6 +88,8 @@ pub struct Settings {
     pub edges_always: bool,
     /// While controlled, use the keyboard layout of the computer in control.
     pub follow_layout: bool,
+    /// macOS: can be controlled on the login screen as well (through the system helper).
+    pub login_screen: bool,
     /// macOS: pause AWDL (AirDrop, Handoff, AirPlay) while the pointer is shared; it makes Wi-Fi
     /// packets wait every few seconds.
     pub quiet_radio: bool,
@@ -119,6 +121,7 @@ impl Default for Settings {
             skip_offline: true,
             edges_always: false,
             follow_layout: true,
+            login_screen: false,
             quiet_radio: true,
             screen_diagonals: Vec::new(),
         }
@@ -176,6 +179,7 @@ impl Settings {
             skip_offline: field(&fields, "skip_offline", d.skip_offline),
             edges_always: field(&fields, "edges_always", d.edges_always),
             follow_layout: field(&fields, "follow_layout", d.follow_layout),
+            login_screen: field(&fields, "login_screen", d.login_screen),
             quiet_radio: field(&fields, "quiet_radio", d.quiet_radio),
             screen_diagonals: field(&fields, "screen_diagonals", d.screen_diagonals),
         }
