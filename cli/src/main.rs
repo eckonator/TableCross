@@ -413,6 +413,9 @@ async fn login_agent(dir: PathBuf) -> Result<()> {
     let (session, task) = Session::start(config, Some(backend), None, None).await?;
     tracing::warn!("{name} can be controlled on the login screen (port {port})");
     let mut notices = session.notices();
+    // Without these macOS drops the input silently; checked again since a grant may come late
+    let mut access_check = tokio::time::interval(std::time::Duration::from_secs(10));
+    let mut last_access = None;
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
@@ -428,6 +431,18 @@ async fn login_agent(dir: PathBuf) -> Result<()> {
             },
             _ = ended => break,
             _ = tokio::signal::ctrl_c() => break,
+            _ = access_check.tick() => {
+                let access = tc_input::system::event_access();
+                if let Some((session, trusted, post, listen)) = access
+                    && (last_access != access || !(session && trusted && post))
+                {
+                    tracing::warn!(
+                        "window server session {session}; macOS allows this program: accessibility \
+                         {trusted}, posting events {post}, listening {listen}"
+                    );
+                }
+                last_access = access;
+            }
         }
     }
     session.send(SessionCommand::Shutdown);

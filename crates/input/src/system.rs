@@ -375,6 +375,39 @@ pub fn answer_access_check() {
     std::process::exit(0);
 }
 
+/// macOS: what this process may do as macOS sees it now: a window server session to post into,
+/// Accessibility, posting events, listening to events. `None` elsewhere.
+pub fn event_access() -> Option<(bool, bool, bool, bool)> {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        unsafe extern "C" {
+            fn AXIsProcessTrusted() -> bool;
+            fn CGPreflightPostEventAccess() -> bool;
+            fn CGPreflightListenEventAccess() -> bool;
+            fn CGSessionCopyCurrentDictionary() -> *const std::ffi::c_void;
+        }
+        #[link(name = "CoreFoundation", kind = "framework")]
+        unsafe extern "C" {
+            fn CFRelease(cf: *const std::ffi::c_void);
+        }
+        unsafe {
+            let session = CGSessionCopyCurrentDictionary();
+            if !session.is_null() {
+                CFRelease(session);
+            }
+            Some((
+                !session.is_null(),
+                AXIsProcessTrusted(),
+                CGPreflightPostEventAccess(),
+                CGPreflightListenEventAccess(),
+            ))
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 /// macOS: whether Accessibility is granted, asked of a fresh process of this program. A running
 /// process may keep the answer it got first, so a permission granted later shows only here.
 /// `None` where it cannot be told.
