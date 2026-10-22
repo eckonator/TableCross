@@ -44,6 +44,18 @@ pub fn notice(n: &Notice) -> String {
         Notice::LockedAll => tr("All screens were locked").into(),
         Notice::PoweringOff(names) if names.is_empty() => tr("This computer is shutting down").into(),
         Notice::PoweringOff(names) => trf("Shutting down: {}", &[&names.join(", ")]),
+        Notice::LoggingOut(names, too_old) => {
+            let told = if names.is_empty() {
+                tr("This computer logs out").to_string()
+            } else {
+                trf("Logging out: {}", &[&names.join(", ")])
+            };
+            if too_old.is_empty() {
+                told
+            } else {
+                format!("{told}. {}", trf("Update first to log out: {}", &[&too_old.join(", ")]))
+            }
+        }
         Notice::LayoutMissing(name, layout) => trf(
             "{} types with the keyboard layout {}, which is not set up here (add it in the system settings)",
             &[name, layout],

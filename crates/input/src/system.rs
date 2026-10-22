@@ -294,6 +294,58 @@ pub fn power_off() -> Result<(), String> {
     }
 }
 
+/// Logs the user of this computer out like its own menu does, without asking first: applications
+/// are asked to quit and may stop it for unsaved documents.
+pub fn log_out() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // "Really log out": the login window's event without the confirmation dialog
+        run(
+            "osascript",
+            &["-e", "tell application \"loginwindow\" to «event aevtrlgo»"],
+        )
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Shutdown::{
+            EWX_LOGOFF, ExitWindowsEx, SHTDN_REASON_FLAG_PLANNED, SHTDN_REASON_MAJOR_OTHER,
+        };
+        // Logging off needs no special right, unlike shutting down
+        if unsafe { ExitWindowsEx(EWX_LOGOFF, SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_FLAG_PLANNED) } == 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_uppercase();
+        let session = if desktop.contains("GNOME") {
+            run("gnome-session-quit", &["--logout", "--no-prompt"])
+        } else if desktop.contains("KDE") {
+            run(
+                "dbus-send",
+                &[
+                    "--session",
+                    "--type=method_call",
+                    "--dest=org.kde.Shutdown",
+                    "/Shutdown",
+                    "org.kde.Shutdown.logout",
+                ],
+            )
+        } else {
+            Err("no session manager".into())
+        };
+        session.or_else(|_| match std::env::var("XDG_SESSION_ID") {
+            Ok(id) => run("loginctl", &["terminate-session", &id]),
+            Err(_) => Err("no session to end".into()),
+        })
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+    {
+        Err("not supported".into())
+    }
+}
+
 /// Every user may shut down, but the right has to be switched on in the process token first.
 #[cfg(windows)]
 fn windows_power_off() -> Result<(), String> {

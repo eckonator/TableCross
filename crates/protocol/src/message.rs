@@ -292,6 +292,9 @@ pub enum Message {
     KeyboardLayout {
         layout: KeyboardLayout,
     },
+    /// Log the user out (someone logged out all computers at once). Applications may still ask to
+    /// save their documents. From 0.4.52 on, only to peers that announced it.
+    LogOut,
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -530,6 +533,7 @@ mod tests {
                     name: "Deutsch".into(),
                 },
             },
+            Message::LogOut,
         ]
     }
 

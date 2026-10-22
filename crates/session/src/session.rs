@@ -101,6 +101,11 @@ pub enum Command {
     PowerOff {
         this_one: bool,
     },
+    /// Log out on all connected computers (those that know how), and on this one as well with
+    /// `this_one`.
+    LogOut {
+        this_one: bool,
+    },
     /// Put a peer next to this computer (`None`: nowhere).
     Place {
         peer: Fingerprint,
@@ -169,6 +174,8 @@ pub enum Notice {
     LockedAll,
     /// These computers were told to shut down from here.
     PoweringOff(Vec<String>),
+    /// These computers were told to log out from here; the second list is too old for that.
+    LoggingOut(Vec<String>, Vec<String>),
     /// The computer controlling this one types with a keyboard layout not set up here.
     LayoutMissing(String, String),
 }
@@ -206,6 +213,12 @@ impl std::fmt::Display for Notice {
             Notice::TransferFailed(n, e) => write!(f, "file transfer with {n} failed: {e}"),
             Notice::LockedAll => write!(f, "all screens locked"),
             Notice::PoweringOff(names) => write!(f, "shutting down: {}", names.join(", ")),
+            Notice::LoggingOut(names, too_old) => write!(
+                f,
+                "logging out: {}; too old for it: {}",
+                names.join(", "),
+                too_old.join(", ")
+            ),
             Notice::LayoutMissing(name, layout) => {
                 write!(
                     f,
@@ -1964,6 +1977,47 @@ fn power_off_here() {
     });
 }
 
+/// Logs this computer's user out without blocking the loop.
+fn log_out_here() {
+    std::thread::spawn(|| {
+        if let Err(e) = tc_input::system::log_out() {
+            tracing::warn!("cannot log out: {e}");
+        }
+    });
+}
+
+/// Mouse and keyboard back home, then the user of every connected computer that knows how is
+/// logged out; this one a moment later, so that the messages are out before TableCross is asked
+/// to quit.
+fn log_out_all(shared: &Arc<Shared>, this_one: bool) {
+    let actions = shared.engine.lock().expect("engine lock").release_everything();
+    shared.execute(actions);
+    let (mut told, mut too_old) = (Vec::new(), Vec::new());
+    for peer in shared.node.status() {
+        let Some(link) = &peer.link else { continue };
+        let name = shared.name_of(&peer.peer.fingerprint.to_string());
+        // Older versions end the connection on a message they do not know
+        if layout_file::knows_log_out(&link.app_version) {
+            shared.node.send(&peer.peer.fingerprint, Message::LogOut);
+            told.push(name);
+        } else {
+            too_old.push(name);
+        }
+    }
+    tracing::info!(
+        "logging out {} other computer(s), {} too old for it, this one: {this_one}",
+        told.len(),
+        too_old.len()
+    );
+    shared.notice(Notice::LoggingOut(told, too_old));
+    if this_one {
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            log_out_here();
+        });
+    }
+}
+
 /// Mouse and keyboard back home, then every connected computer shuts down; this one a moment later,
 /// so that the messages are out before TableCross is asked to quit.
 fn power_off_all(shared: &Arc<Shared>, this_one: bool) {
@@ -2216,6 +2270,13 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             tracing::info!("{} shuts down all computers", shared.name_of(&peer.to_string()));
             power_off_here();
         }
+        Event::Message {
+            peer,
+            message: Message::LogOut,
+        } => {
+            tracing::info!("{} logs out all computers", shared.name_of(&peer.to_string()));
+            log_out_here();
+        }
         Event::Message { peer, message } => {
             match message {
                 Message::Enter { .. } => shared.files.lock().expect("files lock").left_up_seen = false,
@@ -2373,6 +2434,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
         }
         Command::LockAll => lock_all(shared),
         Command::PowerOff { this_one } => power_off_all(shared, this_one),
+        Command::LogOut { this_one } => log_out_all(shared, this_one),
         Command::CollectLogs(on) => {
             let mut logs = shared.logs.lock().expect("logs lock");
             if logs.collect == on {

@@ -27,6 +27,8 @@ pub struct Tray {
     lock: MenuItem,
     power_off_others: MenuItem,
     power_off_all: MenuItem,
+    log_out_others: MenuItem,
+    log_out_all: MenuItem,
     quit: MenuItem,
 }
 
@@ -59,9 +61,11 @@ pub fn icons_shown() -> Option<bool> {
     }
 }
 
-/// What the menu asked to shut down, kept until the window asked back.
+/// What the menu asked to shut down or log out, kept until the window asked back.
 pub const POWER_OFF_OTHERS: u8 = 1;
 pub const POWER_OFF_ALL: u8 = 2;
+pub const LOG_OUT_OTHERS: u8 = 3;
+pub const LOG_OUT_ALL: u8 = 4;
 
 /// After "Quit" the process ends at the latest after this long.
 pub(crate) const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
@@ -104,7 +108,7 @@ fn show_window(ctx: &egui::Context) {
 
 impl Tray {
     /// `quit` is set when the user chose "Quit" in the menu, `update_flag` when "Update to …",
-    /// `power_off` to `POWER_OFF_OTHERS` or `POWER_OFF_ALL` when the window should ask about that.
+    /// `power_off` to one of `POWER_OFF_*` or `LOG_OUT_*` when the window should ask about that.
     pub fn new(
         ctx: &egui::Context,
         session: Arc<Mutex<Option<SessionHandle>>>,
@@ -121,6 +125,8 @@ impl Tray {
         let lock = MenuItem::new(tr("Lock all screens"), true, None);
         let power_off_others = MenuItem::new(tr("Shut down other computers …"), true, None);
         let power_off_all = MenuItem::new(tr("Shut down all computers …"), true, None);
+        let log_out_others = MenuItem::new(tr("Log out on other computers …"), true, None);
+        let log_out_all = MenuItem::new(tr("Log out on all computers …"), true, None);
         let quit = MenuItem::new(tr("Quit TableCross"), true, None);
         let menu = Menu::new();
         menu.append_items(&[&show]).ok()?;
@@ -133,6 +139,8 @@ impl Tray {
             &lock,
             &power_off_others,
             &power_off_all,
+            &log_out_others,
+            &log_out_all,
             &PredefinedMenuItem::separator(),
             &quit,
         ])
@@ -159,7 +167,13 @@ impl Tray {
         let (show_id, release_id, quit_id) = (show.id().clone(), release.id().clone(), quit.id().clone());
         let lock_id = lock.id().clone();
         let pin_id = pin.id().clone();
-        let (others_id, all_id) = (power_off_others.id().clone(), power_off_all.id().clone());
+        // Menu entries that ask in the window first, and what they ask about
+        let asking = [
+            (power_off_others.id().clone(), POWER_OFF_OTHERS),
+            (power_off_all.id().clone(), POWER_OFF_ALL),
+            (log_out_others.id().clone(), LOG_OUT_OTHERS),
+            (log_out_all.id().clone(), LOG_OUT_ALL),
+        ];
         let update_id = update.id().clone();
         let save_files_id = save_files.id().clone();
         let menu_ctx = ctx.clone();
@@ -184,13 +198,8 @@ impl Tray {
                 if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
                     session.send(Command::LockAll);
                 }
-            } else if event.id == others_id || event.id == all_id {
-                let which = if event.id == all_id {
-                    POWER_OFF_ALL
-                } else {
-                    POWER_OFF_OTHERS
-                };
-                power_off.store(which, Ordering::SeqCst);
+            } else if let Some((_, which)) = asking.iter().find(|(id, _)| *id == event.id) {
+                power_off.store(*which, Ordering::SeqCst);
                 show_window(&menu_ctx);
             } else if event.id == quit_id {
                 tracing::info!("quit chosen in the status icon menu");
@@ -236,6 +245,8 @@ impl Tray {
             lock,
             power_off_others,
             power_off_all,
+            log_out_others,
+            log_out_all,
             quit,
         })
     }
@@ -280,6 +291,8 @@ impl Tray {
         self.lock.set_text(tr("Lock all screens"));
         self.power_off_others.set_text(tr("Shut down other computers …"));
         self.power_off_all.set_text(tr("Shut down all computers …"));
+        self.log_out_others.set_text(tr("Log out on other computers …"));
+        self.log_out_all.set_text(tr("Log out on all computers …"));
         self.quit.set_text(tr("Quit TableCross"));
     }
 }

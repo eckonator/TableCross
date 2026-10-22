@@ -57,8 +57,8 @@ pub struct App {
     update_flag: Arc<AtomicBool>,
     /// "Shut down …" was chosen in the menu of the status icon (`tray::POWER_OFF_*`).
     power_off_flag: Arc<AtomicU8>,
-    /// Asking whether to shut down; `true` includes this computer.
-    confirm_power_off: Option<bool>,
+    /// Asking whether to shut down (or log out with `.0`); `.1` includes this computer.
+    confirm_power_off: Option<(bool, bool)>,
     /// "Save files from the clipboard …" was chosen in the menu of the status icon.
     save_files_flag: Arc<AtomicBool>,
     /// Asking where the files copied on another computer go: the folder chosen so far.
@@ -735,11 +735,15 @@ impl App {
     /// Asks before shutting down what the menu of the status icon chose.
     fn power_off_dialog(&mut self, ctx: &egui::Context) {
         match self.power_off_flag.swap(0, Ordering::SeqCst) {
-            crate::tray::POWER_OFF_OTHERS => self.confirm_power_off = Some(false),
-            crate::tray::POWER_OFF_ALL => self.confirm_power_off = Some(true),
+            crate::tray::POWER_OFF_OTHERS => self.confirm_power_off = Some((false, false)),
+            crate::tray::POWER_OFF_ALL => self.confirm_power_off = Some((false, true)),
+            crate::tray::LOG_OUT_OTHERS => self.confirm_power_off = Some((true, false)),
+            crate::tray::LOG_OUT_ALL => self.confirm_power_off = Some((true, true)),
             _ => {}
         }
-        let Some(this_one) = self.confirm_power_off else { return };
+        let Some((log_out, this_one)) = self.confirm_power_off else {
+            return;
+        };
         let others: Vec<String> = self
             .status
             .peers
@@ -756,10 +760,11 @@ impl App {
         let mut decided = None;
         let modal = egui::Modal::new(egui::Id::new("power_off")).show(ctx, |ui| {
             ui.set_max_width(380.0);
-            let title = if this_one {
-                tr("Shut down all computers?")
-            } else {
-                tr("Shut down the other computers?")
+            let title = match (log_out, this_one) {
+                (false, true) => tr("Shut down all computers?"),
+                (false, false) => tr("Shut down the other computers?"),
+                (true, true) => tr("Log out on all computers?"),
+                (true, false) => tr("Log out on the other computers?"),
             };
             ui.label(RichText::new(title).size(16.0).strong());
             ui.add_space(6.0);
@@ -778,7 +783,12 @@ impl App {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui
-                    .add(egui::Button::new(RichText::new(tr("Shut down")).color(p.on_accent)).fill(p.bad))
+                    .add(
+                        egui::Button::new(
+                            RichText::new(if log_out { tr("Log out") } else { tr("Shut down") }).color(p.on_accent),
+                        )
+                        .fill(p.bad),
+                    )
                     .clicked()
                 {
                     decided = Some(true);
@@ -793,7 +803,9 @@ impl App {
         }
         if let Some(go) = decided {
             self.confirm_power_off = None;
-            if go {
+            if go && log_out {
+                self.send(Command::LogOut { this_one });
+            } else if go {
                 self.send(Command::PowerOff { this_one });
             }
         }
