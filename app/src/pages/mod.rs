@@ -1,7 +1,7 @@
 //! The pages of the window.
 
 mod about;
-mod arrangement;
+pub mod arrangement;
 mod pairing;
 mod settings_page;
 mod setup;

@@ -411,7 +411,7 @@ impl App {
         };
         let marks = crate::edges::marks(shown);
         if let Some((_, mine)) = marks.iter().find(|(m, _)| m == me) {
-            crate::edges::show(ctx, &status.screens, mine, theme::palette(ctx).ok);
+            crate::edges::show(ctx, &status.screens, mine, theme::palette(ctx).ok, crate::edges::THICK);
         }
         if sent.is_none_or(|t| t.elapsed() >= EDGES_EVERY) {
             let to_peers = status
@@ -584,6 +584,26 @@ fn tile_menu(ui: &mut egui::Ui, status: &Status, me: &str, id: &str) -> Option<C
         change = Some(Change::Remove(id.to_string()));
     }
     change
+}
+
+/// Whether the arrangement page shows the bars of a computer being dragged right now.
+pub(crate) fn dragging_edges(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<Instant>(egui::Id::new("tc-edges-sent")))
+        .is_some()
+}
+
+/// Where the pointer crosses on this computer's screens, by the arrangement as it is.
+pub(crate) fn own_marks(status: &Status) -> Vec<tc_protocol::EdgeMark> {
+    let Some(me_fp) = status.fingerprint else {
+        return Vec::new();
+    };
+    let me = layout_file::machine_id(&me_fp);
+    let desk = layout_file::desk(&status.layout, |entry| canonical(status, &me_fp, entry));
+    crate::edges::marks(&desk)
+        .into_iter()
+        .find(|(m, _)| *m == me)
+        .map(|(_, marks)| marks)
+        .unwrap_or_default()
 }
 
 /// Direction and speed of the wheel on a computer controlled from here; `Some` when changed.

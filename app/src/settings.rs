@@ -84,6 +84,8 @@ pub struct Settings {
     pub corner: u32,
     /// The pointer goes past computers that are not connected to the next one that is.
     pub skip_offline: bool,
+    /// Thin green bars at the screen edges where the pointer crosses, all the time.
+    pub edges_always: bool,
     /// macOS: pause AWDL (AirDrop, Handoff, AirPlay) while the pointer is shared; it makes Wi-Fi
     /// packets wait every few seconds.
     pub quiet_radio: bool,
@@ -113,6 +115,7 @@ impl Default for Settings {
             edges: EdgeSetting::AtOnce,
             corner: 16,
             skip_offline: true,
+            edges_always: false,
             quiet_radio: true,
             screen_diagonals: Vec::new(),
         }
@@ -168,6 +171,7 @@ impl Settings {
             },
             corner: field(&fields, "corner", d.corner).min(200),
             skip_offline: field(&fields, "skip_offline", d.skip_offline),
+            edges_always: field(&fields, "edges_always", d.edges_always),
             quiet_radio: field(&fields, "quiet_radio", d.quiet_radio),
             screen_diagonals: field(&fields, "screen_diagonals", d.screen_diagonals),
         }

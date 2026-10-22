@@ -103,10 +103,11 @@ on as well, if wanted) for a computer in the middle of the desk, so the way over
 macOS, TableCross switches off Universal Control at start, which also takes the pointer at screen
 edges; the status page warns while it is on. While a Mac shares the pointer, the system helper also
 pauses AWDL, the radio link of AirDrop, Handoff and AirPlay, which leaves the Wi-Fi channel every few
-seconds and makes the pointer stutter (*Pause AirDrop and Handoff while the pointer is shared*, on by
-default); it runs again afterwards. For each computer controlled from here, the wheel can scroll the
-other way and faster or slower (Pairing page, or the computer's menu on the desk), next to *Swap ⌘ and
-Ctrl*.
+seconds and makes the pointer stutter (*Pause AirDrop and Handoff while sharing*, on by default); it
+runs again afterwards. For each computer controlled from here, the wheel can scroll the other way and
+faster or slower (Pairing page, or the computer's menu on the desk), next to *Swap ⌘ and Ctrl*.
+*Always show where the pointer crosses* keeps thin green bars at those screen edges (off by default;
+otherwise they appear while the arrangement is changed).
 
 Removing it: Settings → *Remove TableCross* takes away everything TableCross set up (system helper,
 permissions, starting with the system, the program; optionally settings and pairings).

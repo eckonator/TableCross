@@ -1,5 +1,6 @@
 //! Green bars at the real screen edges where the pointer crosses, while the arrangement is being
-//! changed: on this computer from the arrangement page, on the others through `ShowEdges`. Each bar
+//! changed: on this computer from the arrangement page, on the others through `ShowEdges`; thinner
+//! ones all the time if the setting asks for it. Each bar
 //! is a small borderless window that stays on top and lets clicks through. Wayland does not let a
 //! program place windows, so there the bars do not appear.
 
@@ -7,8 +8,10 @@ use eframe::egui;
 use tc_core::Area;
 use tc_protocol::{EdgeMark, Screen, Side};
 
-/// Thickness of a bar in points.
-const THICKNESS: f32 = 8.0;
+/// Thickness of a bar in points, while arranging.
+pub const THICK: f32 = 8.0;
+/// Thickness of the bars shown all the time.
+pub const THIN: f32 = 4.0;
 /// How many bars at most (a few edges per computer).
 const MAX_BARS: usize = 16;
 
@@ -39,7 +42,7 @@ pub fn marks(areas: &[Area]) -> Vec<(String, Vec<EdgeMark>)> {
 }
 
 /// The bars for `marks` on `screens`, in points of the desktop.
-fn bars(screens: &[Screen], marks: &[EdgeMark]) -> Vec<egui::Rect> {
+fn bars(screens: &[Screen], marks: &[EdgeMark], thickness: f32) -> Vec<egui::Rect> {
     let rects: Vec<egui::Rect> = screens
         .iter()
         .filter(|s| s.width > 0 && s.height > 0 && s.scale > 0.0)
@@ -80,10 +83,10 @@ fn bars(screens: &[Screen], marks: &[EdgeMark]) -> Vec<egui::Rect> {
                 continue;
             }
             out.push(match mark.side {
-                Side::Left => egui::Rect::from_x_y_ranges(r.left()..=r.left() + THICKNESS, min..=max),
-                Side::Right => egui::Rect::from_x_y_ranges(r.right() - THICKNESS..=r.right(), min..=max),
-                Side::Top => egui::Rect::from_x_y_ranges(min..=max, r.top()..=r.top() + THICKNESS),
-                Side::Bottom => egui::Rect::from_x_y_ranges(min..=max, r.bottom() - THICKNESS..=r.bottom()),
+                Side::Left => egui::Rect::from_x_y_ranges(r.left()..=r.left() + thickness, min..=max),
+                Side::Right => egui::Rect::from_x_y_ranges(r.right() - thickness..=r.right(), min..=max),
+                Side::Top => egui::Rect::from_x_y_ranges(min..=max, r.top()..=r.top() + thickness),
+                Side::Bottom => egui::Rect::from_x_y_ranges(min..=max, r.bottom() - thickness..=r.bottom()),
             });
         }
     }
@@ -93,8 +96,8 @@ fn bars(screens: &[Screen], marks: &[EdgeMark]) -> Vec<egui::Rect> {
 
 /// Shows the bars for `marks` on this computer's `screens` (call every frame while they should be
 /// seen; they disappear in the first frame without the call).
-pub fn show(ctx: &egui::Context, screens: &[Screen], marks: &[EdgeMark], color: egui::Color32) {
-    for (i, bar) in bars(screens, marks).into_iter().enumerate() {
+pub fn show(ctx: &egui::Context, screens: &[Screen], marks: &[EdgeMark], color: egui::Color32, thickness: f32) {
+    for (i, bar) in bars(screens, marks, thickness).into_iter().enumerate() {
         let builder = egui::ViewportBuilder::default()
             .with_title("TableCross")
             .with_decorations(false)
@@ -167,7 +170,7 @@ mod tests {
             from: 0.0,
             to: 0.5,
         };
-        let bars = bars(&[screen(0), screen(1000)], &[mark]);
+        let bars = bars(&[screen(0), screen(1000)], &[mark], THICK);
         assert_eq!(bars, [egui::Rect::from_x_y_ranges(0.0..=1000.0, 492.0..=500.0)]);
         // The right side of two screens side by side is only on the right one
         let mark = EdgeMark {
@@ -175,7 +178,7 @@ mod tests {
             from: 0.0,
             to: 1.0,
         };
-        let bars = super::bars(&[screen(0), screen(1000)], &[mark]);
+        let bars = super::bars(&[screen(0), screen(1000)], &[mark], THICK);
         assert_eq!(bars, [egui::Rect::from_x_y_ranges(1992.0..=2000.0, 0.0..=500.0)]);
     }
 }

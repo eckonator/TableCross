@@ -133,6 +133,19 @@ impl App {
                     }
                     ui.end_row();
 
+                    ui.label(tr("Crossings"));
+                    changed |= ui
+                        .checkbox(
+                            &mut self.settings.edges_always,
+                            tr("Always show where the pointer crosses"),
+                        )
+                        .on_hover_text(tr(
+                            "Thin green bars at the edges of the screens where the pointer goes to another computer. \
+                             Otherwise they appear only while the arrangement is changed.",
+                        ))
+                        .changed();
+                    ui.end_row();
+
                     ui.label(tr("Offline computers"));
                     if ui
                         .checkbox(&mut self.settings.skip_offline, tr("Skip computers that are offline"))
@@ -182,7 +195,7 @@ impl App {
                         if ui
                             .checkbox(
                                 &mut self.settings.quiet_radio,
-                                tr("Pause AirDrop and Handoff while the pointer is shared"),
+                                tr("Pause AirDrop and Handoff while sharing"),
                             )
                             .on_hover_text(tr(
                                 "Their radio link (AWDL) leaves the Wi-Fi channel every few seconds, and the \

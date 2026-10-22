@@ -958,9 +958,20 @@ impl eframe::App for App {
         if let Some((marks, at)) = &self.status.edge_marks
             && at.elapsed() < EDGES_SHOWN
         {
-            crate::edges::show(&ctx, &self.status.screens, marks, theme::palette(&ctx).ok);
+            crate::edges::show(
+                &ctx,
+                &self.status.screens,
+                marks,
+                theme::palette(&ctx).ok,
+                crate::edges::THICK,
+            );
             ctx.request_repaint_after(Duration::from_millis(200));
         }
+        let peer_edges = self
+            .status
+            .edge_marks
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() < EDGES_SHOWN);
         self.helper_prompt();
         self.poll_removal(&ctx);
 
@@ -1026,6 +1037,17 @@ impl eframe::App for App {
                     }
                 });
             });
+        // Thin bars where the pointer crosses, all the time if wanted (not while others are shown)
+        if self.settings.edges_always && !peer_edges && !crate::pages::arrangement::dragging_edges(&ctx) {
+            let marks = crate::pages::arrangement::own_marks(&self.status);
+            crate::edges::show(
+                &ctx,
+                &self.status.screens,
+                &marks,
+                theme::palette(&ctx).ok,
+                crate::edges::THIN,
+            );
+        }
         self.power_off_dialog(&ctx);
         self.save_files_dialog(&ctx);
         // Numbers like the round trip change without events

@@ -333,6 +333,11 @@ fn de(en: &str) -> Option<&'static str> {
         "Offline computers" => "Computer offline",
         "Skip computers that are offline" => "Computer überspringen, die offline sind",
         "AirDrop radio" => "AirDrop-Funk",
+        "Crossings" => "Übergänge",
+        "Always show where the pointer crosses" => "Immer zeigen, wo der Zeiger hinüberwechselt",
+        "Thin green bars at the edges of the screens where the pointer goes to another computer. Otherwise they appear only while the arrangement is changed." => {
+            "Schmale grüne Balken an den Bildschirmrändern, wo der Zeiger zu einem anderen Computer wechselt. Sonst erscheinen sie nur, während die Anordnung geändert wird."
+        }
         "Scroll the other way" => "Andersherum scrollen",
         "While controlling this computer from here, the wheel scrolls the other way round" => {
             "Wenn dieser Computer von hier aus gesteuert wird, scrollt das Rad andersherum"
@@ -341,9 +346,7 @@ fn de(en: &str) -> Option<&'static str> {
         "While controlling this computer from here (1: as here)" => {
             "Wenn dieser Computer von hier aus gesteuert wird (1: wie hier)"
         }
-        "Pause AirDrop and Handoff while the pointer is shared" => {
-            "AirDrop und Handoff pausieren, solange der Zeiger geteilt wird"
-        }
+        "Pause AirDrop and Handoff while sharing" => "AirDrop und Handoff beim Teilen pausieren",
         "Their radio link (AWDL) leaves the Wi-Fi channel every few seconds, and the pointer stutters meanwhile. The system helper pauses it while this Mac controls or is controlled, and lets it run again afterwards. AirDrop, Handoff and AirPlay to nearby devices wait until then." => {
             "Ihre Funkverbindung (AWDL) verlässt alle paar Sekunden den WLAN-Kanal, und der Zeiger ruckelt so lange. Der Systemhelfer pausiert sie, solange dieser Mac steuert oder gesteuert wird, und lässt sie danach wieder laufen. AirDrop, Handoff und AirPlay zu Geräten in der Nähe warten so lange."
         }
