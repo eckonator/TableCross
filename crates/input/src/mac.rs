@@ -299,6 +299,13 @@ fn current_position() -> Point {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct IOGPoint {
+    x: i16,
+    y: i16,
+}
+
 #[link(name = "IOKit", kind = "framework")]
 unsafe extern "C" {
     fn IOServiceMatching(name: *const std::ffi::c_char) -> Ref;
@@ -307,6 +314,15 @@ unsafe extern "C" {
     fn IOServiceClose(connect: u32) -> i32;
     fn IOObjectRelease(object: u32) -> i32;
     fn IOHIDSetMouseLocation(connect: u32, x: i32, y: i32) -> i32;
+    fn IOHIDPostEvent(
+        connect: u32,
+        kind: u32,
+        location: IOGPoint,
+        data: *const c_void,
+        version: u32,
+        flags: u32,
+        options: u32,
+    ) -> i32;
 }
 
 unsafe extern "C" {
@@ -315,48 +331,93 @@ unsafe extern "C" {
 
 /// See [`crate::system::pointer_probe`].
 pub(crate) fn pointer_probe() -> Option<String> {
+    const SOURCE_PRIVATE: i32 = -1;
+    const SOURCE_HID_SYSTEM: i32 = 1;
     let settle = || std::thread::sleep(Duration::from_millis(150));
     let bounds = unsafe { CGDisplayBounds(CGMainDisplayID()) };
     let at = |i: f64| CGPoint {
-        x: bounds.origin.x + bounds.size.width * (0.3 + 0.1 * i),
+        x: bounds.origin.x + bounds.size.width * (0.2 + 0.07 * i),
         y: bounds.origin.y + bounds.size.height * 0.5,
     };
     let start = current_position();
     let mut report = Vec::new();
-    let mut check = |name: &str, target: CGPoint, done: bool| {
+    let mut check = |name: &str, target: CGPoint, done: Result<(), i32>| {
         settle();
         let now = current_position();
-        let moved = done && (now.x - target.x).abs() < 2.0 && (now.y - target.y).abs() < 2.0;
-        report.push(format!("{name} {moved}"));
+        let moved = done.is_ok() && (now.x - target.x).abs() < 2.0 && (now.y - target.y).abs() < 2.0;
+        match done {
+            Ok(()) => report.push(format!("{name} {moved}")),
+            Err(code) => report.push(format!("{name} failed ({code:#x})")),
+        }
     };
     unsafe {
-        for (i, (name, tap)) in [("HID tap", HID_TAP), ("session tap", SESSION_TAP)]
-            .into_iter()
-            .enumerate()
-        {
-            let target = at(i as f64);
-            let event = CGEventCreateMouseEvent(std::ptr::null_mut(), MOUSE_MOVED, target, 0);
-            let made = !event.is_null();
-            if made {
+        let variants = [
+            ("HID tap", HID_TAP, None),
+            ("session tap", SESSION_TAP, None),
+            ("HID tap + HID source", HID_TAP, Some(SOURCE_HID_SYSTEM)),
+            ("HID tap + private source", HID_TAP, Some(SOURCE_PRIVATE)),
+            ("session tap + HID source", SESSION_TAP, Some(SOURCE_HID_SYSTEM)),
+        ];
+        let mut i = 0.0;
+        for (name, tap, state) in variants {
+            let target = at(i);
+            i += 1.0;
+            let source = state.map_or(std::ptr::null_mut(), |s| CGEventSourceCreate(s));
+            let event = CGEventCreateMouseEvent(source, MOUSE_MOVED, target, 0);
+            let done = if event.is_null() {
+                Err(-1)
+            } else {
                 CGEventPost(tap, event);
                 CFRelease(event.cast());
+                Ok(())
+            };
+            if !source.is_null() {
+                CFRelease(source.cast());
             }
-            check(name, target, made);
+            check(name, target, done);
         }
-        let target = at(2.0);
-        let warped = CGWarpMouseCursorPosition(target) == 0;
-        check("warp", target, warped);
-        let target = at(3.0);
+        let target = at(i);
+        i += 1.0;
+        let warped = CGWarpMouseCursorPosition(target);
+        check("warp", target, if warped == 0 { Ok(()) } else { Err(warped) });
         let service = IOServiceGetMatchingService(0, IOServiceMatching(c"IOHIDSystem".as_ptr()));
         let mut connect = 0;
         // kIOHIDParamConnectType
-        let opened = service != 0 && IOServiceOpen(service, mach_task_self_, 1, &mut connect) == 0;
+        let opened = if service == 0 {
+            Err(-1)
+        } else {
+            match IOServiceOpen(service, mach_task_self_, 1, &mut connect) {
+                0 => Ok(()),
+                e => Err(e),
+            }
+        };
         if service != 0 {
             IOObjectRelease(service);
         }
-        let set = opened && IOHIDSetMouseLocation(connect, target.x as i32, target.y as i32) == 0;
-        check("IOHIDSystem", target, set);
-        if opened {
+        let target = at(i);
+        i += 1.0;
+        let set = opened.and_then(
+            |()| match IOHIDSetMouseLocation(connect, target.x as i32, target.y as i32) {
+                0 => Ok(()),
+                e => Err(e),
+            },
+        );
+        check("IOHIDSystem location", target, set);
+        let target = at(i);
+        // NX_MOUSEMOVED with kIOHIDSetCursorPosition; the event data stays empty
+        let data = [0u64; 16];
+        let location = IOGPoint {
+            x: target.x as i16,
+            y: target.y as i16,
+        };
+        let posted = opened.and_then(
+            |()| match IOHIDPostEvent(connect, 5, location, data.as_ptr().cast(), 2, 0, 2) {
+                0 => Ok(()),
+                e => Err(e),
+            },
+        );
+        check("IOHIDSystem event", target, posted);
+        if opened.is_ok() {
             IOServiceClose(connect);
         }
         CGWarpMouseCursorPosition(CGPoint { x: start.x, y: start.y });
