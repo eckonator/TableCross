@@ -48,6 +48,7 @@ pub fn status() -> Status {
                 refusal: None,
                 side: Some(Side::Right),
                 swap_cmd_ctrl: true,
+                scroll: Default::default(),
                 screen_sizes: vec![(597, 336)],
             },
             PeerView {
@@ -58,6 +59,7 @@ pub fn status() -> Status {
                 refusal: None,
                 side: None,
                 swap_cmd_ctrl: false,
+                scroll: Default::default(),
                 screen_sizes: Vec::new(),
             },
         ],

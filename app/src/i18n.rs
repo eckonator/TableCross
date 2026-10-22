@@ -333,6 +333,14 @@ fn de(en: &str) -> Option<&'static str> {
         "Offline computers" => "Computer offline",
         "Skip computers that are offline" => "Computer überspringen, die offline sind",
         "AirDrop radio" => "AirDrop-Funk",
+        "Scroll the other way" => "Andersherum scrollen",
+        "While controlling this computer from here, the wheel scrolls the other way round" => {
+            "Wenn dieser Computer von hier aus gesteuert wird, scrollt das Rad andersherum"
+        }
+        "Scroll speed" => "Scrolltempo",
+        "While controlling this computer from here (1: as here)" => {
+            "Wenn dieser Computer von hier aus gesteuert wird (1: wie hier)"
+        }
         "Pause AirDrop and Handoff while the pointer is shared" => {
             "AirDrop und Handoff pausieren, solange der Zeiger geteilt wird"
         }

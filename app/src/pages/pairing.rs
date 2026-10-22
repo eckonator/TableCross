@@ -173,6 +173,12 @@ impl App {
                 theme::chip(ui, &trf("ID {}", &[&peer.fingerprint.short()]), p.muted, p.field);
             });
             ui.add_space(4.0);
+            if let Some(scroll) = super::arrangement::scroll_options(ui, peer.scroll) {
+                self.send(Command::Scroll {
+                    peer: peer.fingerprint,
+                    scroll,
+                });
+            }
             ui.horizontal_wrapped(|ui| {
                 let mut swap = peer.swap_cmd_ctrl;
                 if ui

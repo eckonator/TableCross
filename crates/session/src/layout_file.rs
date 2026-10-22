@@ -18,7 +18,9 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tc_core::{Area, LayoutFile, Neighbor, STAND_IN, Side, Tile, area_side, areas_from_tiles, tiles_from_neighbors};
+use tc_core::{
+    Area, LayoutFile, Neighbor, STAND_IN, Scroll, Side, Tile, area_side, areas_from_tiles, tiles_from_neighbors,
+};
 use tc_net::Fingerprint;
 use tc_protocol::{MAX_PLACEMENTS, Message};
 
@@ -307,6 +309,21 @@ pub fn swaps(file: &LayoutFile, peer: &Fingerprint, peer_name: &str) -> bool {
     file.swap_cmd_ctrl.iter().any(|m| names(m, peer, peer_name))
 }
 
+pub fn set_scroll(file: &mut LayoutFile, peer: &Fingerprint, scroll: Scroll) {
+    file.scroll.retain(|m, _| !names(m, peer, ""));
+    if !scroll.is_normal() {
+        file.scroll.insert(machine_id(peer), scroll);
+    }
+}
+
+pub fn scroll_of(file: &LayoutFile, peer: &Fingerprint, peer_name: &str) -> Scroll {
+    file.scroll
+        .iter()
+        .find(|(m, _)| names(m, peer, peer_name))
+        .map(|(_, scroll)| *scroll)
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,6 +363,16 @@ mod tests {
         set_swap(&mut file, &PC, true);
         set_swap(&mut file, &PC, true);
         assert_eq!(file.swap_cmd_ctrl.len(), 1);
+        let faster = Scroll {
+            invert: true,
+            speed: 2.0,
+        };
+        set_scroll(&mut file, &PC, faster);
+        set_scroll(&mut file, &PC, faster);
+        assert_eq!(file.scroll.len(), 1);
+        assert_eq!(scroll_of(&file, &PC, ""), faster);
+        set_scroll(&mut file, &PC, Scroll::default());
+        assert!(file.scroll.is_empty());
         assert!(swaps(&file, &PC, "pc"));
         set_swap(&mut file, &PC, false);
         assert!(!swaps(&file, &PC, "pc"));

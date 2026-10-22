@@ -435,6 +435,10 @@ impl Engine {
             }
             Captured::Wheel { dx, dy, precise } => {
                 if let Mode::Remote { target, .. } = &self.mode {
+                    let (dx, dy) = match self.layout.scroll.get(target) {
+                        Some(scroll) => scroll.apply(dx, dy),
+                        None => (dx, dy),
+                    };
                     actions.push(Action::Send {
                         to: target.clone(),
                         message: Message::Wheel {

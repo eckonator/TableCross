@@ -106,6 +106,11 @@ pub enum Command {
         peer: Fingerprint,
         swap: bool,
     },
+    /// How the wheel scrolls on that computer when controlled from here.
+    Scroll {
+        peer: Fingerprint,
+        scroll: tc_core::Scroll,
+    },
     AddAddress {
         peer: Fingerprint,
         address: SocketAddr,
@@ -208,6 +213,8 @@ pub struct PeerView {
     pub refusal: Option<Refusal>,
     pub side: Option<Side>,
     pub swap_cmd_ctrl: bool,
+    /// How the wheel scrolls there when controlled from here.
+    pub scroll: tc_core::Scroll,
     /// Physical size of its screens in millimeters (see `Status::screen_sizes`).
     pub screen_sizes: Vec<(u32, u32)>,
 }
@@ -513,6 +520,20 @@ impl Shared {
         self.share_layout(None);
     }
 
+    /// Changes what only holds here (nothing the other computers take over).
+    fn edit_options(&self, edit: impl FnOnce(&mut LayoutFile)) {
+        let result = layout_file::load(&self.dir).and_then(|mut file| {
+            edit(&mut file);
+            layout_file::save(&self.dir, &file)
+        });
+        if let Err(e) = result {
+            tracing::warn!("layout: {e}");
+        }
+        self.reload_layout();
+        self.refresh();
+        self.changed();
+    }
+
     /// Our arrangement for `to`: tiles if it runs a version that knows them, else neighbors.
     fn layout_message(&self, to: &Fingerprint) -> Option<Message> {
         let file = layout_file::load(&self.dir).ok()?;
@@ -748,6 +769,7 @@ impl Shared {
             .map(|s| PeerView {
                 side: layout_file::side_of(&file, &me, self.node.name(), &s.peer.fingerprint, &s.peer.name),
                 swap_cmd_ctrl: layout_file::swaps(&file, &s.peer.fingerprint, &s.peer.name),
+                scroll: layout_file::scroll_of(&file, &s.peer.fingerprint, &s.peer.name),
                 screen_sizes: sizes.get(&s.peer.fingerprint).cloned().unwrap_or_default(),
                 fingerprint: s.peer.fingerprint,
                 name: s.peer.name,
@@ -2140,6 +2162,7 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             }
         }
         Command::SwapCmdCtrl { peer, swap } => shared.edit_layout(|file| layout_file::set_swap(file, &peer, swap)),
+        Command::Scroll { peer, scroll } => shared.edit_options(|file| layout_file::set_scroll(file, &peer, scroll)),
         Command::AddAddress { peer, address } => {
             if let Err(e) = shared.node.add_address(&peer, address) {
                 tracing::warn!("cannot save the address: {e}");

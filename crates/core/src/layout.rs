@@ -4,6 +4,7 @@
 //! {
 //!   "tiles": [ { "machine": "MacBook", "x": 0, "y": 0 }, { "machine": "Gaming-PC", "x": 1, "y": 0.5 } ],
 //!   "swap_cmd_ctrl": ["Gaming-PC"],
+//!   "scroll": { "Gaming-PC": { "invert": true, "speed": 2.0 } },
 //!   "corner": 16
 //! }
 //! ```
@@ -15,7 +16,7 @@
 //! Older versions stored tiles of 1 × 1 (0.4.0) or `neighbors` ("Gaming-PC is on the right of
 //! MacBook", over the whole edge); those are read as areas of a stand-in size on a grid.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +50,9 @@ pub struct LayoutFile {
     /// Machines that get ⌘ and Ctrl swapped when controlled from here.
     #[serde(default)]
     pub swap_cmd_ctrl: Vec<String>,
+    /// How the wheel scrolls on machines controlled from here, where it differs from here.
+    #[serde(default)]
+    pub scroll: BTreeMap<String, Scroll>,
     /// No switching within this many logical points of a screen corner.
     #[serde(default = "default_corner")]
     pub corner: f64,
@@ -67,6 +71,53 @@ fn default_corner() -> f64 {
     16.0
 }
 
+/// The wheel on a machine controlled from here: the other way round and faster or slower.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Scroll {
+    #[serde(default)]
+    pub invert: bool,
+    /// Factor on the distance, `SPEEDS`.
+    #[serde(default = "normal_speed")]
+    pub speed: f64,
+}
+
+/// Slowest and fastest scrolling.
+pub const SPEEDS: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+
+fn normal_speed() -> f64 {
+    1.0
+}
+
+impl Default for Scroll {
+    fn default() -> Self {
+        Self {
+            invert: false,
+            speed: normal_speed(),
+        }
+    }
+}
+
+impl Scroll {
+    /// The speed within `SPEEDS` (1 for nonsense from the file).
+    pub fn speed(&self) -> f64 {
+        if self.speed.is_finite() {
+            self.speed.clamp(*SPEEDS.start(), *SPEEDS.end())
+        } else {
+            normal_speed()
+        }
+    }
+
+    pub fn is_normal(&self) -> bool {
+        !self.invert && (self.speed() - 1.0).abs() < 1e-3
+    }
+
+    /// A wheel movement as it goes to the machine.
+    pub fn apply(&self, dx: f64, dy: f64) -> (f64, f64) {
+        let factor = if self.invert { -self.speed() } else { self.speed() };
+        (dx * factor, dy * factor)
+    }
+}
+
 impl Default for LayoutFile {
     fn default() -> Self {
         Self {
@@ -74,6 +125,7 @@ impl Default for LayoutFile {
             tiles: Vec::new(),
             neighbors: Vec::new(),
             swap_cmd_ctrl: Vec::new(),
+            scroll: BTreeMap::new(),
             corner: default_corner(),
             revision: 0,
             editor: String::new(),
@@ -305,6 +357,7 @@ pub struct Layout {
     /// In the order they were placed: of machines sharing a place, the first one online counts.
     tiles: Vec<(String, R)>,
     pub swap_cmd_ctrl: HashSet<String>,
+    pub scroll: HashMap<String, Scroll>,
     pub corner: f64,
 }
 
@@ -313,6 +366,7 @@ impl Default for Layout {
         Self {
             tiles: Vec::new(),
             swap_cmd_ctrl: HashSet::new(),
+            scroll: HashMap::new(),
             corner: default_corner(),
         }
     }
@@ -348,6 +402,12 @@ impl Layout {
             }
         }
         layout.swap_cmd_ctrl = file.swap_cmd_ctrl.iter().filter_map(|n| resolve(n)).collect();
+        layout.scroll = file
+            .scroll
+            .iter()
+            .filter(|(_, scroll)| !scroll.is_normal())
+            .filter_map(|(n, scroll)| Some((resolve(n)?, *scroll)))
+            .collect();
         Ok(layout)
     }
 

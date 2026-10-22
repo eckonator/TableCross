@@ -354,6 +354,7 @@ impl App {
             }
             Some(Change::ArrangeScreens) => open_display_settings(),
             Some(Change::Swap(peer, swap)) => self.send(Command::SwapCmdCtrl { peer, swap }),
+            Some(Change::Scroll(peer, scroll)) => self.send(Command::Scroll { peer, scroll }),
             Some(Change::GoTo(peer)) => self.send(Command::SwitchTo(Some(peer))),
             None => {}
         }
@@ -525,6 +526,7 @@ enum Change {
     ScreenSizes,
     ArrangeScreens,
     Swap(Fingerprint, bool),
+    Scroll(Fingerprint, tc_core::Scroll),
     GoTo(Fingerprint),
 }
 
@@ -545,6 +547,9 @@ fn tile_menu(ui: &mut egui::Ui, status: &Status, me: &str, id: &str) -> Option<C
             .changed()
         {
             change = Some(Change::Swap(peer.fingerprint, swap));
+        }
+        if let Some(scroll) = scroll_options(ui, peer.scroll) {
+            change = Some(Change::Scroll(peer.fingerprint, scroll));
         }
         if peer.link.is_some() && ui.button(tr("Go there")).clicked() {
             change = Some(Change::GoTo(peer.fingerprint));
@@ -579,6 +584,31 @@ fn tile_menu(ui: &mut egui::Ui, status: &Status, me: &str, id: &str) -> Option<C
         change = Some(Change::Remove(id.to_string()));
     }
     change
+}
+
+/// Direction and speed of the wheel on a computer controlled from here; `Some` when changed.
+pub(super) fn scroll_options(ui: &mut egui::Ui, mut scroll: tc_core::Scroll) -> Option<tc_core::Scroll> {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        changed |= ui
+            .checkbox(&mut scroll.invert, tr("Scroll the other way"))
+            .on_hover_text(tr(
+                "While controlling this computer from here, the wheel scrolls the other way round",
+            ))
+            .changed();
+        ui.add_space(12.0);
+        ui.label(tr("Scroll speed"));
+        changed |= ui
+            .add(
+                egui::Slider::new(&mut scroll.speed, tc_core::SCROLL_SPEEDS)
+                    .logarithmic(true)
+                    .max_decimals(2)
+                    .suffix(" ×"),
+            )
+            .on_hover_text(tr("While controlling this computer from here (1: as here)"))
+            .changed();
+    });
+    changed.then_some(scroll)
 }
 
 /// A diagonal for people: one decimal, with the decimal comma in German.

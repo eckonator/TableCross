@@ -555,6 +555,58 @@ fn cmd_and_ctrl_can_be_swapped_per_target() {
 }
 
 #[test]
+fn the_wheel_follows_the_scroll_option_of_the_target() {
+    let mut layout = Layout::default().with("pc", Side::Right, "mac");
+    layout.scroll.insert(
+        "pc".into(),
+        crate::Scroll {
+            invert: true,
+            speed: 2.0,
+        },
+    );
+    let mut sim = Sim::new(
+        &[
+            ("mac", vec![screen(0, 0, 1512, 982, 1.0)]),
+            ("pc", vec![screen(0, 0, 1920, 1080, 1.0)]),
+        ],
+        layout,
+    );
+    cross_to_pc(&mut sim);
+    let mac = &mut sim.machines.get_mut("mac").unwrap().engine;
+    let sent = mac.captured(Captured::Wheel {
+        dx: 1.0,
+        dy: -3.0,
+        precise: false,
+    });
+    let wheel: Vec<_> = sent
+        .iter()
+        .filter_map(|a| match a {
+            Action::Send {
+                message: Message::Wheel { dx, dy, .. },
+                ..
+            } => Some((*dx, *dy)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(wheel, [(-2.0, 6.0)]);
+    sim.assert_all_released();
+}
+
+#[test]
+fn scroll_speeds_from_the_file_stay_sensible() {
+    let nonsense = crate::Scroll {
+        invert: false,
+        speed: f64::NAN,
+    };
+    assert!(nonsense.is_normal());
+    let fast = crate::Scroll {
+        invert: false,
+        speed: 100.0,
+    };
+    assert_eq!(fast.apply(0.0, 1.0), (0.0, 4.0));
+}
+
+#[test]
 fn old_positions_are_ignored_and_the_last_is_repeated() {
     let mut sim = Sim::mac_pc();
     cross_to_pc(&mut sim);
