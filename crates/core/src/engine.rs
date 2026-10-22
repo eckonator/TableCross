@@ -205,6 +205,8 @@ pub struct Engine {
     pinned: bool,
     /// No switching this close to a corner (logical points); `None`: as in the layout.
     corner: Option<f64>,
+    /// Past computers that are not connected to the next one that is.
+    skip_offline: bool,
     /// A corner kept the pointer from switching and nobody has asked about it yet.
     corner_block: Option<CornerBlock>,
     /// When a corner block was last reported, per machine and side (reported again only after a pause).
@@ -269,6 +271,7 @@ impl Engine {
             edge_tap: None,
             pinned: false,
             corner: None,
+            skip_offline: true,
             edge_push: None,
             corner_block: None,
             corner_reported: None,
@@ -320,6 +323,11 @@ impl Engine {
     /// No switching at left and right edges this close to a corner (logical points).
     pub fn set_corner(&mut self, corner: f64) {
         self.corner = (corner.is_finite() && corner >= 0.0).then_some(corner);
+    }
+
+    /// Whether the pointer goes past computers that are not connected to the next one that is.
+    pub fn set_skip_offline(&mut self, skip: bool) {
+        self.skip_offline = skip;
     }
 
     fn corner(&self) -> f64 {
@@ -867,24 +875,22 @@ impl Engine {
     /// A machine beyond `side` of `machine` that is online: the one in the middle of the edge if
     /// there is one, else any.
     fn online_neighbor(&self, machine: &str, side: Side) -> Option<String> {
-        let online = |m: &String| self.machines.contains_key(m);
+        let online = |m: &str| self.machines.contains_key(m);
         self.layout
-            .across(machine, side, 0.5)
-            .into_iter()
+            .across_online(machine, side, 0.5, self.skip_offline, online)
             .map(|(m, _)| m)
-            .find(online)
-            .or_else(|| self.layout.neighbors(machine, side).into_iter().find(online))
+            .or_else(|| self.layout.neighbors(machine, side).into_iter().find(|m| online(m)))
     }
 
     /// The machine beyond `side` of `machine` where `p` crosses it, and where the pointer enters
-    /// it. Of machines sharing a place, the first one online.
+    /// it. Of machines sharing a place, the first one online; past machines that are not, if allowed.
     fn neighbor_entry(&self, machine: &str, side: Side, p: Point) -> Option<(MachineId, Point)> {
         let from = self.machines.get(machine)?;
         let (next, along) = self
             .layout
-            .across(machine, side, from.along(side, p))
-            .into_iter()
-            .find(|(m, _)| self.machines.contains_key(m))?;
+            .across_online(machine, side, from.along(side, p), self.skip_offline, |m| {
+                self.machines.contains_key(m)
+            })?;
         let entry = self.machines.get(&next)?.entry(side.opposite(), along);
         Some((next, entry))
     }

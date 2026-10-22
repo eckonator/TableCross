@@ -499,6 +499,41 @@ fn three_machines_in_a_row() {
 }
 
 #[test]
+fn a_computer_that_is_away_is_skipped() {
+    let three = || {
+        Sim::new(
+            &[
+                ("book", vec![screen(0, 0, 1000, 800, 1.0)]),
+                ("middle", vec![screen(0, 0, 1000, 800, 1.0)]),
+                ("imac", vec![screen(0, 0, 2000, 1000, 1.0)]),
+            ],
+            Layout::default()
+                .with("middle", Side::Right, "book")
+                .with("imac", Side::Right, "middle"),
+        )
+    };
+    let mut sim = three();
+    sim.disconnect("book", "middle");
+    sim.disconnect("imac", "middle");
+    sim.machines.get_mut("book").unwrap().os.pointer = Point::new(990.0, 200.0);
+    sim.glide("book", 20.0, 0.0);
+    assert_eq!(sim.role("book"), Role::Controlling("imac".into()));
+    assert_eq!(sim.role("imac"), Role::ControlledBy("book".into()));
+    // At the same height: a quarter of the way down
+    assert_eq!(sim.os("imac").pointer.y, 250.0);
+    sim.glide("book", -100.0, 0.0);
+    assert_eq!(sim.role("book"), Role::Idle);
+    // Switched off, the edge leads nowhere
+    let mut sim = three();
+    sim.machines.get_mut("book").unwrap().engine.set_skip_offline(false);
+    sim.disconnect("book", "middle");
+    sim.machines.get_mut("book").unwrap().os.pointer = Point::new(990.0, 200.0);
+    sim.glide("book", 20.0, 0.0);
+    assert_eq!(sim.role("book"), Role::Idle);
+    sim.assert_all_released();
+}
+
+#[test]
 fn cmd_and_ctrl_can_be_swapped_per_target() {
     let mut layout = Layout::default().with("pc", Side::Right, "mac");
     layout.swap_cmd_ctrl.insert("pc".into());

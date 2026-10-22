@@ -329,6 +329,11 @@ fn de(en: &str) -> Option<&'static str> {
         "At left and right edges, so the pointer can reach things in the corners (0: off)." => {
             "An den linken und rechten Kanten, damit der Zeiger Dinge in den Ecken erreicht (0: aus)."
         }
+        "Offline computers" => "Computer offline",
+        "Skip computers that are offline" => "Computer überspringen, die offline sind",
+        "When a computer in the arrangement is off or not connected, the pointer goes on to the next computer behind it in the same direction." => {
+            "Ist ein Computer der Anordnung aus oder nicht verbunden, geht der Zeiger in derselben Richtung weiter zum nächsten Computer dahinter."
+        }
         "Ctrl + Shift + Alt + F" => "Strg + Umschalt + Alt + F",
         "Keep the pointer on this computer, or let it go again" => {
             "Zeiger auf diesem Computer festhalten oder wieder freigeben"

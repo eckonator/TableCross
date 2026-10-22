@@ -82,6 +82,8 @@ pub struct Settings {
     pub edges: EdgeSetting,
     /// No switching at left and right edges this close to a corner (points).
     pub corner: u32,
+    /// The pointer goes past computers that are not connected to the next one that is.
+    pub skip_offline: bool,
     /// Diagonals typed in for screens of this computer, by the size they report.
     pub screen_diagonals: Vec<tc_session::screen_size::Typed>,
 }
@@ -107,6 +109,7 @@ impl Default for Settings {
             screen_stays_on: false,
             edges: EdgeSetting::AtOnce,
             corner: 16,
+            skip_offline: true,
             screen_diagonals: Vec::new(),
         }
     }
@@ -160,6 +163,7 @@ impl Settings {
                 _ => field(&fields, "edges", d.edges),
             },
             corner: field(&fields, "corner", d.corner).min(200),
+            skip_offline: field(&fields, "skip_offline", d.skip_offline),
             screen_diagonals: field(&fields, "screen_diagonals", d.screen_diagonals),
         }
     }

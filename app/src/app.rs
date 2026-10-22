@@ -279,6 +279,7 @@ impl App {
                 }
                 handle.send(Command::EdgeRule(self.settings.edges.rule()));
                 handle.send(Command::Corner(f64::from(self.settings.corner)));
+                handle.send(Command::SkipOffline(self.settings.skip_offline));
                 handle.send(Command::ScreenDiagonals(self.settings.screen_diagonals.clone()));
                 *self.tray_session.lock().expect("tray session lock") = Some(handle.clone());
                 self.session = Some(handle);

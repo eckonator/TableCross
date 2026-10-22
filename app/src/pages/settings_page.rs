@@ -133,6 +133,20 @@ impl App {
                     }
                     ui.end_row();
 
+                    ui.label(tr("Offline computers"));
+                    if ui
+                        .checkbox(&mut self.settings.skip_offline, tr("Skip computers that are offline"))
+                        .on_hover_text(tr(
+                            "When a computer in the arrangement is off or not connected, the pointer goes on to \
+                             the next computer behind it in the same direction.",
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        self.send(Command::SkipOffline(self.settings.skip_offline));
+                    }
+                    ui.end_row();
+
                     ui.label(tr("Sleep"));
                     if ui
                         .checkbox(

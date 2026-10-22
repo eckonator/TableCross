@@ -437,6 +437,30 @@ impl Layout {
             })
             .collect()
     }
+
+    /// Like `across`, the first machine `online` accepts. With `skip`, where only machines that are
+    /// not online touch the edge, the pointer goes on through them in the same direction to the
+    /// next one that is.
+    pub fn across_online(
+        &self,
+        machine: &str,
+        side: Side,
+        along: f64,
+        skip: bool,
+        online: impl Fn(&str) -> bool,
+    ) -> Option<(String, f64)> {
+        let (mut from, mut along) = (machine.to_string(), along);
+        // Each step goes further in one direction, so this many steps reach every tile
+        for _ in 0..self.tiles.len() {
+            let beyond = self.across(&from, side, along);
+            if let Some(hit) = beyond.iter().find(|(m, _)| online(m)) {
+                return Some(hit.clone());
+            }
+            let (next, at) = beyond.into_iter().next().filter(|_| skip)?;
+            (from, along) = (next, at);
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -504,6 +528,32 @@ mod tests {
         assert_eq!(at("left", Side::Top, 0.75), [("imac".to_string(), 0.25)]);
         assert!(at("left", Side::Top, 0.25).is_empty());
         assert!(at("imac", Side::Top, 0.5).is_empty());
+    }
+
+    #[test]
+    fn offline_computers_are_skipped() {
+        // An iMac half a tile higher, behind a laptop in the middle
+        let layout = Layout::default()
+            .at("left", 0.0, 0.0)
+            .at("middle", 1.0, 0.0)
+            .at("imac", 2.0, 0.5);
+        let all = |_: &str| true;
+        let not_middle = |m: &str| m != "middle";
+        assert_eq!(
+            layout.across_online("left", Side::Right, 0.75, true, all),
+            Some(("middle".to_string(), 0.75))
+        );
+        assert_eq!(
+            layout.across_online("left", Side::Right, 0.75, true, not_middle),
+            Some(("imac".to_string(), 0.25))
+        );
+        assert_eq!(layout.across_online("left", Side::Right, 0.75, false, not_middle), None);
+        // Where nothing lies behind the computer that is away, nothing happens
+        assert_eq!(layout.across_online("left", Side::Right, 0.25, true, not_middle), None);
+        assert_eq!(
+            layout.across_online("imac", Side::Left, 0.25, true, not_middle),
+            Some(("left".to_string(), 0.75))
+        );
     }
 
     #[test]

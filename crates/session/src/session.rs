@@ -80,6 +80,8 @@ pub enum Command {
     EdgeRule(EdgeRule),
     /// No switching at left and right edges this close to a corner (logical points).
     Corner(f64),
+    /// Let the pointer go past computers that are not connected to the next one that is.
+    SkipOffline(bool),
     /// Keep the pointer on the computer it is on (`None`: the other way round).
     Pin(Option<bool>),
     /// While the arrangement is being changed here: where the pointer would cross, per connected
@@ -2032,6 +2034,10 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             shared.changed();
         }
         Command::Corner(points) => shared.engine.lock().expect("engine lock").set_corner(points),
+        Command::SkipOffline(skip) => {
+            tracing::info!("computers that are offline are skipped: {skip}");
+            shared.engine.lock().expect("engine lock").set_skip_offline(skip);
+        }
         Command::Pin(pin) => shared.toggle_pin(pin),
         Command::ShowEdges(marks) => {
             let knows = |peer: &Fingerprint| {

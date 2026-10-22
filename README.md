@@ -96,8 +96,10 @@ menu adopts the screens it has now. New computers are paired on the Pairing page
 Settings worth knowing: all edges switch at once; for top and bottom, *after a moment of pushing* or
 *after touching twice* protects the Dock and the menu bar instead, and the corners where left and
 right edges do not switch can be widened or switched off. Ctrl+Shift+Alt+F (or the status icon menu)
-keeps the pointer on the computer it is on until pressed again. *Keep this computer from going to sleep* (with the screen on as well, if
-wanted) for a computer in the middle of the desk, so the way over it to the others stays open. On
+keeps the pointer on the computer it is on until pressed again. A computer that is off or not
+connected is skipped: the pointer goes on in the same direction to the next computer behind it (*Skip
+computers that are offline*, on by default). *Keep this computer from going to sleep* (with the screen
+on as well, if wanted) for a computer in the middle of the desk, so the way over it stays as it is. On
 macOS, TableCross switches off Universal Control at start, which also takes the pointer at screen
 edges; the status page warns while it is on.
 
