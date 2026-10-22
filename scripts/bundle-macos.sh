@@ -16,6 +16,8 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/tablecross "$APP/Contents/MacOS/TableCross"
+# Same UUID in every version, so the local network permission carries over to an update
+python3 scripts/fixed-uuid.py "$APP/Contents/MacOS/TableCross"
 # The app installs the helper from right next to itself
 cp target/release/tablecross-helper "$APP/Contents/MacOS/tablecross-helper"
 cp target/release/tablecross-cli "$APP/Contents/MacOS/tablecross-cli"
