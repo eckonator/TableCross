@@ -201,6 +201,11 @@ pairings into a folder only the system can read (`/Library/Application Support/T
 and a launch agent starts `tablecross-loginwindow` there while no one is logged in. It only receives
 input, it captures nothing. Its log is `/Library/Logs/TableCross/loginwindow.log`.
 
+If a network filter app runs on that Mac (one that asks per program whether a connection is allowed),
+add a rule that allows `/Library/PrivilegedHelperTools/tablecross-loginwindow` in the local network,
+incoming and outgoing. On the login screen no one can answer its question, so the filter blocks the
+program silently and the other computers cannot reach the Mac there.
+
 On Windows, the optional service lets TableCross operate the sign-in screen, UAC prompts and programs
 started as administrator (run once in an administrator prompt):
 
