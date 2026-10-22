@@ -26,6 +26,8 @@ use crate::devtools::DevTools;
 use crate::settings::{LangSetting, Settings};
 
 fn main() -> eframe::Result {
+    // Asked by the running app whether Accessibility is granted (see `accessibility_fresh`)
+    tc_input::system::answer_access_check();
     // For building packages: write the icon files and quit
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--write-icons") {

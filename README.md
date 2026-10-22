@@ -101,7 +101,10 @@ connected is skipped: the pointer goes on in the same direction to the next comp
 computers that are offline*, on by default). *Keep this computer from going to sleep* (with the screen
 on as well, if wanted) for a computer in the middle of the desk, so the way over it stays as it is. On
 macOS, TableCross switches off Universal Control at start, which also takes the pointer at screen
-edges; the status page warns while it is on.
+edges; the status page warns while it is on. While a Mac shares the pointer, the system helper also
+pauses AWDL, the radio link of AirDrop, Handoff and AirPlay, which leaves the Wi-Fi channel every few
+seconds and makes the pointer stutter (*Pause AirDrop and Handoff while the pointer is shared*, on by
+default); it runs again afterwards.
 
 Removing it: Settings → *Remove TableCross* takes away everything TableCross set up (system helper,
 permissions, starting with the system, the program; optionally settings and pairings).

@@ -407,6 +407,12 @@ impl Capture for MacCapture {
         }
     }
 
+    fn quiet_radio(&self, quiet: bool) {
+        if let Some(helper) = self.shared.helper.lock().expect("helper lock").as_ref() {
+            helper.set_quiet_radio(quiet);
+        }
+    }
+
     fn health(&self) -> Health {
         let tap = self.shared.tap.load(Ordering::SeqCst);
         let capturing = !tap.is_null() && unsafe { CGEventTapIsEnabled(tap.cast()) };

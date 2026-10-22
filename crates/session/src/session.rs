@@ -5,6 +5,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Condvar;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -82,6 +83,9 @@ pub enum Command {
     Corner(f64),
     /// Let the pointer go past computers that are not connected to the next one that is.
     SkipOffline(bool),
+    /// macOS: pause AWDL (AirDrop, Handoff, AirPlay) while the pointer is shared, through the
+    /// system helper.
+    QuietRadio(bool),
     /// Keep the pointer on the computer it is on (`None`: the other way round).
     Pin(Option<bool>),
     /// While the arrangement is being changed here: where the pointer would cross, per connected
@@ -251,6 +255,8 @@ pub struct Status {
     pub edge_marks: Option<(Vec<EdgeMark>, Instant)>,
     /// The pointer stays on the computer it is on (Ctrl+Shift+Alt+F).
     pub pinned: bool,
+    /// macOS: Accessibility was granted, but this process does not get it before it starts anew.
+    pub restart_needed: bool,
 }
 
 /// Talks to a running session; cheap to clone.
@@ -292,6 +298,8 @@ pub type OnChange = Arc<dyn Fn() + Send + Sync>;
 
 enum Internal {
     Notice(Notice),
+    /// What a fresh process says about the Accessibility permission (macOS).
+    Accessibility(bool),
     PairDone(Result<String, PairError>),
     ClipRead(Option<tc_clipboard::Read>),
     ClipWritten(Fingerprint, Option<u64>),
@@ -399,6 +407,8 @@ struct Shared {
     reported_sizes: Mutex<Reported>,
     /// When this computer's area is to be measured anew.
     measure_at: Mutex<Option<Instant>>,
+    /// Pause AWDL while the pointer is shared (setting).
+    quiet_radio: AtomicBool,
 }
 
 /// What this computer's screens report about their size in millimeters, and the diagonals typed in.
@@ -1013,6 +1023,7 @@ impl Session {
             peer_sizes: Mutex::new(HashMap::new()),
             reported_sizes: Mutex::new((screen_sizes, Vec::new())),
             measure_at: Mutex::new(None),
+            quiet_radio: AtomicBool::new(false),
         });
         shared.reload_layout();
         shared.update_sizes(true);
@@ -1084,6 +1095,8 @@ async fn run(
     // Both computers stay awake while one controls the other
     let awake = Awake::start();
     let mut problems: Vec<Problem> = Vec::new();
+    let mut radio_quiet = false;
+    let mut access_check: Option<Instant> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     let mut status_tick = tokio::time::interval(STATUS_EVERY);
     let mut screen_tick = tokio::time::interval(Duration::from_secs(2));
@@ -1125,6 +1138,19 @@ async fn run(
             }
             Some(message) = internal.recv() => match message {
                 Internal::Notice(notice) => shared.notice(notice),
+                Internal::Accessibility(granted) => {
+                    access_check = Some(Instant::now());
+                    let failed = matches!(shared.status.lock().expect("status lock").input, InputState::Failed(_));
+                    if granted && failed {
+                        tracing::info!("Accessibility is granted now, starting input capture again");
+                        start_capture(&shared, &mut capture);
+                        if matches!(shared.status.lock().expect("status lock").input, InputState::Failed(_)) {
+                            tracing::info!("Accessibility only reaches a new process: TableCross has to start anew");
+                            shared.status.lock().expect("status lock").restart_needed = true;
+                            shared.changed();
+                        }
+                    }
+                }
                 Internal::ClipRead(read) => clip_read(&shared, read),
                 Internal::FilesListed(listing) => files_listed(&shared, listing, false),
                 Internal::Dropped(paths) => {
@@ -1183,12 +1209,15 @@ async fn run(
                     awake.set(now != Role::Idle);
                     shared.node.set_brisk(now != Role::Idle);
                     role = now;
+                    quiet_radio(&shared, &capture, &role, &mut radio_quiet);
                     shared.refresh();
                     shared.notice(notice);
                 }
             }
             _ = status_tick.tick() => {
                 shared.refresh();
+                quiet_radio(&shared, &capture, &role, &mut radio_quiet);
+                check_access(&shared, &mut access_check);
                 if let Some(capture) = &capture {
                     #[allow(unused_mut)]
                     let mut health = capture.health();
@@ -1235,9 +1264,52 @@ async fn run(
         inject.release_all();
     }
     if let Some(capture) = capture.as_mut() {
+        if radio_quiet {
+            capture.quiet_radio(false);
+        }
         capture.stop();
     }
     shared.node.shutdown().await;
+}
+
+/// AWDL pauses while the pointer is shared and the setting asks for it.
+fn quiet_radio(shared: &Shared, capture: &Option<Box<dyn Capture>>, role: &Role, quiet: &mut bool) {
+    let want = shared.quiet_radio.load(Ordering::SeqCst) && *role != Role::Idle;
+    if want == *quiet {
+        return;
+    }
+    if let Some(capture) = capture {
+        tracing::info!(
+            "{}",
+            if want {
+                "pausing AWDL while the pointer is shared"
+            } else {
+                "AWDL may run again"
+            }
+        );
+        capture.quiet_radio(want);
+    }
+    *quiet = want;
+}
+
+/// While capture failed: ask a fresh process every few seconds whether Accessibility was granted
+/// meanwhile (this process may keep the old answer).
+fn check_access(shared: &Arc<Shared>, last: &mut Option<Instant>) {
+    const EVERY: Duration = Duration::from_secs(2);
+    let status = shared.status.lock().expect("status lock");
+    let waiting = matches!(status.input, InputState::Failed(_)) && !status.restart_needed;
+    drop(status);
+    if !waiting || last.is_some_and(|t| t.elapsed() < EVERY) {
+        return;
+    }
+    // Not again until the answer is in
+    *last = Some(Instant::now() + Duration::from_secs(3600));
+    let internal = shared.internal.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(granted) = tc_input::system::accessibility_fresh() {
+            let _ = internal.send(Internal::Accessibility(granted));
+        }
+    });
 }
 
 /// New lines of our log to the computers that collect it.
@@ -2042,6 +2114,10 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             shared.changed();
         }
         Command::Corner(points) => shared.engine.lock().expect("engine lock").set_corner(points),
+        Command::QuietRadio(quiet) => {
+            tracing::info!("AWDL pauses while the pointer is shared: {quiet}");
+            shared.quiet_radio.store(quiet, Ordering::SeqCst);
+        }
         Command::SkipOffline(skip) => {
             tracing::info!("computers that are offline are skipped: {skip}");
             shared.engine.lock().expect("engine lock").set_skip_offline(skip);

@@ -178,6 +178,25 @@ impl App {
 
                     #[cfg(target_os = "macos")]
                     {
+                        ui.label(tr("AirDrop radio"));
+                        if ui
+                            .checkbox(
+                                &mut self.settings.quiet_radio,
+                                tr("Pause AirDrop and Handoff while the pointer is shared"),
+                            )
+                            .on_hover_text(tr(
+                                "Their radio link (AWDL) leaves the Wi-Fi channel every few seconds, and the \
+                                 pointer stutters meanwhile. The system helper pauses it while this Mac controls \
+                                 or is controlled, and lets it run again afterwards. AirDrop, Handoff and AirPlay \
+                                 to nearby devices wait until then.",
+                            ))
+                            .changed()
+                        {
+                            changed = true;
+                            self.send(Command::QuietRadio(self.settings.quiet_radio));
+                        }
+                        ui.end_row();
+
                         ui.label(tr("Universal Control"));
                         if ui
                             .checkbox(

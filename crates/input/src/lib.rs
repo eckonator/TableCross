@@ -123,6 +123,9 @@ pub trait Capture: Send {
     fn single_push_at_edges(&self) -> bool {
         false
     }
+    /// macOS: pause AWDL (the radio of AirDrop, Handoff and AirPlay) through the system helper
+    /// while the pointer is shared; it makes Wi-Fi packets wait every few seconds.
+    fn quiet_radio(&self, _quiet: bool) {}
 }
 
 /// The local system's pointer and keyboard.

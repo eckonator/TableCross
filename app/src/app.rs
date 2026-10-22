@@ -94,6 +94,8 @@ pub struct App {
     removal: Option<Removal>,
     /// The session the status icon menu talks to (it changes when the session restarts).
     tray_session: Arc<std::sync::Mutex<Option<SessionHandle>>>,
+    /// Started anew (or tried to) for a permission granted meanwhile.
+    restart_tried: bool,
     /// Keeps the system (and with `true` the display) awake while the settings ask for it.
     stay_awake: Option<(bool, tc_input::system::KeepAwake)>,
 }
@@ -176,6 +178,7 @@ impl App {
             update_progress: None,
             stay_awake: None,
             tray_session: Arc::new(std::sync::Mutex::new(None)),
+            restart_tried: false,
         };
         app.apply_stay_awake();
         if app.demo.is_none() {
@@ -280,6 +283,7 @@ impl App {
                 handle.send(Command::EdgeRule(self.settings.edges.rule()));
                 handle.send(Command::Corner(f64::from(self.settings.corner)));
                 handle.send(Command::SkipOffline(self.settings.skip_offline));
+                handle.send(Command::QuietRadio(self.settings.quiet_radio));
                 handle.send(Command::ScreenDiagonals(self.settings.screen_diagonals.clone()));
                 *self.tray_session.lock().expect("tray session lock") = Some(handle.clone());
                 self.session = Some(handle);
@@ -870,6 +874,28 @@ impl App {
         }
     }
 
+    /// macOS: Accessibility was granted after the start and only reaches a new process: start anew
+    /// by ourselves instead of asking for it.
+    fn restart_for_permission(&mut self, _ctx: &egui::Context) {
+        #[cfg(target_os = "macos")]
+        if self.status.restart_needed && !self.restart_tried {
+            self.restart_tried = true;
+            match crate::self_update::restart() {
+                Ok(()) => {
+                    tracing::info!("starting anew to use the Accessibility permission");
+                    self.quit_flag.store(true, Ordering::SeqCst);
+                    _ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                Err(e) => {
+                    tracing::warn!("cannot start anew by myself: {e}");
+                    self.show_info(tr(
+                        "Accessibility is granted now. Please quit TableCross and start it again.",
+                    ));
+                }
+            }
+        }
+    }
+
     fn poll_job(&mut self) {
         let Some(job) = &self.job else { return };
         if let Ok(result) = job.try_recv() {
@@ -927,6 +953,7 @@ impl eframe::App for App {
         self.poll_job();
         self.update_check(&ctx);
         self.status = self.current_status();
+        self.restart_for_permission(&ctx);
         // Another computer changes the arrangement: its bars at the edges here, for a moment
         if let Some((marks, at)) = &self.status.edge_marks
             && at.elapsed() < EDGES_SHOWN

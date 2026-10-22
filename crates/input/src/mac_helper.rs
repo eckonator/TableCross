@@ -22,7 +22,8 @@ use core_foundation_sys::preferences::{
 use core_foundation_sys::string::{CFStringCreateWithCString, kCFStringEncodingUTF8};
 
 use crate::helper_protocol::{
-    ALIVE_INTERVAL, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, top_row, write_frame,
+    ALIVE_INTERVAL, FromHelper, HELPER_VERSION, OLDEST_HELPER, QUIET_RADIO_SINCE, ToHelper, read_frame, socket_path,
+    top_row, write_frame,
 };
 
 const RECONNECT: Duration = Duration::from_secs(2);
@@ -37,11 +38,14 @@ pub struct HelperStatus {
     pub failed: u16,
     /// The helper speaks another version (reinstall it).
     pub version_mismatch: Option<u16>,
+    /// The connected helper's version.
+    pub version: u16,
 }
 
 pub struct HelperClient {
     writer: Mutex<Option<BufWriter<UnixStream>>>,
     want_seize: AtomicBool,
+    want_quiet: AtomicBool,
     status: Mutex<HelperStatus>,
 }
 
@@ -51,6 +55,7 @@ impl HelperClient {
         let client = Arc::new(Self {
             writer: Mutex::new(None),
             want_seize: AtomicBool::new(false),
+            want_quiet: AtomicBool::new(false),
             status: Mutex::new(HelperStatus::default()),
         });
         let on_key = Arc::new(on_key);
@@ -97,7 +102,7 @@ impl HelperClient {
             match message {
                 FromHelper::Hello { version, access } => {
                     let mut status = self.status.lock().expect("helper status");
-                    if version != HELPER_VERSION {
+                    if !(OLDEST_HELPER..=HELPER_VERSION).contains(&version) {
                         status.version_mismatch = Some(version);
                         drop(status);
                         break;
@@ -105,12 +110,16 @@ impl HelperClient {
                     *status = HelperStatus {
                         connected: true,
                         access,
+                        version,
                         ..HelperStatus::default()
                     };
                     drop(status);
-                    tracing::info!("system helper connected (input monitoring: {access})");
+                    tracing::info!("system helper {version} connected (input monitoring: {access})");
                     // Restore what we want after a reconnect
                     self.send(&ToHelper::Seize(self.want_seize.load(Ordering::SeqCst)));
+                    if self.want_quiet.load(Ordering::SeqCst) {
+                        self.send_quiet(true);
+                    }
                 }
                 FromHelper::Key { usage, down } => on_key(Captured::Key { usage, down }),
                 FromHelper::Media { key, down } => on_key(Captured::Media { key, down }),
@@ -159,6 +168,23 @@ impl HelperClient {
     pub fn set_seize(&self, seize: bool) {
         self.want_seize.store(seize, Ordering::SeqCst);
         self.send(&ToHelper::Seize(seize));
+    }
+
+    /// Pause AWDL while the pointer is shared (helpers from `QUIET_RADIO_SINCE` on; older ones
+    /// would take the message for garbage and stop listening).
+    pub fn set_quiet_radio(&self, quiet: bool) {
+        if self.want_quiet.swap(quiet, Ordering::SeqCst) != quiet {
+            self.send_quiet(quiet);
+        }
+    }
+
+    fn send_quiet(&self, quiet: bool) {
+        let version = self.status().version;
+        if version >= QUIET_RADIO_SINCE {
+            self.send(&ToHelper::QuietRadio(quiet));
+        } else if quiet && version > 0 {
+            tracing::info!("the system helper {version} cannot pause AWDL yet; update it for that");
+        }
     }
 
     pub fn status(&self) -> HelperStatus {

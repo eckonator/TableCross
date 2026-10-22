@@ -100,6 +100,7 @@ pub fn status() -> Status {
         },
         edge_marks: None,
         pinned: false,
+        restart_needed: false,
         transfers: vec![
             tc_session::TransferView {
                 id: 1,

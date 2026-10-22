@@ -84,6 +84,9 @@ pub struct Settings {
     pub corner: u32,
     /// The pointer goes past computers that are not connected to the next one that is.
     pub skip_offline: bool,
+    /// macOS: pause AWDL (AirDrop, Handoff, AirPlay) while the pointer is shared; it makes Wi-Fi
+    /// packets wait every few seconds.
+    pub quiet_radio: bool,
     /// Diagonals typed in for screens of this computer, by the size they report.
     pub screen_diagonals: Vec<tc_session::screen_size::Typed>,
 }
@@ -110,6 +113,7 @@ impl Default for Settings {
             edges: EdgeSetting::AtOnce,
             corner: 16,
             skip_offline: true,
+            quiet_radio: true,
             screen_diagonals: Vec::new(),
         }
     }
@@ -164,6 +168,7 @@ impl Settings {
             },
             corner: field(&fields, "corner", d.corner).min(200),
             skip_offline: field(&fields, "skip_offline", d.skip_offline),
+            quiet_radio: field(&fields, "quiet_radio", d.quiet_radio),
             screen_diagonals: field(&fields, "screen_diagonals", d.screen_diagonals),
         }
     }

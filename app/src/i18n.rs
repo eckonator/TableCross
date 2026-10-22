@@ -332,6 +332,16 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "Offline computers" => "Computer offline",
         "Skip computers that are offline" => "Computer überspringen, die offline sind",
+        "AirDrop radio" => "AirDrop-Funk",
+        "Pause AirDrop and Handoff while the pointer is shared" => {
+            "AirDrop und Handoff pausieren, solange der Zeiger geteilt wird"
+        }
+        "Their radio link (AWDL) leaves the Wi-Fi channel every few seconds, and the pointer stutters meanwhile. The system helper pauses it while this Mac controls or is controlled, and lets it run again afterwards. AirDrop, Handoff and AirPlay to nearby devices wait until then." => {
+            "Ihre Funkverbindung (AWDL) verlässt alle paar Sekunden den WLAN-Kanal, und der Zeiger ruckelt so lange. Der Systemhelfer pausiert sie, solange dieser Mac steuert oder gesteuert wird, und lässt sie danach wieder laufen. AirDrop, Handoff und AirPlay zu Geräten in der Nähe warten so lange."
+        }
+        "Accessibility is granted now. Please quit TableCross and start it again." => {
+            "Die Bedienungshilfen sind jetzt erlaubt. Bitte TableCross beenden und neu starten."
+        }
         "When a computer in the arrangement is off or not connected, the pointer goes on to the next computer behind it in the same direction." => {
             "Ist ein Computer der Anordnung aus oder nicht verbunden, geht der Zeiger in derselben Richtung weiter zum nächsten Computer dahinter."
         }

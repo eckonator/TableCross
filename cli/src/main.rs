@@ -177,6 +177,7 @@ fn parse_peer_addr(s: &str) -> Result<(String, SocketAddr), String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tc_input::system::answer_access_check();
     let cli = Cli::parse();
     let level = match cli.verbose {
         0 => "warn",

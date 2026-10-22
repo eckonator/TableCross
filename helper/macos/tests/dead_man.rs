@@ -3,12 +3,12 @@
 
 #![cfg(target_os = "macos")]
 
-use std::io::BufReader;
+use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use tc_input::helper_protocol::{FromHelper, HELPER_VERSION, ToHelper, read_frame, write_frame};
+use tc_input::helper_protocol::{AWDL, FromHelper, HELPER_VERSION, ToHelper, interface_up, read_frame, write_frame};
 
 struct Helper(Child);
 
@@ -107,4 +107,50 @@ fn keyboards_are_given_back_when_the_app_goes_quiet_or_away() {
     }
     assert!(saw_release);
     drop(stream);
+}
+
+#[test]
+fn awdl_pauses_while_asked_and_runs_again_when_the_app_goes_away() {
+    let ifconfig = Command::new("/sbin/ifconfig").arg(AWDL).output().unwrap();
+    if interface_up(&String::from_utf8_lossy(&ifconfig.stdout)) != Some(true) {
+        eprintln!("AWDL is not up here, nothing to pause");
+        return;
+    }
+    let socket = std::env::temp_dir().join(format!("tablecross-helper-awdl-{}.sock", std::process::id()));
+    let socket = socket.to_str().unwrap().to_string();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tablecross-helper"))
+        .env("TC_HELPER_SOCKET", &socket)
+        .env("TC_HELPER_DRY_RUN", "1")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut log = BufReader::new(child.stderr.take().unwrap());
+    let _helper = Helper(child);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut wait_for = |text: &str| {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert!(Instant::now() < deadline, "helper did not say: {text}");
+            assert!(log.read_line(&mut line).unwrap() > 0, "helper ended before: {text}");
+            if line.contains(text) {
+                return;
+            }
+        }
+    };
+    let (mut stream, reader) = connect(&socket);
+    write_frame(
+        &mut stream,
+        &ToHelper::Hello {
+            version: HELPER_VERSION,
+        },
+    )
+    .unwrap();
+    write_frame(&mut stream, &ToHelper::QuietRadio(true)).unwrap();
+    wait_for("AWDL would go down");
+    wait_for("AWDL paused");
+    // The app is gone: what we paused runs again
+    drop((stream, reader));
+    wait_for("AWDL would go up");
+    wait_for("AWDL runs again");
 }

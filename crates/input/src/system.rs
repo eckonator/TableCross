@@ -354,6 +354,49 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// With this argument the program only tells whether it has the Accessibility permission (exit
+/// code 0, else 1) and ends; see [`accessibility_fresh`].
+pub const ACCESS_CHECK_FLAG: &str = "--check-accessibility";
+
+/// First thing in `main`: answers [`ACCESS_CHECK_FLAG`] and ends the process.
+pub fn answer_access_check() {
+    if std::env::args().nth(1).as_deref() != Some(ACCESS_CHECK_FLAG) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        unsafe extern "C" {
+            fn AXIsProcessTrusted() -> bool;
+        }
+        std::process::exit(if unsafe { AXIsProcessTrusted() } { 0 } else { 1 });
+    }
+    #[cfg(not(target_os = "macos"))]
+    std::process::exit(0);
+}
+
+/// macOS: whether Accessibility is granted, asked of a fresh process of this program. A running
+/// process may keep the answer it got first, so a permission granted later shows only here.
+/// `None` where it cannot be told.
+pub fn accessibility_fresh() -> Option<bool> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let status = std::process::Command::new(exe)
+        .arg(ACCESS_CHECK_FLAG)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;

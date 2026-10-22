@@ -20,7 +20,8 @@ use core_foundation_sys::runloop::{CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopR
 use core_foundation_sys::set::{CFSetGetCount, CFSetGetValues, CFSetRef};
 use core_foundation_sys::string::{CFStringCreateWithCString, CFStringRef, kCFStringEncodingUTF8};
 use tc_input::helper_protocol::{
-    CONSUMER_KEYS, DeadManSwitch, F1, F12, FromHelper, HELPER_VERSION, ToHelper, read_frame, socket_path, write_frame,
+    AWDL, CONSUMER_KEYS, DeadManSwitch, F1, F12, FromHelper, HELPER_VERSION, ToHelper, interface_up, read_frame,
+    socket_path, write_frame,
 };
 
 type Ref = *mut c_void;
@@ -317,6 +318,74 @@ fn allowed_user() -> Option<u32> {
     std::fs::metadata("/dev/console").ok().map(|m| m.uid())
 }
 
+/// The app wants AWDL paused.
+static QUIET_WANTED: AtomicBool = AtomicBool::new(false);
+/// Left behind while AWDL is paused by us, so a helper that crashed meanwhile lets it run again
+/// when it starts.
+const QUIET_MARK: &str = "/var/run/de.eckonator.tablecross.awdl-paused";
+/// While paused, how often to look whether macOS switched AWDL on again (it does after sleep, a
+/// Wi-Fi change, or when AirDrop, Handoff or AirPlay ask for it).
+const QUIET_CHECK: Duration = Duration::from_secs(5);
+
+fn ifconfig(args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("/sbin/ifconfig").args(args).output().ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn awdl_up() -> Option<bool> {
+    ifconfig(&[AWDL]).as_deref().and_then(interface_up)
+}
+
+fn set_awdl(up: bool) {
+    if dry_run() {
+        log(&format!("dry run: AWDL would go {}", if up { "up" } else { "down" }));
+        return;
+    }
+    let _ = ifconfig(&[AWDL, if up { "up" } else { "down" }]);
+}
+
+/// Pauses AWDL while the app wants it and lets it run again afterwards, but only if it was us who
+/// paused it. On a thread of its own: `ifconfig` takes a moment, and keys must not wait for it.
+fn quiet_radio() {
+    let mark = |paused: bool| {
+        if dry_run() {
+            return;
+        }
+        if paused {
+            let _ = std::fs::write(QUIET_MARK, b"");
+        } else {
+            let _ = std::fs::remove_file(QUIET_MARK);
+        }
+    };
+    let mut ours = !dry_run() && std::path::Path::new(QUIET_MARK).exists();
+    let mut checked: Option<Instant> = None;
+    loop {
+        let wanted = QUIET_WANTED.load(Ordering::SeqCst);
+        if wanted && checked.is_none_or(|t| t.elapsed() >= QUIET_CHECK) {
+            checked = Some(Instant::now());
+            if awdl_up() == Some(true) {
+                set_awdl(false);
+                log(if ours {
+                    "AWDL was on again, paused it again"
+                } else {
+                    "AWDL paused"
+                });
+                ours = true;
+                mark(true);
+            }
+        } else if !wanted {
+            checked = None;
+            if ours {
+                set_awdl(true);
+                log("AWDL runs again");
+                ours = false;
+                mark(false);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 enum Incoming {
     Connected,
     Message(ToHelper),
@@ -379,6 +448,7 @@ pub fn run() {
     let run_loop = unsafe { CFRunLoopGetCurrent() };
     let mut keyboards = Keyboards::new(run_loop);
 
+    std::thread::spawn(quiet_radio);
     let (tx, rx): (Sender<Incoming>, Receiver<Incoming>) = mpsc::channel();
     std::thread::spawn(move || serve(tx));
     let mut switch = DeadManSwitch::new(Instant::now());
@@ -389,14 +459,23 @@ pub fn run() {
             match event {
                 Incoming::Connected => {
                     switch.disconnected();
+                    QUIET_WANTED.store(false, Ordering::SeqCst);
                     send(&FromHelper::Hello {
                         version: HELPER_VERSION,
                         access,
                     });
                     keyboards.report();
                 }
-                Incoming::Message(message) => switch.message(&message, now),
-                Incoming::Gone => switch.disconnected(),
+                Incoming::Message(message) => {
+                    if let ToHelper::QuietRadio(on) = message {
+                        QUIET_WANTED.store(on, Ordering::SeqCst);
+                    }
+                    switch.message(&message, now);
+                }
+                Incoming::Gone => {
+                    switch.disconnected();
+                    QUIET_WANTED.store(false, Ordering::SeqCst);
+                }
             }
         }
         let added: Vec<usize> = std::mem::take(&mut *ADDED.lock().expect("added lock"));

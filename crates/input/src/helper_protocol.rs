@@ -10,8 +10,12 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-/// Changed on incompatible changes; app and helper must match.
-pub const HELPER_VERSION: u16 = 3;
+/// Changed on incompatible changes. The app also works with a helper down to `OLDEST_HELPER`
+/// (without what came later); an older helper is offered for update.
+pub const HELPER_VERSION: u16 = 4;
+pub const OLDEST_HELPER: u16 = 3;
+/// The first helper that pauses AWDL (`ToHelper::QuietRadio`).
+pub const QUIET_RADIO_SINCE: u16 = 4;
 pub const SOCKET_PATH: &str = "/var/run/de.eckonator.tablecross.helper.sock";
 
 /// `TC_HELPER_SOCKET` overrides the path (tests).
@@ -45,6 +49,10 @@ pub enum ToHelper {
     /// Take the keyboards away from the system and send their keys (`true`), or give them back.
     Seize(bool),
     Alive,
+    /// Pause AWDL, the radio link of AirDrop, Handoff and AirPlay, while the pointer is shared
+    /// (`true`), or let it run again. It leaves the Wi-Fi channel every few seconds, and packets
+    /// wait meanwhile. Only from helper version `QUIET_RADIO_SINCE`.
+    QuietRadio(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +111,17 @@ pub fn top_row(usage: u16, fn_held: bool, fn_keys_standard: bool) -> Option<tc_p
         return None;
     }
     TOP_ROW[usize::from(usage - F1)]
+}
+
+/// AWDL's interface on macOS.
+pub const AWDL: &str = "awdl0";
+
+/// Whether `ifconfig <interface>` reports the interface as up ("flags=8843<UP,BROADCAST,…>");
+/// `None` when the output says nothing about it.
+pub fn interface_up(ifconfig: &str) -> Option<bool> {
+    let flags = ifconfig.lines().next()?.split_once("flags=")?.1;
+    let list = flags.split_once('<')?.1.split_once('>')?.0;
+    Some(list.split(',').any(|f| f == "UP"))
 }
 
 /// Length (u16 little endian) and postcard bytes.
@@ -194,6 +213,19 @@ mod tests {
         // Mission Control and friends stay function keys
         assert_eq!(top_row(F1 + 2, false, false), None);
         assert_eq!(top_row(0x04, false, false), None);
+    }
+
+    #[test]
+    fn reads_whether_an_interface_is_up() {
+        let up =
+            "awdl0: flags=8943<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST> mtu 1500\n\toptions=400<CHANNEL_IO>";
+        let down = "awdl0: flags=8902<BROADCAST,PROMISC,SIMPLEX,MULTICAST> mtu 1500";
+        assert_eq!(interface_up(up), Some(true));
+        assert_eq!(interface_up(down), Some(false));
+        assert_eq!(interface_up("ifconfig: interface awdl0 does not exist"), None);
+        assert_eq!(interface_up(""), None);
+        // "UP" only as a whole flag
+        assert_eq!(interface_up("x: flags=1<LOWER_UP,POINTOPOINT> mtu 1"), Some(false));
     }
 
     #[test]

@@ -209,6 +209,23 @@ fn relaunch(bundle: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Opens this app again as soon as this process has ended (a permission granted meanwhile only
+/// reaches a new process).
+#[cfg(target_os = "macos")]
+pub fn restart() -> Result<(), String> {
+    let bundle = bundle().ok_or("not running from an app bundle")?;
+    command("/bin/sh")
+        .args([
+            "-c",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$0\"",
+        ])
+        .arg(bundle)
+        .arg(std::process::id().to_string())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(windows)]
 fn run(url: &str, report: &impl Fn(Progress)) -> Result<(), String> {
     let dir = work_dir()?;
