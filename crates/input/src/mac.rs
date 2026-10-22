@@ -336,7 +336,7 @@ pub(crate) fn pointer_probe() -> Option<String> {
     let settle = || std::thread::sleep(Duration::from_millis(150));
     let bounds = unsafe { CGDisplayBounds(CGMainDisplayID()) };
     let at = |i: f64| CGPoint {
-        x: bounds.origin.x + bounds.size.width * (0.2 + 0.07 * i),
+        x: bounds.origin.x + bounds.size.width * (0.15 + 0.07 * i),
         y: bounds.origin.y + bounds.size.height * 0.5,
     };
     let start = current_position();
@@ -354,31 +354,29 @@ pub(crate) fn pointer_probe() -> Option<String> {
         report.push(line);
     };
     let trying = |name: &str| tracing::info!("pointer probe: trying {name}");
+    // A source with a state of its own may never come back on the login screen, so those go last
+    let post_move = |tap: u32, state: Option<i32>, target: CGPoint| unsafe {
+        let source = state.map_or(std::ptr::null_mut(), |s| CGEventSourceCreate(s));
+        let event = CGEventCreateMouseEvent(source, MOUSE_MOVED, target, 0);
+        let done = if event.is_null() {
+            Err(-1)
+        } else {
+            CGEventPost(tap, event);
+            CFRelease(event.cast());
+            Ok(())
+        };
+        if !source.is_null() {
+            CFRelease(source.cast());
+        }
+        done
+    };
+    let mut i = 0.0;
     unsafe {
-        let variants = [
-            ("HID tap", HID_TAP, None),
-            ("session tap", SESSION_TAP, None),
-            ("HID tap + HID source", HID_TAP, Some(SOURCE_HID_SYSTEM)),
-            ("HID tap + private source", HID_TAP, Some(SOURCE_PRIVATE)),
-            ("session tap + HID source", SESSION_TAP, Some(SOURCE_HID_SYSTEM)),
-        ];
-        let mut i = 0.0;
-        for (name, tap, state) in variants {
+        for (name, tap) in [("HID tap", HID_TAP), ("session tap", SESSION_TAP)] {
             trying(name);
             let target = at(i);
             i += 1.0;
-            let source = state.map_or(std::ptr::null_mut(), |s| CGEventSourceCreate(s));
-            let event = CGEventCreateMouseEvent(source, MOUSE_MOVED, target, 0);
-            let done = if event.is_null() {
-                Err(-1)
-            } else {
-                CGEventPost(tap, event);
-                CFRelease(event.cast());
-                Ok(())
-            };
-            if !source.is_null() {
-                CFRelease(source.cast());
-            }
+            let done = post_move(tap, None, target);
             check(name, target, done);
         }
         trying("warp");
@@ -427,6 +425,18 @@ pub(crate) fn pointer_probe() -> Option<String> {
         check("IOHIDSystem event", target, posted);
         if opened.is_ok() {
             IOServiceClose(connect);
+        }
+        i += 1.0;
+        for (name, tap, state) in [
+            ("HID tap + private source", HID_TAP, SOURCE_PRIVATE),
+            ("HID tap + HID source", HID_TAP, SOURCE_HID_SYSTEM),
+            ("session tap + HID source", SESSION_TAP, SOURCE_HID_SYSTEM),
+        ] {
+            trying(name);
+            let target = at(i);
+            i += 1.0;
+            let done = post_move(tap, Some(state), target);
+            check(name, target, done);
         }
         CGWarpMouseCursorPosition(CGPoint { x: start.x, y: start.y });
     }
