@@ -19,6 +19,19 @@ pub enum LangSetting {
     En,
 }
 
+/// The group of settings shown (a tab on the settings page).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsTab {
+    #[default]
+    General,
+    Pointer,
+    /// macOS only.
+    Mac,
+    Network,
+    Troubleshooting,
+}
+
 /// How top and bottom edges switch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +108,8 @@ pub struct Settings {
     pub quiet_radio: bool,
     /// Diagonals typed in for screens of this computer, by the size they report.
     pub screen_diagonals: Vec<tc_session::screen_size::Typed>,
+    /// The tab of the settings page shown last.
+    pub settings_tab: SettingsTab,
 }
 
 impl Default for Settings {
@@ -124,6 +139,7 @@ impl Default for Settings {
             login_screen: false,
             quiet_radio: true,
             screen_diagonals: Vec::new(),
+            settings_tab: SettingsTab::General,
         }
     }
 }
@@ -182,6 +198,7 @@ impl Settings {
             login_screen: field(&fields, "login_screen", d.login_screen),
             quiet_radio: field(&fields, "quiet_radio", d.quiet_radio),
             screen_diagonals: field(&fields, "screen_diagonals", d.screen_diagonals),
+            settings_tab: field(&fields, "settings_tab", d.settings_tab),
         }
     }
 

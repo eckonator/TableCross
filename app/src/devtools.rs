@@ -18,6 +18,8 @@ pub struct DevTools {
     screenshot: Option<PathBuf>,
     pub demo: bool,
     pub page: Option<String>,
+    /// Tab of the settings page (`general`, `pointer`, `mac`, `network`, `troubleshooting`).
+    pub tab: Option<String>,
     pub setup_step: Option<usize>,
     pub lang: Option<String>,
     pub theme: Option<String>,
@@ -32,6 +34,7 @@ impl DevTools {
             screenshot: var("TC_SCREENSHOT").map(PathBuf::from),
             demo: var("TC_DEMO").is_some(),
             page: var("TC_PAGE"),
+            tab: var("TC_TAB"),
             setup_step: var("TC_SETUP").and_then(|s| s.parse().ok()),
             lang: var("TC_LANG"),
             theme: var("TC_THEME"),

@@ -1,18 +1,67 @@
-//! Settings: language, appearance, start with the system, network, keyboard shortcuts.
+//! Settings in tabs: general, pointer and keyboard, Mac, network, troubleshooting.
 
 use eframe::egui::{self, RichText};
 
 use super::card;
 use crate::app::App;
 use crate::i18n::{tr, trf};
-use crate::settings::{EdgeSetting, LangSetting, ThemeSetting, host_name};
+use crate::settings::{EdgeSetting, LangSetting, SettingsTab, ThemeSetting, host_name};
+use crate::theme;
 use tc_session::Command;
 
 impl App {
     pub fn settings_page(&mut self, ui: &mut egui::Ui) {
         self.page_header(ui, tr("Settings"), tr("How TableCross behaves on this computer."));
+        let mut changed = self.settings_tabs(ui);
+        ui.add_space(12.0);
+        changed |= match self.settings.settings_tab {
+            SettingsTab::General => self.general_settings(ui),
+            SettingsTab::Pointer => self.pointer_settings(ui),
+            SettingsTab::Mac => self.mac_settings(ui),
+            SettingsTab::Network => self.network_settings(ui),
+            SettingsTab::Troubleshooting => self.troubleshooting_settings(ui),
+        };
+        if changed {
+            self.save_settings();
+        }
+    }
+
+    /// The row of tabs; whether another one was chosen.
+    fn settings_tabs(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut tabs = vec![
+            (SettingsTab::General, tr("General")),
+            (SettingsTab::Pointer, tr("Pointer & keyboard")),
+        ];
+        if cfg!(target_os = "macos") {
+            tabs.push((SettingsTab::Mac, "Mac"));
+        }
+        tabs.push((SettingsTab::Network, tr("Network")));
+        tabs.push((SettingsTab::Troubleshooting, tr("Troubleshooting")));
+        // The Mac tab of a settings file from a Mac does not exist elsewhere
+        if !tabs.iter().any(|(t, _)| *t == self.settings.settings_tab) {
+            self.settings.settings_tab = SettingsTab::General;
+        }
+        let mut chosen = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for (tab, label) in tabs {
+                if settings_tab(ui, label, self.settings.settings_tab == tab).clicked() {
+                    chosen = Some(tab);
+                }
+            }
+        });
+        match chosen {
+            Some(tab) if tab != self.settings.settings_tab => {
+                self.settings.settings_tab = tab;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn general_settings(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
-        card(ui, tr("General"), |ui| {
+        card(ui, "", |ui| {
             egui::Grid::new("general")
                 .num_columns(2)
                 .spacing([16.0, 8.0])
@@ -97,6 +146,46 @@ impl App {
                     }
                     ui.end_row();
 
+                    ui.label(tr("Sleep"));
+                    if ui
+                        .checkbox(
+                            &mut self.settings.stay_awake,
+                            tr("Keep this computer from going to sleep"),
+                        )
+                        .on_hover_text(tr(
+                            "While TableCross runs. A computer that sleeps drops out, and with it the way over \
+                             it to the computers behind.",
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        self.apply_stay_awake();
+                    }
+                    ui.end_row();
+                    ui.label("");
+                    if ui
+                        .add_enabled(
+                            self.settings.stay_awake,
+                            egui::Checkbox::new(&mut self.settings.screen_stays_on, tr("Keep the screen on as well")),
+                        )
+                        .changed()
+                    {
+                        changed = true;
+                        self.apply_stay_awake();
+                    }
+                    ui.end_row();
+                });
+        });
+        changed
+    }
+
+    fn pointer_settings(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
+        card(ui, "", |ui| {
+            egui::Grid::new("pointer")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
                     ui.label(tr("Top and bottom"));
                     let before = self.settings.edges;
                     egui::ComboBox::from_id_salt("edges")
@@ -180,36 +269,46 @@ impl App {
                         self.send(Command::SkipOffline(self.settings.skip_offline));
                     }
                     ui.end_row();
+                });
+        });
+        ui.add_space(14.0);
+        card(ui, tr("Keyboard shortcuts"), |ui| {
+            for (keys, what) in [
+                (
+                    tr("Ctrl + Shift + Alt + Esc"),
+                    tr("Release everything: all keys up, mouse and keyboard back to this computer"),
+                ),
+                (
+                    tr("Ctrl + Shift + Alt + arrow key"),
+                    tr("Go to the computer on that side"),
+                ),
+                (
+                    tr("Ctrl + Shift + Alt + 1 … 9"),
+                    tr("Go to the computer with that number (see Arrangement)"),
+                ),
+                (tr("Ctrl + Shift + Alt + L"), tr("Lock the screens of all computers")),
+                (
+                    tr("Ctrl + Shift + Alt + F"),
+                    tr("Keep the pointer on this computer, or let it go again"),
+                ),
+            ] {
+                ui.label(RichText::new(keys).monospace().strong());
+                ui.label(what);
+                ui.add_space(4.0);
+            }
+        });
+        changed
+    }
 
-                    ui.label(tr("Sleep"));
-                    if ui
-                        .checkbox(
-                            &mut self.settings.stay_awake,
-                            tr("Keep this computer from going to sleep"),
-                        )
-                        .on_hover_text(tr(
-                            "While TableCross runs. A computer that sleeps drops out, and with it the way over \
-                             it to the computers behind.",
-                        ))
-                        .changed()
-                    {
-                        changed = true;
-                        self.apply_stay_awake();
-                    }
-                    ui.end_row();
-                    ui.label("");
-                    if ui
-                        .add_enabled(
-                            self.settings.stay_awake,
-                            egui::Checkbox::new(&mut self.settings.screen_stays_on, tr("Keep the screen on as well")),
-                        )
-                        .changed()
-                    {
-                        changed = true;
-                        self.apply_stay_awake();
-                    }
-                    ui.end_row();
-
+    #[allow(clippy::unused_self)]
+    fn mac_settings(&mut self, ui: &mut egui::Ui) -> bool {
+        #[allow(unused_mut)]
+        let mut changed = false;
+        card(ui, "", |ui| {
+            egui::Grid::new("mac")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
                     #[cfg(target_os = "macos")]
                     {
                         ui.label(tr("Login screen"));
@@ -295,7 +394,11 @@ impl App {
                     }
                 });
         });
-        ui.add_space(14.0);
+        changed
+    }
+
+    fn network_settings(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
         card(ui, tr("Network"), |ui| {
             egui::Grid::new("network")
                 .num_columns(2)
@@ -368,46 +471,11 @@ impl App {
                 });
             }
         });
-        ui.add_space(14.0);
-        card(ui, tr("Keyboard shortcuts"), |ui| {
-            for (keys, what) in [
-                (
-                    tr("Ctrl + Shift + Alt + Esc"),
-                    tr("Release everything: all keys up, mouse and keyboard back to this computer"),
-                ),
-                (
-                    tr("Ctrl + Shift + Alt + arrow key"),
-                    tr("Go to the computer on that side"),
-                ),
-                (
-                    tr("Ctrl + Shift + Alt + 1 … 9"),
-                    tr("Go to the computer with that number (see Arrangement)"),
-                ),
-                (tr("Ctrl + Shift + Alt + L"), tr("Lock the screens of all computers")),
-                (
-                    tr("Ctrl + Shift + Alt + F"),
-                    tr("Keep the pointer on this computer, or let it go again"),
-                ),
-            ] {
-                ui.label(RichText::new(keys).monospace().strong());
-                ui.label(what);
-                ui.add_space(4.0);
-            }
-        });
-        ui.add_space(14.0);
-        card(ui, tr("Files"), |ui| {
-            ui.horizontal(|ui| {
-                if ui.button(tr("Open settings folder")).clicked() {
-                    super::open(&self.dir.display().to_string());
-                }
-                if let Some(log) = self.log_file.clone()
-                    && ui.button(tr("Show log file")).clicked()
-                {
-                    super::open(&log.display().to_string());
-                }
-            });
-        });
-        ui.add_space(14.0);
+        changed
+    }
+
+    fn troubleshooting_settings(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
         card(ui, tr("Troubleshooting"), |ui| {
             if ui
                 .checkbox(
@@ -434,10 +502,21 @@ impl App {
             }
         });
         ui.add_space(14.0);
+        card(ui, tr("Files"), |ui| {
+            ui.horizontal(|ui| {
+                if ui.button(tr("Open settings folder")).clicked() {
+                    super::open(&self.dir.display().to_string());
+                }
+                if let Some(log) = self.log_file.clone()
+                    && ui.button(tr("Show log file")).clicked()
+                {
+                    super::open(&log.display().to_string());
+                }
+            });
+        });
+        ui.add_space(14.0);
         card(ui, tr("Remove TableCross"), |ui| self.removal_card(ui));
-        if changed {
-            self.save_settings();
-        }
+        changed
     }
 
     /// "Check for updates", with a spinner while it runs.
@@ -489,6 +568,31 @@ impl App {
             self.confirm_remove = true;
         }
     }
+}
+
+/// One tab of the settings page.
+fn settings_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+    let p = theme::colors(ui);
+    let font = if selected {
+        egui::FontId::new(14.0, theme::semibold())
+    } else {
+        egui::FontId::proportional(14.0)
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), font, if selected { p.accent } else { p.text });
+    let size = galley.size() + egui::vec2(28.0, 16.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let fill = if selected {
+        p.accent_soft
+    } else if response.hovered() {
+        p.window
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.text);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn edge_text(e: EdgeSetting) -> &'static str {

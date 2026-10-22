@@ -172,6 +172,7 @@ fn de(en: &str) -> Option<&'static str> {
             "Freie Software unter der GNU General Public License, Version 3 oder neuer. Ohne jede Gewährleistung."
         }
         "General" => "Allgemein",
+        "Pointer & keyboard" => "Zeiger & Tastatur",
         "Go there" => "Dorthin wechseln",
         "Go to the computer on that side" => "Zum Computer auf dieser Seite wechseln",
         "Install system helper …" => "Systemhelfer installieren …",

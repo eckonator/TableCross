@@ -193,6 +193,10 @@ impl App {
             Some("about") => Page::About,
             _ => Page::Status,
         };
+        if let Some(tab) = app.dev.tab.as_deref() {
+            app.settings.settings_tab =
+                serde_json::from_value(serde_json::Value::String(tab.into())).unwrap_or_default();
+        }
         let first_start = !app.settings.setup_done && app.current_status().peers.is_empty();
         app.setup_step = app
             .dev
