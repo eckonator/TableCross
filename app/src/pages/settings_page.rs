@@ -300,98 +300,100 @@ impl App {
         changed
     }
 
-    #[allow(clippy::unused_self)]
+    /// The Mac tab is not offered elsewhere.
+    #[cfg(not(target_os = "macos"))]
+    fn mac_settings(&mut self, _ui: &mut egui::Ui) -> bool {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
     fn mac_settings(&mut self, ui: &mut egui::Ui) -> bool {
-        #[allow(unused_mut)]
         let mut changed = false;
         card(ui, "", |ui| {
             egui::Grid::new("mac")
                 .num_columns(2)
                 .spacing([16.0, 8.0])
                 .show(ui, |ui| {
-                    #[cfg(target_os = "macos")]
-                    {
-                        ui.label(tr("Login screen"));
-                        if ui
-                            .checkbox(
-                                &mut self.settings.login_screen,
-                                tr("Can be controlled on the login screen"),
-                            )
-                            .on_hover_text(tr(
-                                "Before anyone logs in, this Mac can be used from the other computers as well, for \
+                    ui.label(tr("Login screen"));
+                    if ui
+                        .checkbox(
+                            &mut self.settings.login_screen,
+                            tr("Can be controlled on the login screen"),
+                        )
+                        .on_hover_text(tr(
+                            "Before anyone logs in, this Mac can be used from the other computers as well, for \
                                  example to type the password. Needs the system helper, and tablecross-loginwindow \
                                  needs the Accessibility permission (the status page shows how).",
-                            ))
-                            .changed()
-                        {
-                            changed = true;
-                            self.send(Command::LoginScreen(self.settings.login_screen));
-                        }
-                        ui.end_row();
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        self.send(Command::LoginScreen(self.settings.login_screen));
+                    }
+                    ui.end_row();
 
-                        ui.label(tr("AirDrop radio"));
-                        if ui
-                            .checkbox(
-                                &mut self.settings.quiet_radio,
-                                tr("Pause AirDrop and Handoff while sharing"),
-                            )
-                            .on_hover_text(tr(
-                                "Their radio link (AWDL) leaves the Wi-Fi channel every few seconds, and the \
+                    ui.label(tr("AirDrop radio"));
+                    if ui
+                        .checkbox(
+                            &mut self.settings.quiet_radio,
+                            tr("Pause AirDrop and Handoff while sharing"),
+                        )
+                        .on_hover_text(tr(
+                            "Their radio link (AWDL) leaves the Wi-Fi channel every few seconds, and the \
                                  pointer stutters meanwhile. The system helper pauses it while this Mac controls \
                                  or is controlled, and lets it run again afterwards. AirDrop, Handoff and AirPlay \
                                  to nearby devices wait until then.",
-                            ))
-                            .changed()
-                        {
-                            changed = true;
-                            self.send(Command::QuietRadio(self.settings.quiet_radio));
-                        }
-                        ui.end_row();
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        self.send(Command::QuietRadio(self.settings.quiet_radio));
+                    }
+                    ui.end_row();
 
-                        ui.label(tr("Universal Control"));
-                        if ui
-                            .checkbox(
-                                &mut self.settings.universal_control_off,
-                                tr("Switch off Universal Control of macOS"),
-                            )
-                            .on_hover_text(tr(
-                                "Universal Control also moves the pointer to other Macs at the screen edges. \
+                    ui.label(tr("Universal Control"));
+                    if ui
+                        .checkbox(
+                            &mut self.settings.universal_control_off,
+                            tr("Switch off Universal Control of macOS"),
+                        )
+                        .on_hover_text(tr(
+                            "Universal Control also moves the pointer to other Macs at the screen edges. \
                                  TableCross switches it off at start so the two do not fight over the pointer.",
-                            ))
-                            .changed()
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        if self.settings.universal_control_off
+                            && !self.isolated
+                            && tc_input::universal_control::is_on()
+                            && let Err(e) = tc_input::universal_control::turn_off()
                         {
-                            changed = true;
-                            if self.settings.universal_control_off
-                                && !self.isolated
-                                && tc_input::universal_control::is_on()
-                                && let Err(e) = tc_input::universal_control::turn_off()
-                            {
-                                self.show_info(trf("Could not switch off Universal Control: {}", &[&e]));
-                            }
+                            self.show_info(trf("Could not switch off Universal Control: {}", &[&e]));
                         }
-                        ui.end_row();
+                    }
+                    ui.end_row();
 
-                        ui.label(tr("Handoff"));
-                        if ui
-                            .checkbox(&mut self.settings.handoff_off, tr("Switch off Handoff of macOS"))
-                            .on_hover_text(tr(
-                                "With Handoff, macOS carries the clipboard to your other Macs as well and sends what \
+                    ui.label(tr("Handoff"));
+                    if ui
+                        .checkbox(&mut self.settings.handoff_off, tr("Switch off Handoff of macOS"))
+                        .on_hover_text(tr(
+                            "With Handoff, macOS carries the clipboard to your other Macs as well and sends what \
                                  TableCross shares back as new: pasting then waits for the other Mac. TableCross \
                                  switches it off at start. This also stops the clipboard with an iPhone or iPad.",
-                            ))
-                            .changed()
+                        ))
+                        .changed()
+                    {
+                        changed = true;
+                        if self.settings.handoff_off
+                            && !self.isolated
+                            && tc_input::handoff::is_on()
+                            && let Err(e) = tc_input::handoff::turn_off()
                         {
-                            changed = true;
-                            if self.settings.handoff_off
-                                && !self.isolated
-                                && tc_input::handoff::is_on()
-                                && let Err(e) = tc_input::handoff::turn_off()
-                            {
-                                self.show_info(trf("Could not switch off Handoff: {}", &[&e]));
-                            }
+                            self.show_info(trf("Could not switch off Handoff: {}", &[&e]));
                         }
-                        ui.end_row();
                     }
+                    ui.end_row();
                 });
         });
         #[cfg(target_os = "macos")]
@@ -421,9 +423,11 @@ impl App {
             if self.settings.login_screen {
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new(tr("On the login screen no one can answer its questions, so it blocks \
-                         tablecross-loginwindow silently. Add a rule that allows tablecross-loginwindow in the \
-                         local network, incoming and outgoing, for all users (it runs as root there)."))
+                    RichText::new(tr(
+                        "For the login screen it needs both: GUI Scripting access as above, and a rule that \
+                         allows tablecross-loginwindow in the local network, incoming and outgoing (no one can \
+                         answer its question there, so it blocks the program silently).",
+                    ))
                     .color(muted),
                 );
                 if ui.button(tr("Show tablecross-loginwindow in the Finder")).clicked() {

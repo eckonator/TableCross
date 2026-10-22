@@ -212,7 +212,10 @@ into the list.
 If a network filter app runs on that Mac (one that asks per program whether a connection is allowed),
 add a rule that allows `/Library/PrivilegedHelperTools/tablecross-loginwindow` in the local network,
 incoming and outgoing. On the login screen no one can answer its question, so the filter blocks the
-program silently and the other computers cannot reach the Mac there.
+program silently and the other computers cannot reach the Mac there. Some filters also ignore clicks and
+keys that do not come from a real device (against malware); allow that in their settings (often called
+GUI Scripting access), or neither their questions nor the login screen can be operated from another
+computer. TableCross shows these hints in its settings when it recognizes such a filter.
 
 On Windows, the optional service lets TableCross operate the sign-in screen, UAC prompts and programs
 started as administrator (run once in an administrator prompt):
