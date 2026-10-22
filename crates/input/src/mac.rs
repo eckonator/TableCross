@@ -299,6 +299,71 @@ fn current_position() -> Point {
     }
 }
 
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    fn IOServiceMatching(name: *const std::ffi::c_char) -> Ref;
+    fn IOServiceGetMatchingService(main: u32, matching: Ref) -> u32;
+    fn IOServiceOpen(service: u32, task: u32, kind: u32, connect: *mut u32) -> i32;
+    fn IOServiceClose(connect: u32) -> i32;
+    fn IOObjectRelease(object: u32) -> i32;
+    fn IOHIDSetMouseLocation(connect: u32, x: i32, y: i32) -> i32;
+}
+
+unsafe extern "C" {
+    static mach_task_self_: u32;
+}
+
+/// See [`crate::system::pointer_probe`].
+pub(crate) fn pointer_probe() -> Option<String> {
+    let settle = || std::thread::sleep(Duration::from_millis(150));
+    let bounds = unsafe { CGDisplayBounds(CGMainDisplayID()) };
+    let at = |i: f64| CGPoint {
+        x: bounds.origin.x + bounds.size.width * (0.3 + 0.1 * i),
+        y: bounds.origin.y + bounds.size.height * 0.5,
+    };
+    let start = current_position();
+    let mut report = Vec::new();
+    let mut check = |name: &str, target: CGPoint, done: bool| {
+        settle();
+        let now = current_position();
+        let moved = done && (now.x - target.x).abs() < 2.0 && (now.y - target.y).abs() < 2.0;
+        report.push(format!("{name} {moved}"));
+    };
+    unsafe {
+        for (i, (name, tap)) in [("HID tap", HID_TAP), ("session tap", SESSION_TAP)]
+            .into_iter()
+            .enumerate()
+        {
+            let target = at(i as f64);
+            let event = CGEventCreateMouseEvent(std::ptr::null_mut(), MOUSE_MOVED, target, 0);
+            let made = !event.is_null();
+            if made {
+                CGEventPost(tap, event);
+                CFRelease(event.cast());
+            }
+            check(name, target, made);
+        }
+        let target = at(2.0);
+        let warped = CGWarpMouseCursorPosition(target) == 0;
+        check("warp", target, warped);
+        let target = at(3.0);
+        let service = IOServiceGetMatchingService(0, IOServiceMatching(c"IOHIDSystem".as_ptr()));
+        let mut connect = 0;
+        // kIOHIDParamConnectType
+        let opened = service != 0 && IOServiceOpen(service, mach_task_self_, 1, &mut connect) == 0;
+        if service != 0 {
+            IOObjectRelease(service);
+        }
+        let set = opened && IOHIDSetMouseLocation(connect, target.x as i32, target.y as i32) == 0;
+        check("IOHIDSystem", target, set);
+        if opened {
+            IOServiceClose(connect);
+        }
+        CGWarpMouseCursorPosition(CGPoint { x: start.x, y: start.y });
+    }
+    Some(report.join(", "))
+}
+
 pub struct MacCapture {
     shared: Arc<Shared>,
 }

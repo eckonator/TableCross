@@ -408,6 +408,16 @@ pub fn event_access() -> Option<(bool, bool, bool, bool)> {
     None
 }
 
+/// macOS: moves the pointer in each way there is and tells which ways macOS carried out (the
+/// pointer is put back afterwards). Where injected events vanish silently this shows the way that
+/// still works. `None` elsewhere.
+pub fn pointer_probe() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    return crate::mac::pointer_probe();
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 /// macOS: whether Accessibility is granted, asked of a fresh process of this program. A running
 /// process may keep the answer it got first, so a permission granted later shows only here.
 /// `None` where it cannot be told.
