@@ -394,7 +394,43 @@ impl App {
                     }
                 });
         });
+        #[cfg(target_os = "macos")]
+        self.network_filter_hint(ui);
         changed
+    }
+
+    /// macOS: a network filter that asks per program is installed. Two things go wrong with it
+    /// unless set up: its questions cannot be answered from another computer (it ignores
+    /// injected clicks by default), and on the login screen no one answers them at all.
+    #[cfg(target_os = "macos")]
+    fn network_filter_hint(&mut self, ui: &mut egui::Ui) {
+        if !std::path::Path::new("/Applications/Little Snitch.app").exists() {
+            return;
+        }
+        ui.add_space(14.0);
+        card(ui, tr("Little Snitch is installed"), |ui| {
+            let muted = theme::colors(ui).muted;
+            ui.label(
+                RichText::new(tr(
+                    "It ignores clicks and keys from other computers, so its questions can only be answered at \
+                     this Mac. To answer them from another computer as well, switch on “Allow GUI Scripting \
+                     access to Little Snitch” in its settings under Security.",
+                ))
+                .color(muted),
+            );
+            if self.settings.login_screen {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(tr("On the login screen no one can answer its questions, so it blocks \
+                         tablecross-loginwindow silently. Add a rule that allows tablecross-loginwindow in the \
+                         local network, incoming and outgoing, for all users (it runs as root there)."))
+                    .color(muted),
+                );
+                if ui.button(tr("Show tablecross-loginwindow in the Finder")).clicked() {
+                    tc_session::helper_install::show_login_program();
+                }
+            }
+        });
     }
 
     fn network_settings(&mut self, ui: &mut egui::Ui) -> bool {

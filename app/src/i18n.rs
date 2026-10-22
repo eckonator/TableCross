@@ -175,6 +175,14 @@ fn de(en: &str) -> Option<&'static str> {
             "Freie Software unter der GNU General Public License, Version 3 oder neuer. Ohne jede Gewährleistung."
         }
         "General" => "Allgemein",
+        "Little Snitch is installed" => "Little Snitch ist installiert",
+        "It ignores clicks and keys from other computers, so its questions can only be answered at this Mac. To answer them from another computer as well, switch on “Allow GUI Scripting access to Little Snitch” in its settings under Security." => {
+            "Es ignoriert Klicks und Tasten von anderen Computern, seine Nachfragen lassen sich also nur an diesem Mac beantworten. Damit das auch von einem anderen Computer aus geht, in seinen Einstellungen unter „Sicherheit“ den GUI-Scripting-Zugriff auf Little Snitch erlauben."
+        }
+        "On the login screen no one can answer its questions, so it blocks tablecross-loginwindow silently. Add a rule that allows tablecross-loginwindow in the local network, incoming and outgoing, for all users (it runs as root there)." => {
+            "Am Anmeldebildschirm kann niemand seine Nachfragen beantworten, deshalb blockiert es tablecross-loginwindow still. Lege eine Regel an, die tablecross-loginwindow im lokalen Netz erlaubt, eingehend und ausgehend, für alle Benutzer (dort läuft es als root)."
+        }
+        "Show tablecross-loginwindow in the Finder" => "tablecross-loginwindow im Finder zeigen",
         "Pointer & keyboard" => "Zeiger & Tastatur",
         "Go there" => "Dorthin wechseln",
         "Go to the computer on that side" => "Zum Computer auf dieser Seite wechseln",

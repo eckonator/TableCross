@@ -226,6 +226,11 @@ pub fn show_login_permission_place() {
     let _ = std::process::Command::new("open").args(["-R", LOGIN_BINARY]).status();
 }
 
+/// A Finder window with the program for the login screen, e.g. for a rule of a network filter.
+pub fn show_login_program() {
+    let _ = std::process::Command::new("open").args(["-R", LOGIN_BINARY]).status();
+}
+
 pub fn uninstall() -> Result<()> {
     as_admin(&format!(
         "launchctl bootout system/{LABEL} 2>/dev/null || true
