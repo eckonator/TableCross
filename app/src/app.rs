@@ -95,6 +95,7 @@ pub struct App {
     /// The session the status icon menu talks to (it changes when the session restarts).
     tray_session: Arc<std::sync::Mutex<Option<SessionHandle>>>,
     /// Started anew (or tried to) for a permission granted meanwhile.
+    #[cfg(target_os = "macos")]
     restart_tried: bool,
     /// Keeps the system (and with `true` the display) awake while the settings ask for it.
     stay_awake: Option<(bool, tc_input::system::KeepAwake)>,
@@ -178,6 +179,7 @@ impl App {
             update_progress: None,
             stay_awake: None,
             tray_session: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(target_os = "macos")]
             restart_tried: false,
         };
         app.apply_stay_awake();
