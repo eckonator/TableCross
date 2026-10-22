@@ -1,4 +1,4 @@
-# TableCross
+<p align="center"><img src="docs/banner.png" alt="TableCross: one mouse, keyboard and clipboard for all the computers on your desk"></p>
 
 Share one mouse, keyboard and clipboard between computers on your desk: macOS, Windows and Linux
 (Wayland on GNOME and KDE Plasma, and X11). Move the pointer over the edge of one screen and keep working
@@ -9,6 +9,8 @@ on the next computer.
 ![Arranging the computers by dragging, one of them half below the others (dark mode)](docs/screenshot-arrangement.png)
 
 ![Setup in three steps: permissions, pairing with a code, arrangement](docs/screenshot-setup.png)
+
+![Settings in tabs, here how the pointer crosses and the keyboard shortcuts (dark mode)](docs/screenshot-settings.png)
 
 *The screenshots show made-up computers (`TC_DEMO=1`).*
 
