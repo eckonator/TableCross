@@ -408,16 +408,6 @@ pub fn event_access() -> Option<(bool, bool, bool, bool)> {
     None
 }
 
-/// macOS: moves the pointer in each way there is and tells which ways macOS carried out (the
-/// pointer is put back afterwards). Where injected events vanish silently this shows the way that
-/// still works. `None` elsewhere.
-pub fn pointer_probe() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    return crate::mac::pointer_probe();
-    #[cfg(not(target_os = "macos"))]
-    None
-}
-
 /// macOS: from now on input is injected through the HID system, as if from a device. Needed on the
 /// login screen, which ignores the usual way. Does nothing elsewhere.
 pub fn inject_through_hid_system() {

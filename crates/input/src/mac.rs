@@ -314,9 +314,7 @@ unsafe extern "C" {
     fn IOServiceMatching(name: *const std::ffi::c_char) -> Ref;
     fn IOServiceGetMatchingService(main: u32, matching: Ref) -> u32;
     fn IOServiceOpen(service: u32, task: u32, kind: u32, connect: *mut u32) -> i32;
-    fn IOServiceClose(connect: u32) -> i32;
     fn IOObjectRelease(object: u32) -> i32;
-    fn IOHIDSetMouseLocation(connect: u32, x: i32, y: i32) -> i32;
     fn IOHIDPostEvent(
         connect: u32,
         kind: u32,
@@ -330,120 +328,6 @@ unsafe extern "C" {
 
 unsafe extern "C" {
     static mach_task_self_: u32;
-}
-
-/// See [`crate::system::pointer_probe`].
-pub(crate) fn pointer_probe() -> Option<String> {
-    const SOURCE_PRIVATE: i32 = -1;
-    const SOURCE_HID_SYSTEM: i32 = 1;
-    let settle = || std::thread::sleep(Duration::from_millis(150));
-    let bounds = unsafe { CGDisplayBounds(CGMainDisplayID()) };
-    let at = |i: f64| CGPoint {
-        x: bounds.origin.x + bounds.size.width * (0.15 + 0.07 * i),
-        y: bounds.origin.y + bounds.size.height * 0.5,
-    };
-    let start = current_position();
-    let mut report = Vec::new();
-    let mut check = |name: &str, target: CGPoint, done: Result<(), i32>| {
-        settle();
-        let now = current_position();
-        let moved = done.is_ok() && (now.x - target.x).abs() < 2.0 && (now.y - target.y).abs() < 2.0;
-        let line = match done {
-            Ok(()) => format!("{name} {moved}"),
-            Err(code) => format!("{name} failed ({code:#x})"),
-        };
-        // Each step on its own, in case a later one never returns
-        tracing::info!("pointer probe: {line}");
-        report.push(line);
-    };
-    let trying = |name: &str| tracing::info!("pointer probe: trying {name}");
-    // A source with a state of its own may never come back on the login screen, so those go last
-    let post_move = |tap: u32, state: Option<i32>, target: CGPoint| unsafe {
-        let source = state.map_or(std::ptr::null_mut(), |s| CGEventSourceCreate(s));
-        let event = CGEventCreateMouseEvent(source, MOUSE_MOVED, target, 0);
-        let done = if event.is_null() {
-            Err(-1)
-        } else {
-            CGEventPost(tap, event);
-            CFRelease(event.cast());
-            Ok(())
-        };
-        if !source.is_null() {
-            CFRelease(source.cast());
-        }
-        done
-    };
-    let mut i = 0.0;
-    unsafe {
-        for (name, tap) in [("HID tap", HID_TAP), ("session tap", SESSION_TAP)] {
-            trying(name);
-            let target = at(i);
-            i += 1.0;
-            let done = post_move(tap, None, target);
-            check(name, target, done);
-        }
-        trying("warp");
-        let target = at(i);
-        i += 1.0;
-        let warped = CGWarpMouseCursorPosition(target);
-        check("warp", target, if warped == 0 { Ok(()) } else { Err(warped) });
-        trying("IOHIDSystem");
-        let service = IOServiceGetMatchingService(0, IOServiceMatching(c"IOHIDSystem".as_ptr()));
-        let mut connect = 0;
-        // kIOHIDParamConnectType
-        let opened = if service == 0 {
-            Err(-1)
-        } else {
-            match IOServiceOpen(service, mach_task_self_, 1, &mut connect) {
-                0 => Ok(()),
-                e => Err(e),
-            }
-        };
-        if service != 0 {
-            IOObjectRelease(service);
-        }
-        let target = at(i);
-        i += 1.0;
-        let set = opened.and_then(
-            |()| match IOHIDSetMouseLocation(connect, target.x as i32, target.y as i32) {
-                0 => Ok(()),
-                e => Err(e),
-            },
-        );
-        check("IOHIDSystem location", target, set);
-        trying("IOHIDSystem event");
-        let target = at(i);
-        // NX_MOUSEMOVED with kIOHIDSetCursorPosition; the event data stays empty
-        let data = [0u64; 16];
-        let location = IOGPoint {
-            x: target.x as i16,
-            y: target.y as i16,
-        };
-        let posted = opened.and_then(
-            |()| match IOHIDPostEvent(connect, 5, location, data.as_ptr().cast(), 2, 0, 2) {
-                0 => Ok(()),
-                e => Err(e),
-            },
-        );
-        check("IOHIDSystem event", target, posted);
-        if opened.is_ok() {
-            IOServiceClose(connect);
-        }
-        i += 1.0;
-        for (name, tap, state) in [
-            ("HID tap + private source", HID_TAP, SOURCE_PRIVATE),
-            ("HID tap + HID source", HID_TAP, SOURCE_HID_SYSTEM),
-            ("session tap + HID source", SESSION_TAP, SOURCE_HID_SYSTEM),
-        ] {
-            trying(name);
-            let target = at(i);
-            i += 1.0;
-            let done = post_move(tap, Some(state), target);
-            check(name, target, done);
-        }
-        CGWarpMouseCursorPosition(CGPoint { x: start.x, y: start.y });
-    }
-    Some(report.join(", "))
 }
 
 /// The login screen ignores events posted to the window server; only those that come through the
@@ -571,7 +455,13 @@ fn post_through_hid_system(event: Ref) {
             flags,
             options,
         );
-        if result != 0 {
+        // Refused in a row while macOS switches sessions (logging in): told once
+        static LAST_REFUSAL: Mutex<Option<(u32, i32)>> = Mutex::new(None);
+        let mut last = LAST_REFUSAL.lock().expect("refusal lock");
+        if result == 0 {
+            *last = None;
+        } else if *last != Some((kind, result)) {
+            *last = Some((kind, result));
             tracing::warn!("the HID system refused event {kind} ({result:#x})");
         }
     }

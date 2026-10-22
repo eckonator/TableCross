@@ -199,7 +199,13 @@ If TableCross stops or crashes, the helper gives the keyboard back within a seco
 The helper also sets up the login screen if you switch that on: it copies this Mac's identity and
 pairings into a folder only the system can read (`/Library/Application Support/TableCross/LoginWindow`)
 and a launch agent starts `tablecross-loginwindow` there while no one is logged in. It only receives
-input, it captures nothing. Its log is `/Library/Logs/TableCross/loginwindow.log`.
+input, it captures nothing. Its log is `/Library/Logs/TableCross/loginwindow.log`; computers that
+collect logs receive it too.
+
+`tablecross-loginwindow` needs the Accessibility permission of its own (in newer macOS versions
+*Device control and data access*). macOS cannot ask for it on the login screen, so the status page
+shows when it is missing; its button opens the settings and a Finder window with the file to drag
+into the list.
 
 If a network filter app runs on that Mac (one that asks per program whether a connection is allowed),
 add a rule that allows `/Library/PrivilegedHelperTools/tablecross-loginwindow` in the local network,

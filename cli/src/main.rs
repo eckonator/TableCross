@@ -400,7 +400,8 @@ async fn login_agent(dir: PathBuf) -> Result<()> {
         .as_u64()
         .and_then(|p| u16::try_from(p).ok())
         .unwrap_or(tc_net::DEFAULT_PORT);
-    // The login screen takes input only from the HID system (measured with `pointer_probe`)
+    // The login screen ignores events posted to the window server (measured on macOS 27: only
+    // `IOHIDPostEvent` and warping moved the pointer there)
     tc_input::system::inject_through_hid_system();
     let backend = tc_input::Backend {
         capture: Box::new(tc_input::NoCapture),
@@ -415,12 +416,6 @@ async fn login_agent(dir: PathBuf) -> Result<()> {
     let (session, task) = Session::start(config, Some(backend), None, None).await?;
     tracing::warn!("{name} can be controlled on the login screen (port {port})");
     let mut notices = session.notices();
-    // Not awaited: a way that never returns must not hold up the rest
-    tokio::task::spawn_blocking(|| {
-        if let Some(report) = tc_input::system::pointer_probe() {
-            tracing::warn!("pointer moved by: {report}");
-        }
-    });
     // Without these macOS drops the input silently; checked again since a grant may come late
     let mut access_check = tokio::time::interval(std::time::Duration::from_secs(10));
     let mut last_access = None;
