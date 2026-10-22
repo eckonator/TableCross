@@ -46,16 +46,23 @@ fn login_program(helper: &Path) -> Option<PathBuf> {
     Some(helper.with_file_name("tablecross-cli")).filter(|p| p.exists())
 }
 
+/// Shell lines that put the program `from` at `to`, owned by root. A signed program must not be
+/// overwritten in place: a running copy keeps the file mapped, and macOS then kills the next start
+/// for an invalid code signature. So the new one goes next to it and replaces it in one step.
+fn put_program(from: &str, to: &str) -> String {
+    format!(
+        "cp {from} {to}.new
+chown root:wheel {to}.new
+chmod 755 {to}.new
+mv -f {to}.new {to}
+"
+    )
+}
+
 /// Shell lines that put the program for the login screen in place (none without it).
 fn copy_login_program(helper: &Path) -> String {
     match login_program(helper) {
-        Some(program) => format!(
-            "cp {program} {LOGIN_BINARY}
-chown root:wheel {LOGIN_BINARY}
-chmod 755 {LOGIN_BINARY}
-",
-            program = quote(&program)
-        ),
+        Some(program) => put_program(&quote(&program), LOGIN_BINARY),
         None => String::new(),
     }
 }
@@ -115,15 +122,12 @@ pub fn install() -> Result<()> {
         "set -e
 mkdir -p /Library/PrivilegedHelperTools /Library/Logs/TableCross
 launchctl bootout system/{LABEL} 2>/dev/null || true
-cp {source} {INSTALLED_BINARY}
-chown root:wheel {INSTALLED_BINARY}
-chmod 755 {INSTALLED_BINARY}
-{login}cp {plist} {PLIST}
+{helper}{login}cp {plist} {PLIST}
 chown root:wheel {PLIST}
 chmod 644 {PLIST}
 launchctl bootstrap system {PLIST}",
+        helper = put_program(&quote(&source), INSTALLED_BINARY),
         login = copy_login_program(&source),
-        source = quote(&source),
         plist = quote(&plist_file),
     );
     as_admin(&script)?;
@@ -172,12 +176,9 @@ pub fn update_from(new: &Path) -> Result<()> {
     }
     as_admin(&format!(
         "set -e
-cp {new} {INSTALLED_BINARY}
-chown root:wheel {INSTALLED_BINARY}
-chmod 755 {INSTALLED_BINARY}
-{login}launchctl kickstart -k system/{LABEL}",
+{helper}{login}launchctl kickstart -k system/{LABEL}",
+        helper = put_program(&quote(new), INSTALLED_BINARY),
         login = copy_login_program(new),
-        new = quote(new),
     ))
 }
 

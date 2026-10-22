@@ -413,9 +413,12 @@ async fn login_agent(dir: PathBuf) -> Result<()> {
     let (session, task) = Session::start(config, Some(backend), None, None).await?;
     tracing::warn!("{name} can be controlled on the login screen (port {port})");
     let mut notices = session.notices();
-    if let Ok(Some(report)) = tokio::task::spawn_blocking(tc_input::system::pointer_probe).await {
-        tracing::warn!("pointer moved by: {report}");
-    }
+    // Not awaited: a way that never returns must not hold up the rest
+    tokio::task::spawn_blocking(|| {
+        if let Some(report) = tc_input::system::pointer_probe() {
+            tracing::warn!("pointer moved by: {report}");
+        }
+    });
     // Without these macOS drops the input silently; checked again since a grant may come late
     let mut access_check = tokio::time::interval(std::time::Duration::from_secs(10));
     let mut last_access = None;

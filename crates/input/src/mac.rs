@@ -345,11 +345,15 @@ pub(crate) fn pointer_probe() -> Option<String> {
         settle();
         let now = current_position();
         let moved = done.is_ok() && (now.x - target.x).abs() < 2.0 && (now.y - target.y).abs() < 2.0;
-        match done {
-            Ok(()) => report.push(format!("{name} {moved}")),
-            Err(code) => report.push(format!("{name} failed ({code:#x})")),
-        }
+        let line = match done {
+            Ok(()) => format!("{name} {moved}"),
+            Err(code) => format!("{name} failed ({code:#x})"),
+        };
+        // Each step on its own, in case a later one never returns
+        tracing::info!("pointer probe: {line}");
+        report.push(line);
     };
+    let trying = |name: &str| tracing::info!("pointer probe: trying {name}");
     unsafe {
         let variants = [
             ("HID tap", HID_TAP, None),
@@ -360,6 +364,7 @@ pub(crate) fn pointer_probe() -> Option<String> {
         ];
         let mut i = 0.0;
         for (name, tap, state) in variants {
+            trying(name);
             let target = at(i);
             i += 1.0;
             let source = state.map_or(std::ptr::null_mut(), |s| CGEventSourceCreate(s));
@@ -376,10 +381,12 @@ pub(crate) fn pointer_probe() -> Option<String> {
             }
             check(name, target, done);
         }
+        trying("warp");
         let target = at(i);
         i += 1.0;
         let warped = CGWarpMouseCursorPosition(target);
         check("warp", target, if warped == 0 { Ok(()) } else { Err(warped) });
+        trying("IOHIDSystem");
         let service = IOServiceGetMatchingService(0, IOServiceMatching(c"IOHIDSystem".as_ptr()));
         let mut connect = 0;
         // kIOHIDParamConnectType
@@ -403,6 +410,7 @@ pub(crate) fn pointer_probe() -> Option<String> {
             },
         );
         check("IOHIDSystem location", target, set);
+        trying("IOHIDSystem event");
         let target = at(i);
         // NX_MOUSEMOVED with kIOHIDSetCursorPosition; the event data stays empty
         let data = [0u64; 16];
