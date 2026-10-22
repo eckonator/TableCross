@@ -32,6 +32,11 @@ const BACKOFF_MAX: Duration = Duration::from_secs(2);
 /// Addresses are tried in parallel, each one this much later than the previous.
 const DIAL_STAGGER: Duration = Duration::from_millis(150);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
+/// A paired peer that stays out of reach this long is reported in the log, then again after this
+/// long, each pause twice the one before up to the last.
+const UNREACHABLE_TELL_AFTER: Duration = Duration::from_secs(10);
+const UNREACHABLE_TELL_EVERY: Duration = Duration::from_secs(60);
+const UNREACHABLE_TELL_MAX: Duration = Duration::from_secs(30 * 60);
 /// The peer with the larger fingerprint waits this long before dialing, so that usually only one side
 /// dials after a link was lost (both dialing at once works, but costs an extra connection).
 const HEAD_START: Duration = Duration::from_millis(300);
@@ -879,10 +884,12 @@ async fn supervise(inner: Arc<Inner>, peer: Fingerprint) {
     let mut woke = inner.woke.subscribe();
     let mut backoff = BACKOFF_MIN;
     let mut gave_head_start = false;
+    // Since when and how the peer could not be reached, told now and then
+    let mut unreachable: Option<(Instant, Option<Instant>, Duration)> = None;
     loop {
         changed.borrow_and_update();
         let discovered = inner.discovery.as_ref().map(|d| d.found()).unwrap_or_default();
-        let candidates = {
+        let (candidates, name) = {
             let state = inner.lock();
             if state.shut_down {
                 return;
@@ -890,11 +897,15 @@ async fn supervise(inner: Arc<Inner>, peer: Fingerprint) {
             let Some(paired) = state.store.get(&peer) else {
                 return;
             };
-            (!state.links.contains_key(&peer)).then(|| candidates(paired, &discovered))
+            (
+                (!state.links.contains_key(&peer)).then(|| candidates(paired, &discovered)),
+                paired.name.clone(),
+            )
         };
         let Some(candidates) = candidates else {
             // Connected: wait until that changes
             gave_head_start = false;
+            unreachable = None;
             if changed.changed().await.is_err() {
                 return;
             }
@@ -908,12 +919,34 @@ async fn supervise(inner: Arc<Inner>, peer: Fingerprint) {
             }
             continue;
         }
-        if !candidates.is_empty()
-            && let Some(connection) = dial(&inner, peer, &candidates).await
-            && run_link(inner.clone(), connection, true).await
+        let failures = if candidates.is_empty() {
+            vec!["no address known".to_string()]
+        } else {
+            match dial(&inner, peer, &candidates).await {
+                Ok(connection) => {
+                    if run_link(inner.clone(), connection, true).await {
+                        backoff = BACKOFF_MIN;
+                        continue;
+                    }
+                    vec!["connected, but the link did not come up".to_string()]
+                }
+                Err(failures) => failures,
+            }
+        };
+        let now = Instant::now();
+        let (since, told, every) = unreachable.get_or_insert((now, None, UNREACHABLE_TELL_EVERY));
+        if now.duration_since(*since) >= UNREACHABLE_TELL_AFTER && told.is_none_or(|t| now.duration_since(t) >= *every)
         {
-            backoff = BACKOFF_MIN;
-            continue;
+            if told.is_some() {
+                *every = (*every * 2).min(UNREACHABLE_TELL_MAX);
+            }
+            *told = Some(now);
+            tracing::info!(
+                "{name} not reached for {} s, found by discovery: {}; tried: {}",
+                now.duration_since(*since).as_secs(),
+                discovered.iter().any(|d| d.fingerprint == peer),
+                failures.join("; ")
+            );
         }
         let mut reset = false;
         tokio::select! {
@@ -949,8 +982,9 @@ fn candidates(paired: &PairedPeer, discovered: &[Discovered]) -> Vec<SocketAddr>
     list
 }
 
-/// Tries all addresses, staggered; the first connection to the right device wins.
-async fn dial(inner: &Arc<Inner>, peer: Fingerprint, candidates: &[SocketAddr]) -> Option<Connection> {
+/// Tries all addresses, staggered; the first connection to the right device wins. Otherwise what
+/// became of each address.
+async fn dial(inner: &Arc<Inner>, peer: Fingerprint, candidates: &[SocketAddr]) -> Result<Connection, Vec<String>> {
     let mut attempts = JoinSet::new();
     for (i, &address) in candidates.iter().enumerate() {
         let inner = inner.clone();
@@ -959,28 +993,38 @@ async fn dial(inner: &Arc<Inner>, peer: Fingerprint, candidates: &[SocketAddr]) 
             let connecting = inner
                 .endpoint
                 .connect_with(inner.link_client.clone(), address, CERT_NAME)
-                .ok()?;
-            let connection = connecting.await.ok()?;
+                .map_err(|e| format!("{address}: {e}"))?;
+            let connection = connecting.await.map_err(|e| format!("{address}: {e}"))?;
             if tls::peer_fingerprint(&connection) == Some(peer) {
-                Some(connection)
+                Ok(connection)
             } else {
                 CloseCode::WrongPeer.close(&connection, "unexpected device");
                 inner.refuse(Some(peer), address, Refusal::WrongPeer);
-                None
+                Err(format!("{address}: another device"))
             }
         });
     }
-    timeout(DIAL_TIMEOUT, async {
+    let mut failures = Vec::new();
+    let finished = timeout(DIAL_TIMEOUT, async {
         while let Some(result) = attempts.join_next().await {
-            if let Ok(Some(connection)) = result {
-                return Some(connection);
+            match result {
+                Ok(Ok(connection)) => return Some(connection),
+                Ok(Err(failure)) => failures.push(failure),
+                Err(_) => {}
             }
         }
         None
     })
-    .await
-    .ok()
-    .flatten()
+    .await;
+    match finished {
+        Ok(Some(connection)) => Ok(connection),
+        Ok(None) => Err(failures),
+        Err(_) => {
+            let answered = failures.len();
+            failures.push(format!("{} more without answer", candidates.len() - answered));
+            Err(failures)
+        }
+    }
 }
 
 fn store_pairing(
