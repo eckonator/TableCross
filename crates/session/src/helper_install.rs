@@ -229,7 +229,7 @@ pub fn show_login_permission_place() {
 pub fn uninstall() -> Result<()> {
     as_admin(&format!(
         "launchctl bootout system/{LABEL} 2>/dev/null || true
-rm -f {PLIST} {INSTALLED_BINARY} {LOGIN_BINARY} {LOGIN_PLIST}
+rm -f {PLIST} {INSTALLED_BINARY} {INSTALLED_BINARY}.new {LOGIN_BINARY} {LOGIN_BINARY}.new {LOGIN_PLIST}
 rm -rf '{LOGIN_DIR}'
 rm -rf /Library/Logs/TableCross
 tccutil reset ListenEvent {LABEL} 2>/dev/null || true"
