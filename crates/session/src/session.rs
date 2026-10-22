@@ -115,6 +115,9 @@ pub enum Command {
     CancelTransfer(u64),
     /// Fetch the files copied on another computer into this folder.
     SaveFiles(PathBuf),
+    /// Clear the file list: finished transfers and the note about copied files (running
+    /// transfers stay, copied files can still be pasted or saved).
+    ClearFiles,
     /// Collect the logs of the connected computers in `logs/peers` (troubleshooting), or stop.
     CollectLogs(bool),
     /// Diagonals typed in for screens here, by what they report (see `screen_size::Typed`).
@@ -1987,6 +1990,11 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
         Command::SaveFiles(dir) => {
             shared.files.lock().expect("files lock").save_to = Some(dir);
             request_files(shared);
+        }
+        Command::ClearFiles => {
+            let mut status = shared.status.lock().expect("status lock");
+            status.files_waiting = None;
+            status.transfers.retain(|t| t.state == TransferState::Running);
         }
         Command::StopPairing => {
             shared.node.stop_pairing();

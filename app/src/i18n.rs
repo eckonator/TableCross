@@ -132,6 +132,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Back" => "Zurück",
         "below this computer" => "unter diesem Computer",
         "Cancel" => "Abbrechen",
+        "Clear list" => "Liste leeren",
         "cannot save the pairing ({})" => "Kopplung lässt sich nicht speichern ({})",
         "captured" => "erfasst",
         "Check again" => "Erneut prüfen",

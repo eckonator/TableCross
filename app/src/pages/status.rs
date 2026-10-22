@@ -140,6 +140,10 @@ impl App {
             }
             ui.add_space(4.0);
         }
+        ui.add_space(4.0);
+        if ui.button(tr("Clear list")).clicked() {
+            self.send(Command::ClearFiles);
+        }
     }
 
     /// The question whether to look for new versions, or the note that there is one.
