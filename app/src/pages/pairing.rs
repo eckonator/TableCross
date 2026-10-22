@@ -20,16 +20,33 @@ impl App {
         card(ui, tr("Pair a computer"), |ui| self.pairing(ui, &status));
         ui.add_space(14.0);
         card(ui, tr("Paired computers"), |ui| {
+            let muted = theme::colors(ui).muted;
             if status.peers.is_empty() {
-                ui.label(RichText::new(tr("No computer is paired yet.")).color(theme::colors(ui).muted));
+                ui.label(RichText::new(tr("No computer is paired yet.")).color(muted));
+            } else {
+                ui.label(
+                    RichText::new(tr(
+                        "Settings for one computer (scrolling, ⌘ and Ctrl) are in its “…” menu in the arrangement.",
+                    ))
+                    .color(muted),
+                );
+                ui.add_space(8.0);
             }
             self.peer_options(ui, &status);
         });
     }
 
     pub fn pairing(&mut self, ui: &mut egui::Ui, status: &Status) {
+        // Columns lay out justified: text that wraps there gets stretched, so each column gets an
+        // ordinary layout of its own
         ui.columns(2, |cols| {
-            let ui = &mut cols[0];
+            cols[0].vertical(|ui| self.show_code(ui, status));
+            cols[1].vertical(|ui| self.enter_code(ui, status));
+        });
+    }
+
+    fn show_code(&mut self, ui: &mut egui::Ui, status: &Status) {
+        {
             let p = theme::colors(ui);
             ui.label(RichText::new(tr("Show a code here")).font(egui::FontId::new(14.0, theme::semibold())));
             ui.label(RichText::new(tr("Then type it on the other computer.")).color(p.muted));
@@ -73,8 +90,11 @@ impl App {
                     }
                 }
             }
+        }
+    }
 
-            let ui = &mut cols[1];
+    fn enter_code(&mut self, ui: &mut egui::Ui, status: &Status) {
+        {
             let p = theme::colors(ui);
             ui.label(
                 RichText::new(tr("Enter a code from another computer"))
@@ -152,7 +172,7 @@ impl App {
                 };
                 ui.colored_label(color, texts::notice(notice));
             }
-        });
+        }
     }
 
     fn peer_options(&mut self, ui: &mut egui::Ui, status: &Status) {
@@ -173,29 +193,7 @@ impl App {
                 theme::chip(ui, &trf("ID {}", &[&peer.fingerprint.short()]), p.muted, p.field);
             });
             ui.add_space(4.0);
-            if let Some(scroll) = super::arrangement::scroll_options(ui, peer.scroll) {
-                self.send(Command::Scroll {
-                    peer: peer.fingerprint,
-                    scroll,
-                });
-            }
             ui.horizontal_wrapped(|ui| {
-                let mut swap = peer.swap_cmd_ctrl;
-                if ui
-                    .checkbox(&mut swap, tr("Swap ⌘ and Ctrl"))
-                    .on_hover_text(tr(
-                        "While controlling this computer from here, ⌘ acts as Ctrl and the other way round",
-                    ))
-                    .changed()
-                {
-                    self.send(Command::SwapCmdCtrl {
-                        peer: peer.fingerprint,
-                        swap,
-                    });
-                }
-                if peer.link.is_some() && ui.button(tr("Go there")).clicked() {
-                    self.send(Command::SwitchTo(Some(peer.fingerprint)));
-                }
                 if self.confirm_unpair == Some(peer.fingerprint) {
                     ui.label(tr("Really remove?"));
                     if ui.button(RichText::new(tr("Remove")).color(warn_color(ui))).clicked() {

@@ -123,6 +123,9 @@ fn de(en: &str) -> Option<&'static str> {
             "Öffnet die Anzeige-Einstellungen des Systems: Wie die Bildschirme dieses Computers dort liegen, so wechselt der Zeiger zwischen ihnen, und der Schreibtisch zeigt es kurz darauf."
         }
         " inches" => " Zoll",
+        "Settings for one computer (scrolling, ⌘ and Ctrl) are in its “…” menu in the arrangement." => {
+            "Einstellungen für einen einzelnen Computer (Scrollen, ⌘ und Strg) stehen in seinem „…“-Menü in der Anordnung."
+        }
         "No computer is paired yet." => "Noch kein Computer gekoppelt.",
         "Pair new computers and manage the paired ones." => "Neue Computer koppeln und gekoppelte verwalten.",
         "Pairing" => "Kopplung",
