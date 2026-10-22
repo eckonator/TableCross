@@ -418,6 +418,13 @@ pub fn pointer_probe() -> Option<String> {
     None
 }
 
+/// macOS: from now on input is injected through the HID system, as if from a device. Needed on the
+/// login screen, which ignores the usual way. Does nothing elsewhere.
+pub fn inject_through_hid_system() {
+    #[cfg(target_os = "macos")]
+    crate::mac::inject_through_hid_system();
+}
+
 /// macOS: whether Accessibility is granted, asked of a fresh process of this program. A running
 /// process may keep the answer it got first, so a permission granted later shows only here.
 /// `None` where it cannot be told.

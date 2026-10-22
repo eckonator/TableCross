@@ -140,6 +140,9 @@ const DELTA_Y: u32 = 5;
 const KEYCODE: u32 = 9;
 const SOURCE_USER_DATA: u32 = 42;
 const SCROLL_IS_CONTINUOUS: u32 = 88;
+const SCROLL_AXIS1: u32 = 11;
+const SCROLL_AXIS2: u32 = 12;
+const KEYBOARD_TYPE: u32 = 10;
 const SCROLL_FIXED_AXIS1: u32 = 93;
 const SCROLL_FIXED_AXIS2: u32 = 94;
 const SCROLL_POINT_AXIS1: u32 = 96;
@@ -441,6 +444,137 @@ pub(crate) fn pointer_probe() -> Option<String> {
         CGWarpMouseCursorPosition(CGPoint { x: start.x, y: start.y });
     }
     Some(report.join(", "))
+}
+
+/// The login screen ignores events posted to the window server; only those that come through the
+/// HID system, as from a device, take effect there. The program for the login screen switches
+/// this on.
+static THROUGH_HID_SYSTEM: AtomicBool = AtomicBool::new(false);
+
+/// See [`crate::system::inject_through_hid_system`].
+pub(crate) fn inject_through_hid_system() {
+    THROUGH_HID_SYSTEM.store(true, Ordering::Relaxed);
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    fn CGEventGetType(event: Ref) -> u32;
+    fn CGEventKeyboardGetUnicodeString(event: Ref, max: usize, length: *mut usize, text: *mut u16);
+}
+
+/// The connection to the HID system, opened once; 0 where that failed.
+static HID_SYSTEM: Mutex<Option<u32>> = Mutex::new(None);
+
+fn hid_system() -> u32 {
+    let mut connect = HID_SYSTEM.lock().expect("hid system lock");
+    *connect.get_or_insert_with(|| unsafe {
+        let service = IOServiceGetMatchingService(0, IOServiceMatching(c"IOHIDSystem".as_ptr()));
+        if service == 0 {
+            tracing::warn!("no HID system to inject through");
+            return 0;
+        }
+        let mut handle = 0;
+        // kIOHIDParamConnectType
+        let opened = IOServiceOpen(service, mach_task_self_, 1, &mut handle);
+        IOObjectRelease(service);
+        if opened != 0 {
+            tracing::warn!("cannot open the HID system ({opened:#x})");
+            return 0;
+        }
+        handle
+    })
+}
+
+/// Posts a ready event through the HID system instead (`IOHIDPostEvent`, with the event data of
+/// `IOLLEvent.h`). The event types have the same numbers there.
+fn post_through_hid_system(event: Ref) {
+    // kIOHIDSetGlobalEventFlags, kIOHIDSetCursorPosition
+    const SET_FLAGS: u32 = 1;
+    const SET_POSITION: u32 = 2;
+    const DATA_VERSION: u32 = 2;
+    let connect = hid_system();
+    if connect == 0 {
+        return;
+    }
+    // NXEventData is a union of at most 48 bytes; zeroed, then the fields by offset
+    let mut data = [0u8; 64];
+    let put_i16 = |data: &mut [u8; 64], at: usize, v: i16| data[at..at + 2].copy_from_slice(&v.to_ne_bytes());
+    let put_u16 = |data: &mut [u8; 64], at: usize, v: u16| data[at..at + 2].copy_from_slice(&v.to_ne_bytes());
+    let put_i32 = |data: &mut [u8; 64], at: usize, v: i32| data[at..at + 4].copy_from_slice(&v.to_ne_bytes());
+    unsafe {
+        let kind = CGEventGetType(event);
+        let at = CGEventGetLocation(event);
+        let flags = CGEventGetFlags(event) as u32;
+        let mut options = 0;
+        match kind {
+            LEFT_DOWN | LEFT_UP | RIGHT_DOWN | RIGHT_UP | OTHER_DOWN | OTHER_UP => {
+                put_i32(&mut data, 4, CGEventGetIntegerValueField(event, CLICK_STATE) as i32);
+                let down = matches!(kind, LEFT_DOWN | RIGHT_DOWN | OTHER_DOWN);
+                data[8] = if down { 255 } else { 0 };
+                data[9] = CGEventGetIntegerValueField(event, BUTTON_NUMBER) as u8;
+                options = SET_POSITION;
+            }
+            MOUSE_MOVED | LEFT_DRAGGED | RIGHT_DRAGGED | OTHER_DRAGGED => {
+                put_i32(&mut data, 0, CGEventGetDoubleValueField(event, DELTA_X) as i32);
+                put_i32(&mut data, 4, CGEventGetDoubleValueField(event, DELTA_Y) as i32);
+                options = SET_POSITION;
+            }
+            KEY_DOWN | KEY_UP | FLAGS_CHANGED => {
+                let mut text = [0u16; 4];
+                let mut length = 0;
+                CGEventKeyboardGetUnicodeString(event, text.len(), &mut length, text.as_mut_ptr());
+                // Plain ASCII as character code (character set 0); the rest from the key code
+                let char_code = if length == 1 && text[0] < 0x80 { text[0] } else { 0 };
+                put_i16(
+                    &mut data,
+                    2,
+                    CGEventGetIntegerValueField(event, KEYBOARD_AUTOREPEAT) as i16,
+                );
+                put_u16(&mut data, 6, char_code);
+                put_u16(&mut data, 8, CGEventGetIntegerValueField(event, KEYCODE) as u16);
+                put_u16(&mut data, 10, char_code);
+                put_i32(&mut data, 16, CGEventGetIntegerValueField(event, KEYBOARD_TYPE) as i32);
+                if kind == FLAGS_CHANGED {
+                    options = SET_FLAGS;
+                }
+            }
+            SCROLL_WHEEL => {
+                let lines = |axis: u32| CGEventGetIntegerValueField(event, axis);
+                put_i16(&mut data, 0, lines(SCROLL_AXIS1) as i16);
+                put_i16(&mut data, 2, lines(SCROLL_AXIS2) as i16);
+                put_i32(
+                    &mut data,
+                    8,
+                    (CGEventGetDoubleValueField(event, SCROLL_FIXED_AXIS1) * 65536.0) as i32,
+                );
+                put_i32(
+                    &mut data,
+                    12,
+                    (CGEventGetDoubleValueField(event, SCROLL_FIXED_AXIS2) * 65536.0) as i32,
+                );
+                put_i32(&mut data, 20, lines(SCROLL_POINT_AXIS1) as i32);
+                put_i32(&mut data, 24, lines(SCROLL_POINT_AXIS2) as i32);
+            }
+            // Media keys and the like are not needed on the login screen
+            _ => return,
+        }
+        let location = IOGPoint {
+            x: at.x.round() as i16,
+            y: at.y.round() as i16,
+        };
+        let result = IOHIDPostEvent(
+            connect,
+            kind,
+            location,
+            data.as_ptr().cast(),
+            DATA_VERSION,
+            flags,
+            options,
+        );
+        if result != 0 {
+            tracing::warn!("the HID system refused event {kind} ({result:#x})");
+        }
+    }
 }
 
 pub struct MacCapture {
@@ -855,7 +989,11 @@ impl InjectState {
         unsafe {
             CGEventSetIntegerValueField(event, SOURCE_USER_DATA, OWN_EVENTS);
             CGEventSetFlags(event, self.flags() | (CGEventGetFlags(event) & FLAG_ALPHA_SHIFT));
-            CGEventPost(HID_TAP, event);
+            if THROUGH_HID_SYSTEM.load(Ordering::Relaxed) {
+                post_through_hid_system(event);
+            } else {
+                CGEventPost(HID_TAP, event);
+            }
             CFRelease(event.cast());
         }
     }

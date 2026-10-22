@@ -400,6 +400,8 @@ async fn login_agent(dir: PathBuf) -> Result<()> {
         .as_u64()
         .and_then(|p| u16::try_from(p).ok())
         .unwrap_or(tc_net::DEFAULT_PORT);
+    // The login screen takes input only from the HID system (measured with `pointer_probe`)
+    tc_input::system::inject_through_hid_system();
     let backend = tc_input::Backend {
         capture: Box::new(tc_input::NoCapture),
         inject: tc_input::platform()?.inject,
