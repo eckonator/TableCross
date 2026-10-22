@@ -304,6 +304,22 @@ impl App {
         self.started_with = self.settings.clone();
     }
 
+    /// Ends the app for good. A hidden window may never get to close (it is not drawn), and a new
+    /// version waits for this process to end: so the session stops right away, the window shows
+    /// to close, and if it still does not, the process ends after a grace period.
+    fn quit(&mut self, ctx: &egui::Context, why: &'static str) {
+        self.quit_flag.store(true, Ordering::SeqCst);
+        self.stop_session();
+        ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(ViewportCommand::Close);
+        ctx.request_repaint();
+        std::thread::spawn(move || {
+            std::thread::sleep(crate::tray::QUIT_GRACE);
+            tracing::warn!("window did not close ({why}), ending the process");
+            std::process::exit(0);
+        });
+    }
+
     fn stop_session(&mut self) {
         *self.tray_session.lock().expect("tray session lock") = None;
         if let Some(session) = self.session.take() {
@@ -586,15 +602,13 @@ impl App {
         if self.update_flag.swap(false, Ordering::SeqCst) {
             self.install_update(ctx);
         }
-        if let Some(job) = &self.self_update {
-            while let Ok(progress) = job.try_recv() {
-                if progress == crate::self_update::Progress::Restart {
-                    // The new version starts as soon as this one has ended
-                    self.quit_flag.store(true, Ordering::SeqCst);
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
-                }
-                self.update_progress = Some(progress);
+        let progress: Vec<_> = self.self_update.iter().flat_map(|job| job.try_iter()).collect();
+        for progress in progress {
+            if progress == crate::self_update::Progress::Restart {
+                // The new version starts as soon as this one has ended
+                self.quit(ctx, "update");
             }
+            self.update_progress = Some(progress);
         }
         let due = self.update_checked.is_none_or(|t| t.elapsed() >= UPDATE_EVERY);
         if self.settings.update_check == Some(true) && self.demo.is_none() && self.update_job.is_none() && due {
@@ -647,6 +661,16 @@ impl App {
     }
 
     pub fn install_update(&mut self, ctx: &egui::Context) {
+        // One at a time: a second run would share the first one's files (button and following a
+        // paired computer at once)
+        if self
+            .update_progress
+            .as_ref()
+            .is_some_and(|p| !matches!(p, crate::self_update::Progress::Failed(_)))
+        {
+            tracing::info!("an update is already running");
+            return;
+        }
         if let Some(url) = self.new_version.as_ref().and_then(|n| n.asset.clone()) {
             self.update_progress = Some(crate::self_update::Progress::Downloading);
             self.self_update = Some(crate::self_update::start(url, ctx.clone()));
@@ -692,8 +716,7 @@ impl App {
         match result {
             Some(Ok(())) => {
                 tracing::info!("TableCross removed");
-                self.quit_flag.store(true, Ordering::SeqCst);
-                ctx.send_viewport_cmd(ViewportCommand::Close);
+                self.quit(ctx, "removal");
             }
             Some(Err(e)) => {
                 self.removal = None;
@@ -889,8 +912,7 @@ impl App {
             match crate::self_update::restart() {
                 Ok(()) => {
                     tracing::info!("starting anew to use the Accessibility permission");
-                    self.quit_flag.store(true, Ordering::SeqCst);
-                    _ctx.send_viewport_cmd(ViewportCommand::Close);
+                    self.quit(_ctx, "restart for a permission");
                 }
                 Err(e) => {
                     tracing::warn!("cannot start anew by myself: {e}");

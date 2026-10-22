@@ -64,7 +64,7 @@ pub const POWER_OFF_OTHERS: u8 = 1;
 pub const POWER_OFF_ALL: u8 = 2;
 
 /// After "Quit" the process ends at the latest after this long.
-const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
+pub(crate) const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// macOS: TableCross lives in the menu bar only, without a Dock icon or an entry in ⌘Tab.
 pub fn menu_bar_only() {
