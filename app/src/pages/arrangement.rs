@@ -675,8 +675,9 @@ fn shared_edge(a: &Area, b: &Area) -> Option<((f32, f32), (f32, f32))> {
 }
 
 /// Where a computer of `size` dropped at `raw` lands: at an edge of a nearby computer, aligned with
-/// its corners or middle when close, onto it (shared place), or else where it is. `None` where it
-/// would cover part of another computer. `reach`: snapping distance in thousands of points.
+/// its corners or middle when close, onto it (shared place), or else where it is. Dropped over part
+/// of another computer, it goes to the nearest free place beside it; `None` only where there is
+/// none. `reach`: snapping distance in thousands of points.
 fn snap(raw: (f32, f32), size: (f32, f32), moving: &str, desk: &[Area], reach: f32) -> Option<(f32, f32)> {
     let (w, h) = size;
     let others: Vec<(f32, f32, f32, f32)> = desk
@@ -692,9 +693,10 @@ fn snap(raw: (f32, f32), size: (f32, f32), moving: &str, desk: &[Area], reach: f
             .find(|a| (a - v).abs() < reach)
             .unwrap_or_else(|| v.clamp(start - own + reach, start + len - reach))
     };
+    // Sharing a place only when dropped close to it, never as the way out of an overlap
+    let shared: Vec<(f32, f32)> = others.iter().map(|&(x, y, ..)| (x, y)).collect();
     let mut candidates: Vec<(f32, f32)> = Vec::new();
     for &(x, y, ow, oh) in &others {
-        candidates.push((x, y));
         candidates.push((x + ow, along(raw.1, y, oh, h)));
         candidates.push((x - w, along(raw.1, y, oh, h)));
         candidates.push((along(raw.0, x, ow, w), y + oh));
@@ -703,11 +705,16 @@ fn snap(raw: (f32, f32), size: (f32, f32), moving: &str, desk: &[Area], reach: f
     let free = |c: (f32, f32)| !others.iter().any(|o| overlaps((c.0, c.1, w, h), *o));
     let distance = |c: (f32, f32)| (c.0 - raw.0).hypot(c.1 - raw.1);
     let round = |v: f32| (v * 100.0).round() / 100.0;
-    candidates
-        .into_iter()
-        .filter(|c| free(*c) && distance(*c) < reach)
-        .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
+    let nearest = |within: f32, from: &[(f32, f32)]| {
+        from.iter()
+            .copied()
+            .filter(|c| free(*c) && distance(*c) < within)
+            .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
+    };
+    let close: Vec<(f32, f32)> = candidates.iter().chain(&shared).copied().collect();
+    nearest(reach, &close)
         .or_else(|| Some((round(raw.0), round(raw.1))).filter(|c| free(*c)))
+        .or_else(|| nearest(f32::INFINITY, &candidates))
 }
 
 /// A computer in its real proportions: its screens as they stand, the name in the middle.
@@ -1016,8 +1023,11 @@ mod tests {
         assert_eq!(snap((0.9, 1.5), book, "book", &desk, 0.2), Some((0.9, 1.44)));
         // Onto the PC: shares its place
         assert_eq!(snap((5.2, 0.05), book, "book", &desk, 0.2), Some((5.12, 0.0)));
-        // Over the iMac: not possible
-        assert_eq!(snap((1.0, 0.2), book, "book", &desk, 0.2), None);
+        // Over the iMac: below it, the nearest free place, keeping its spot along the edge
+        assert_eq!(snap((1.0, 0.2), book, "book", &desk, 0.2), Some((1.0, 1.44)));
+        // Over the PC, a computer of the same size goes beside it, it does not share the place
+        let twin = (1.92, 1.08);
+        assert_eq!(snap((5.6, 0.3), twin, "twin", &desk, 0.2), Some((5.6, 1.08)));
         // Far away: stays there
         assert_eq!(snap((9.0, 5.0), book, "book", &desk, 0.2), Some((9.0, 5.0)));
     }
