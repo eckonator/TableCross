@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui::{self, ViewportCommand};
 use tc_session::{Command, SessionHandle};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::i18n::tr;
@@ -25,6 +25,9 @@ pub struct Tray {
     release: MenuItem,
     pin: CheckMenuItem,
     lock: MenuItem,
+    /// "Log out" and "Shut down", each with "Other computers …" and "All computers …".
+    log_out: Submenu,
+    power_off: Submenu,
     power_off_others: MenuItem,
     power_off_all: MenuItem,
     log_out_others: MenuItem,
@@ -123,24 +126,25 @@ impl Tray {
         let release = MenuItem::new(tr("Release everything"), true, None);
         let pin = CheckMenuItem::new(tr("Keep the pointer here"), true, false, None);
         let lock = MenuItem::new(tr("Lock all screens"), true, None);
-        let power_off_others = MenuItem::new(tr("Shut down other computers …"), true, None);
-        let power_off_all = MenuItem::new(tr("Shut down all computers …"), true, None);
-        let log_out_others = MenuItem::new(tr("Log out on other computers …"), true, None);
-        let log_out_all = MenuItem::new(tr("Log out on all computers …"), true, None);
+        // What applies to several computers: chosen by action first, then where
+        let power_off_others = MenuItem::new(tr("Other computers …"), true, None);
+        let power_off_all = MenuItem::new(tr("All computers …"), true, None);
+        let log_out_others = MenuItem::new(tr("Other computers …"), true, None);
+        let log_out_all = MenuItem::new(tr("All computers …"), true, None);
+        let log_out_menu = Submenu::with_items(tr("Log out"), true, &[&log_out_others, &log_out_all]).ok()?;
+        let power_off_menu = Submenu::with_items(tr("Shut down"), true, &[&power_off_others, &power_off_all]).ok()?;
         let quit = MenuItem::new(tr("Quit TableCross"), true, None);
         let menu = Menu::new();
-        menu.append_items(&[&show]).ok()?;
+        menu.append_items(&[&show, &PredefinedMenuItem::separator(), &release, &pin])
+            .ok()?;
         if !cfg!(target_os = "macos") {
             menu.append_items(&[&save_files]).ok()?;
         }
         menu.append_items(&[
-            &release,
-            &pin,
+            &PredefinedMenuItem::separator(),
             &lock,
-            &power_off_others,
-            &power_off_all,
-            &log_out_others,
-            &log_out_all,
+            &log_out_menu,
+            &power_off_menu,
             &PredefinedMenuItem::separator(),
             &quit,
         ])
@@ -243,6 +247,8 @@ impl Tray {
             release,
             pin,
             lock,
+            log_out: log_out_menu,
+            power_off: power_off_menu,
             power_off_others,
             power_off_all,
             log_out_others,
@@ -289,10 +295,14 @@ impl Tray {
         self.release.set_text(tr("Release everything"));
         self.pin.set_text(tr("Keep the pointer here"));
         self.lock.set_text(tr("Lock all screens"));
-        self.power_off_others.set_text(tr("Shut down other computers …"));
-        self.power_off_all.set_text(tr("Shut down all computers …"));
-        self.log_out_others.set_text(tr("Log out on other computers …"));
-        self.log_out_all.set_text(tr("Log out on all computers …"));
+        self.log_out.set_text(tr("Log out"));
+        self.power_off.set_text(tr("Shut down"));
+        for item in [&self.power_off_others, &self.log_out_others] {
+            item.set_text(tr("Other computers …"));
+        }
+        for item in [&self.power_off_all, &self.log_out_all] {
+            item.set_text(tr("All computers …"));
+        }
         self.quit.set_text(tr("Quit TableCross"));
     }
 }
