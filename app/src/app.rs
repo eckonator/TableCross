@@ -484,6 +484,15 @@ impl App {
             });
         }
         ui.add_space(18.0);
+        // The status symbol shows how things are: orange with a problem, green when connected
+        let health =
+            if !self.status.problems.is_empty() || matches!(self.status.input, tc_session::InputState::Failed(_)) {
+                p.warn
+            } else if self.status.peers.iter().any(|peer| peer.link.is_some()) {
+                p.ok
+            } else {
+                p.muted
+            };
         for (page, symbol, label) in [
             (Page::Status, "◉", tr("Status")),
             (Page::Arrangement, "▣", tr("Arrangement")),
@@ -492,13 +501,14 @@ impl App {
             (Page::About, "ℹ", tr("About")),
         ] {
             let selected = self.page == page && self.setup_step.is_none();
-            if nav_item(ui, symbol, label, selected).clicked() {
+            let color = (page == Page::Status).then_some(health);
+            if nav_item(ui, symbol, label, selected, color).clicked() {
                 self.page = page;
                 self.setup_step = None;
             }
         }
         ui.add_space(6.0);
-        if nav_item(ui, "✦", tr("Setup"), self.setup_step.is_some()).clicked() {
+        if nav_item(ui, "✦", tr("Setup"), self.setup_step.is_some(), None).clicked() {
             self.setup_step = Some(0);
         }
         let mut install = false;
@@ -954,7 +964,14 @@ impl App {
 }
 
 /// One entry of the page list.
-fn nav_item(ui: &mut egui::Ui, symbol: &str, label: &str, selected: bool) -> egui::Response {
+/// One entry of the sidebar; `symbol_color` overrides the color of the symbol (status).
+fn nav_item(
+    ui: &mut egui::Ui,
+    symbol: &str,
+    label: &str,
+    selected: bool,
+    symbol_color: Option<egui::Color32>,
+) -> egui::Response {
     let p = theme::colors(ui);
     let width = ui.available_width() - 12.0;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
@@ -977,7 +994,7 @@ fn nav_item(ui: &mut egui::Ui, symbol: &str, label: &str, selected: bool) -> egu
         egui::Align2::LEFT_CENTER,
         symbol,
         egui::FontId::proportional(15.0),
-        if selected { p.accent } else { p.muted },
+        symbol_color.unwrap_or(if selected { p.accent } else { p.muted }),
     );
     ui.painter().text(
         rect.left_center() + egui::vec2(40.0, 0.0),
