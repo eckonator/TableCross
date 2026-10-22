@@ -133,6 +133,27 @@ impl App {
                     }
                     ui.end_row();
 
+                    #[cfg(any(target_os = "macos", windows))]
+                    {
+                        ui.label(tr("Keyboard layout"));
+                        if ui
+                            .checkbox(
+                                &mut self.settings.follow_layout,
+                                tr("Use the layout of the computer in control"),
+                            )
+                            .on_hover_text(tr(
+                                "While another computer controls this one, its keyboard layout (German, Swiss \
+                                 German, US …) is switched on here, so every key gives the same character. The \
+                                 layout used before comes back afterwards.",
+                            ))
+                            .changed()
+                        {
+                            changed = true;
+                            self.send(Command::FollowLayout(self.settings.follow_layout));
+                        }
+                        ui.end_row();
+                    }
+
                     ui.label(tr("Crossings"));
                     changed |= ui
                         .checkbox(

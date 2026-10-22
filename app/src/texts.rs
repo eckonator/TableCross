@@ -44,6 +44,10 @@ pub fn notice(n: &Notice) -> String {
         Notice::LockedAll => tr("All screens were locked").into(),
         Notice::PoweringOff(names) if names.is_empty() => tr("This computer is shutting down").into(),
         Notice::PoweringOff(names) => trf("Shutting down: {}", &[&names.join(", ")]),
+        Notice::LayoutMissing(name, layout) => trf(
+            "{} types with the keyboard layout {}, which is not set up here (add it in the system settings)",
+            &[name, layout],
+        ),
     }
 }
 

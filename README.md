@@ -108,6 +108,9 @@ runs again afterwards. For each computer controlled from here, the wheel can scr
 faster or slower (Pairing page, or the computer's menu on the desk), next to *Swap ⌘ and Ctrl*.
 *Always show where the pointer crosses* keeps thin green bars at those screen edges (off by default;
 otherwise they appear while the arrangement is changed).
+Keys travel as positions, so a controlled Mac or Windows PC switches to the keyboard layout of the
+computer in control (*Use the layout of the computer in control*, on by default) and back afterwards;
+if no fitting layout is set up there, the status page says which one to add.
 
 Removing it: Settings → *Remove TableCross* takes away everything TableCross set up (system helper,
 permissions, starting with the system, the program; optionally settings and pairings).

@@ -395,7 +395,7 @@ fn notice_color(p: &theme::Palette, notice: &tc_session::Notice) -> egui::Color3
     match notice {
         Connected(_) | Paired(_) | FilesReceived(..) | ClipboardReceived(_) => p.ok,
         Disconnected(..) | Refused(..) | PairError(_) | PairingFailed(_) | Problem(_) | InputFailed(_)
-        | TransferFailed(..) | ClipboardSkipped(_) => p.warn,
+        | TransferFailed(..) | ClipboardSkipped(_) | LayoutMissing(..) => p.warn,
         _ => p.accent,
     }
 }

@@ -284,6 +284,7 @@ impl App {
                 handle.send(Command::Corner(f64::from(self.settings.corner)));
                 handle.send(Command::SkipOffline(self.settings.skip_offline));
                 handle.send(Command::QuietRadio(self.settings.quiet_radio));
+                handle.send(Command::FollowLayout(self.settings.follow_layout));
                 handle.send(Command::ScreenDiagonals(self.settings.screen_diagonals.clone()));
                 *self.tray_session.lock().expect("tray session lock") = Some(handle.clone());
                 self.session = Some(handle);

@@ -62,6 +62,9 @@ const SIZES_SINCE: (u32, u32, u32) = (0, 4, 10);
 /// First version that receives programs and symbolic links in copied files (`files::Kind`).
 const LINKS_SINCE: (u32, u32, u32) = (0, 4, 26);
 
+/// First version that understands `Message::KeyboardLayout`.
+const KEYBOARD_SINCE: (u32, u32, u32) = (0, 4, 36);
+
 fn version(app_version: &str) -> (u32, u32, u32) {
     let mut parts = app_version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
     (
@@ -94,6 +97,11 @@ pub fn knows_sizes(app_version: &str) -> bool {
 /// Whether a peer running `app_version` receives programs and links in copied files.
 pub fn knows_links(app_version: &str) -> bool {
     version(app_version) >= LINKS_SINCE
+}
+
+/// Whether a peer running `app_version` understands `Message::KeyboardLayout`.
+pub fn knows_keyboard(app_version: &str) -> bool {
+    version(app_version) >= KEYBOARD_SINCE
 }
 
 pub fn save(dir: &Path, file: &LayoutFile) -> Result<()> {

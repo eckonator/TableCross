@@ -10,6 +10,7 @@ mod message;
 pub use clipboard::{ClipContent, MAX_CLIP_LEN};
 pub use keys::{PressedKeys, is_key_usage};
 pub use message::{
-    Area, ClipFormat, DecodeError, EdgeMark, MAX_AREA_SIZE, MAX_LOG_TEXT, MAX_MESSAGE_LEN, MAX_PLACEMENTS,
-    MAX_TILE_POS, MediaKey, Message, MouseButton, PROTOCOL_VERSION, Placement, Screen, Side, Tile, decode, encode,
+    Area, ClipFormat, DecodeError, EdgeMark, KeyboardLayout, MAX_AREA_SIZE, MAX_LAYOUT_TEXT, MAX_LOG_TEXT,
+    MAX_MESSAGE_LEN, MAX_PLACEMENTS, MAX_TILE_POS, MediaKey, Message, MouseButton, PROTOCOL_VERSION, Placement, Screen,
+    Side, Tile, decode, encode,
 };

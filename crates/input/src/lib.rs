@@ -12,6 +12,7 @@ pub mod keymap {
 #[cfg(target_os = "macos")]
 pub mod handoff;
 pub mod helper_protocol;
+pub mod keyboard_layout;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]

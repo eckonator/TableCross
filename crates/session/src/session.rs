@@ -86,6 +86,8 @@ pub enum Command {
     /// macOS: pause AWDL (AirDrop, Handoff, AirPlay) while the pointer is shared, through the
     /// system helper.
     QuietRadio(bool),
+    /// While controlled, switch to the keyboard layout of the computer that controls this one.
+    FollowLayout(bool),
     /// Keep the pointer on the computer it is on (`None`: the other way round).
     Pin(Option<bool>),
     /// While the arrangement is being changed here: where the pointer would cross, per connected
@@ -165,6 +167,8 @@ pub enum Notice {
     LockedAll,
     /// These computers were told to shut down from here.
     PoweringOff(Vec<String>),
+    /// The computer controlling this one types with a keyboard layout not set up here.
+    LayoutMissing(String, String),
 }
 
 impl std::fmt::Display for Notice {
@@ -200,6 +204,12 @@ impl std::fmt::Display for Notice {
             Notice::TransferFailed(n, e) => write!(f, "file transfer with {n} failed: {e}"),
             Notice::LockedAll => write!(f, "all screens locked"),
             Notice::PoweringOff(names) => write!(f, "shutting down: {}", names.join(", ")),
+            Notice::LayoutMissing(name, layout) => {
+                write!(
+                    f,
+                    "{name} types with the keyboard layout {layout}, which is not set up here"
+                )
+            }
         }
     }
 }
@@ -305,6 +315,8 @@ pub type OnChange = Arc<dyn Fn() + Send + Sync>;
 
 enum Internal {
     Notice(Notice),
+    /// The keyboard layout here, read for the computer controlled from here.
+    OwnLayout(Fingerprint, tc_protocol::KeyboardLayout),
     /// What a fresh process says about the Accessibility permission (macOS).
     Accessibility(bool),
     PairDone(Result<String, PairError>),
@@ -416,6 +428,22 @@ struct Shared {
     measure_at: Mutex<Option<Instant>>,
     /// Pause AWDL while the pointer is shared (setting).
     quiet_radio: AtomicBool,
+    /// Take over the keyboard layout of the computer that controls this one (setting).
+    follow_layout: AtomicBool,
+    keyboard: Arc<Mutex<KeyboardSync>>,
+}
+
+/// Keyboard layouts between the computer that controls and the one controlled.
+#[derive(Default)]
+struct KeyboardSync {
+    /// Controlling: what the computer controlled now was told.
+    sent: Option<tc_protocol::KeyboardLayout>,
+    /// When the layout here was read last for it.
+    read: Option<Instant>,
+    /// Controlled: the layout here before the other one's was taken over, to go back to.
+    before: Option<tc_protocol::KeyboardLayout>,
+    /// Controlled: a layout of the other computer missing here, told once.
+    missing: Option<String>,
 }
 
 /// What this computer's screens report about their size in millimeters, and the diagonals typed in.
@@ -1046,6 +1074,8 @@ impl Session {
             reported_sizes: Mutex::new((screen_sizes, Vec::new())),
             measure_at: Mutex::new(None),
             quiet_radio: AtomicBool::new(false),
+            follow_layout: AtomicBool::new(false),
+            keyboard: Arc::new(Mutex::new(KeyboardSync::default())),
         });
         shared.reload_layout();
         shared.update_sizes(true);
@@ -1160,6 +1190,16 @@ async fn run(
             }
             Some(message) = internal.recv() => match message {
                 Internal::Notice(notice) => shared.notice(notice),
+                Internal::OwnLayout(target, layout) => {
+                    let still = shared.engine.lock().expect("engine lock").role() == Role::Controlling(target.to_string());
+                    let mut keyboard = shared.keyboard.lock().expect("keyboard lock");
+                    if still && keyboard.sent.as_ref() != Some(&layout) {
+                        tracing::info!("keyboard layout {} ({}) goes to {}", layout.name, layout.id, shared.name_of(&target.to_string()));
+                        keyboard.sent = Some(layout.clone());
+                        drop(keyboard);
+                        shared.node.send(&target, Message::KeyboardLayout { layout });
+                    }
+                }
                 Internal::Accessibility(granted) => {
                     access_check = Some(Instant::now());
                     let failed = matches!(shared.status.lock().expect("status lock").input, InputState::Failed(_));
@@ -1230,8 +1270,13 @@ async fn run(
                     };
                     awake.set(now != Role::Idle);
                     shared.node.set_brisk(now != Role::Idle);
+                    if matches!(role, Role::ControlledBy(_)) {
+                        layout_back(&shared);
+                    }
+                    shared.keyboard.lock().expect("keyboard lock").sent = None;
                     role = now;
                     quiet_radio(&shared, &capture, &role, &mut radio_quiet);
+                    read_own_layout(&shared, &role, true);
                     shared.refresh();
                     shared.notice(notice);
                 }
@@ -1240,6 +1285,7 @@ async fn run(
                 shared.refresh();
                 quiet_radio(&shared, &capture, &role, &mut radio_quiet);
                 check_access(&shared, &mut access_check);
+                read_own_layout(&shared, &role, false);
                 if let Some(capture) = &capture {
                     #[allow(unused_mut)]
                     let mut health = capture.health();
@@ -1292,6 +1338,87 @@ async fn run(
         capture.stop();
     }
     shared.node.shutdown().await;
+}
+
+/// Controlling another computer that understands it: read the layout here when the pointer
+/// arrives there (`now`) and every few seconds after, so the other computer can follow it.
+fn read_own_layout(shared: &Arc<Shared>, role: &Role, now: bool) {
+    const EVERY: Duration = Duration::from_secs(2);
+    let Role::Controlling(target) = role else { return };
+    let Ok(target) = target.parse::<Fingerprint>() else {
+        return;
+    };
+    let knows = shared
+        .node
+        .status()
+        .into_iter()
+        .find(|p| p.peer.fingerprint == target)
+        .and_then(|p| p.link)
+        .is_some_and(|link| layout_file::knows_keyboard(&link.app_version));
+    let mut keyboard = shared.keyboard.lock().expect("keyboard lock");
+    if !knows || (!now && keyboard.read.is_some_and(|t| t.elapsed() < EVERY)) {
+        return;
+    }
+    keyboard.read = Some(Instant::now());
+    drop(keyboard);
+    let internal = shared.internal.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(layout) = tc_input::keyboard_layout::current() {
+            let _ = internal.send(Internal::OwnLayout(target, layout));
+        }
+    });
+}
+
+/// The computer that controls this one types with `layout`: switch to the one here that types
+/// alike, remembering the one in use to go back to.
+fn follow_layout(shared: &Arc<Shared>, from: Fingerprint, layout: tc_protocol::KeyboardLayout) {
+    if !shared.follow_layout.load(Ordering::SeqCst)
+        || shared.engine.lock().expect("engine lock").role() != Role::ControlledBy(from.to_string())
+    {
+        return;
+    }
+    let keyboard = shared.keyboard.clone();
+    let internal = shared.internal.clone();
+    let name = shared.name_of(&from.to_string());
+    tokio::task::spawn_blocking(move || {
+        use tc_input::keyboard_layout::{alike, best_match, current, enabled, select};
+        let Some(here) = current() else { return };
+        if alike(&here, &layout) {
+            return;
+        }
+        let available = enabled();
+        let Some(fitting) = best_match(&layout, &available) else {
+            let mut keyboard = keyboard.lock().expect("keyboard lock");
+            if keyboard.missing.as_deref() != Some(layout.id.as_str()) {
+                keyboard.missing = Some(layout.id.clone());
+                let shown = if layout.name.is_empty() {
+                    layout.language.clone()
+                } else {
+                    layout.name.clone()
+                };
+                let _ = internal.send(Internal::Notice(Notice::LayoutMissing(name, shown)));
+            }
+            return;
+        };
+        if select(fitting) {
+            tracing::info!("keyboard layout {} like on {name} (was {})", fitting.name, here.name);
+            keyboard.lock().expect("keyboard lock").before.get_or_insert(here);
+        } else {
+            tracing::warn!("cannot switch to the keyboard layout {}", fitting.id);
+        }
+    });
+}
+
+/// Control from the other computer ended: the layout in use before comes back.
+fn layout_back(shared: &Arc<Shared>) {
+    let Some(before) = shared.keyboard.lock().expect("keyboard lock").before.take() else {
+        return;
+    };
+    tokio::task::spawn_blocking(move || {
+        if tc_input::keyboard_layout::select(&before) {
+            tracing::info!("keyboard layout {} again", before.name);
+        }
+    });
 }
 
 /// AWDL pauses while the pointer is shared and the setting asks for it.
@@ -1974,6 +2101,10 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             shared.changed();
         }
         Event::Message {
+            peer,
+            message: Message::KeyboardLayout { layout },
+        } => follow_layout(shared, peer, layout),
+        Event::Message {
             message: Message::ShowEdges { marks },
             ..
         } => {
@@ -2136,6 +2267,10 @@ fn handle_command(shared: &Arc<Shared>, command: Command) {
             shared.changed();
         }
         Command::Corner(points) => shared.engine.lock().expect("engine lock").set_corner(points),
+        Command::FollowLayout(follow) => {
+            tracing::info!("the keyboard layout follows the controlling computer: {follow}");
+            shared.follow_layout.store(follow, Ordering::SeqCst);
+        }
         Command::QuietRadio(quiet) => {
             tracing::info!("AWDL pauses while the pointer is shared: {quiet}");
             shared.quiet_radio.store(quiet, Ordering::SeqCst);

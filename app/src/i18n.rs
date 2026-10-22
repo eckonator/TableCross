@@ -334,6 +334,14 @@ fn de(en: &str) -> Option<&'static str> {
         "Skip computers that are offline" => "Computer überspringen, die offline sind",
         "AirDrop radio" => "AirDrop-Funk",
         "Crossings" => "Übergänge",
+        "Keyboard layout" => "Tastaturlayout",
+        "Use the layout of the computer in control" => "Layout des steuernden Computers verwenden",
+        "While another computer controls this one, its keyboard layout (German, Swiss German, US …) is switched on here, so every key gives the same character. The layout used before comes back afterwards." => {
+            "Während ein anderer Computer diesen steuert, wird hier dessen Tastaturlayout (Deutsch, Schweizerdeutsch, US …) eingestellt, damit jede Taste dasselbe Zeichen ergibt. Danach kommt das vorherige Layout zurück."
+        }
+        "{} types with the keyboard layout {}, which is not set up here (add it in the system settings)" => {
+            "{} schreibt mit dem Tastaturlayout {}, das hier nicht eingerichtet ist (in den Systemeinstellungen hinzufügen)"
+        }
         "Always show where the pointer crosses" => "Immer zeigen, wo der Zeiger hinüberwechselt",
         "Thin green bars at the edges of the screens where the pointer goes to another computer. Otherwise they appear only while the arrangement is changed." => {
             "Schmale grüne Balken an den Bildschirmrändern, wo der Zeiger zu einem anderen Computer wechselt. Sonst erscheinen sie nur, während die Anordnung geändert wird."

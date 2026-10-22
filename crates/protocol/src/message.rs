@@ -103,6 +103,21 @@ pub struct EdgeMark {
     pub to: f32,
 }
 
+/// A keyboard layout (input source): how keys turn into characters on a computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyboardLayout {
+    /// The system's own name for it ("com.apple.keylayout.German", a Windows layout handle);
+    /// only meaningful on the same kind of system.
+    pub id: String,
+    /// Language and maybe region it is for ("de", "de-CH").
+    pub language: String,
+    /// For people.
+    pub name: String,
+}
+
+/// Longest text in a `KeyboardLayout`.
+pub const MAX_LAYOUT_TEXT: usize = 256;
+
 /// Largest area side, in thousands of logical points.
 pub const MAX_AREA_SIZE: f32 = 100.0;
 
@@ -272,6 +287,11 @@ pub enum Message {
     ScreenSizes {
         mm: Vec<(u32, u32)>,
     },
+    /// The keyboard layout in use on the computer that controls the receiver, sent when the
+    /// pointer arrives and when the layout changes. From 0.4.36 on, only to peers that announced it.
+    KeyboardLayout {
+        layout: KeyboardLayout,
+    },
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -324,6 +344,9 @@ impl Message {
             Message::Screens { screens } => screens.len() <= MAX_PLACEMENTS,
             Message::ScreenSizes { mm } => mm.len() <= MAX_PLACEMENTS,
             Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
+            Message::KeyboardLayout { layout } => [&layout.id, &layout.language, &layout.name]
+                .iter()
+                .all(|t| t.len() <= MAX_LAYOUT_TEXT),
             _ => true,
         }
     }
@@ -499,6 +522,13 @@ mod tests {
             },
             Message::ScreenSizes {
                 mm: vec![(1196, 336), (0, 0)],
+            },
+            Message::KeyboardLayout {
+                layout: KeyboardLayout {
+                    id: "com.apple.keylayout.German".into(),
+                    language: "de".into(),
+                    name: "Deutsch".into(),
+                },
             },
         ]
     }
