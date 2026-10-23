@@ -365,6 +365,24 @@ fn modifiers_follow_the_pointer_across_the_edge() {
 }
 
 #[test]
+fn a_press_after_a_missed_release_is_released_at_the_edge() {
+    let mut sim = Sim::mac_pc();
+    sim.machines.get_mut("mac").unwrap().os.pointer = Point::new(1400.0, 491.0);
+    sim.button("mac", MouseButton::Left, true);
+    sim.glide("mac", 200.0, 0.0);
+    // The release never reaches the engine
+    sim.machines.get_mut("mac").unwrap().os.buttons.clear();
+    sim.glide("mac", -400.0, 0.0);
+    assert_eq!(sim.role("mac"), Role::Idle);
+    // The next drag still ends at the edge
+    sim.button("mac", MouseButton::Left, true);
+    cross_to_pc(&mut sim);
+    assert!(sim.os("mac").buttons.is_empty(), "drag must end on the Mac");
+    sim.button("mac", MouseButton::Left, false);
+    sim.assert_all_released();
+}
+
+#[test]
 fn a_drag_is_released_at_the_edge() {
     let mut sim = Sim::mac_pc();
     sim.machines.get_mut("mac").unwrap().os.pointer = Point::new(1400.0, 491.0);

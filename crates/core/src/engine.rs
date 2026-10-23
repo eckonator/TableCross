@@ -976,8 +976,18 @@ impl Engine {
 
     fn button(&mut self, button: MouseButton, down: bool, actions: &mut Vec<Action>) {
         if down {
-            if self.held_buttons.contains_key(&button) {
-                return;
+            // Pressed while it counts as held: its release was missed (it may have gone to another
+            // computer, or the system kept it during a drag). The old press ends where it went,
+            // and this one counts, so a drag starting now is let go at the edge as it should.
+            if let Some(stale) = self.held_buttons.remove(&button) {
+                for dest in stale {
+                    if let Dest::Remote(to) = dest {
+                        actions.push(Action::Send {
+                            to,
+                            message: Message::MouseButton { button, down: false },
+                        });
+                    }
+                }
             }
             let dest = match &self.mode {
                 Mode::Remote { target, .. } => {
