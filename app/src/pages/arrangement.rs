@@ -705,12 +705,14 @@ fn snap(raw: (f32, f32), size: (f32, f32), moving: &str, desk: &[Area], reach: f
         .filter(|a| a.machine != moving)
         .map(|a| (a.x, a.y, a.w, a.h))
         .collect();
-    // Along an edge: aligned with a corner or the middle when close, else free (keeping some overlap)
+    // Along an edge: aligned with the nearest corner or the middle when close, else free (keeping some
+    // overlap). Nearest, not first: with similar sizes the corners lie within reach of the middle.
     let along = |v: f32, start: f32, len: f32, own: f32| {
         let aligned = [start, start + len - own, start + (len - own) / 2.0];
         aligned
             .into_iter()
-            .find(|a| (a - v).abs() < reach)
+            .filter(|a| (a - v).abs() < reach)
+            .min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
             .unwrap_or_else(|| v.clamp(start - own + reach, start + len - reach))
     };
     // Sharing a place only when dropped close to it, never as the way out of an overlap
@@ -1050,6 +1052,17 @@ mod tests {
         assert_eq!(snap((5.6, 0.3), twin, "twin", &desk, 0.2), Some((5.6, 1.08)));
         // Far away: stays there
         assert_eq!(snap((9.0, 5.0), book, "book", &desk, 0.2), Some((9.0, 5.0)));
+    }
+
+    #[test]
+    fn a_taller_computer_centers_on_a_smaller_one() {
+        // The corners are within reach of the middle: the nearest of the three wins
+        let desk = vec![area("book", 0.0, 0.0, 1.5, 1.0)];
+        let imac = (2.5, 1.5);
+        let right = 1.5;
+        assert_eq!(snap((right, -0.2), imac, "imac", &desk, 0.3), Some((right, -0.25)));
+        assert_eq!(snap((right, -0.05), imac, "imac", &desk, 0.3), Some((right, 0.0)));
+        assert_eq!(snap((right, -0.45), imac, "imac", &desk, 0.3), Some((right, -0.5)));
     }
 
     #[test]
