@@ -8,9 +8,10 @@ use std::sync::Mutex;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardItem, NSPasteboardItemDataProvider,
-    NSPasteboardNameDrag, NSPasteboardType, NSPasteboardTypeFileURL, NSPasteboardTypeHTML, NSPasteboardTypePNG,
-    NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardWriting,
+    NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardContentsOptions, NSPasteboardItem,
+    NSPasteboardItemDataProvider, NSPasteboardNameDrag, NSPasteboardType, NSPasteboardTypeFileURL,
+    NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString, NSPasteboardTypeTIFF,
+    NSPasteboardWriting,
 };
 use objc2_foundation::{NSArray, NSData, NSDictionary, NSString, NSURL};
 
@@ -207,7 +208,9 @@ impl SystemClipboard for MacClipboard {
     fn write_file_promise(&self, count: usize, fulfil: Fulfil) -> Option<Result<u64, ClipError>> {
         Some(autoreleasepool(|_| {
             let board = self.board();
-            board.clearContents();
+            // Not for Apple's own sync to other devices: it asks for the data right away, which would
+            // fetch all files over the network although nobody pasted them
+            board.prepareForNewContentsWithOptions(NSPasteboardContentsOptions::CurrentHostOnly);
             let types = NSArray::from_slice(&[unsafe { NSPasteboardTypeFileURL }]);
             let providers: Vec<Retained<FilePromise>> = (0..count)
                 .map(|index| FilePromise::new(index, fulfil.clone()))
