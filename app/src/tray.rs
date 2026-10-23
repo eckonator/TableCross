@@ -109,6 +109,29 @@ fn show_window(ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
+/// Ends the app from any thread, without waiting for the window (a hidden one is not drawn, so
+/// it may never get to close): sharing stops right away, and if the window does not close, the
+/// process ends after `QUIT_GRACE`.
+pub fn quit_now(
+    session: &Mutex<Option<SessionHandle>>,
+    quit_flag: &AtomicBool,
+    ctx: &egui::Context,
+    why: &'static str,
+) {
+    if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
+        session.send(Command::Shutdown);
+    }
+    quit_flag.store(true, Ordering::SeqCst);
+    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(ViewportCommand::Close);
+    ctx.request_repaint();
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_GRACE);
+        tracing::warn!("window did not close ({why}), ending the process");
+        std::process::exit(0);
+    });
+}
+
 impl Tray {
     /// `quit` is set when the user chose "Quit" in the menu, `update_flag` when "Update to …",
     /// `power_off` to one of `POWER_OFF_*` or `LOG_OUT_*` when the window should ask about that.
@@ -207,20 +230,7 @@ impl Tray {
                 show_window(&menu_ctx);
             } else if event.id == quit_id {
                 tracing::info!("quit chosen in the status icon menu");
-                // Stop sharing right away, without waiting for the (maybe hidden) window
-                if let Some(session) = session.lock().ok().and_then(|s| s.clone()) {
-                    session.send(Command::Shutdown);
-                }
-                quit_flag.store(true, Ordering::SeqCst);
-                menu_ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-                menu_ctx.send_viewport_cmd(ViewportCommand::Close);
-                menu_ctx.request_repaint();
-                // Quit means quit: if the window does not close, end the process anyway
-                std::thread::spawn(|| {
-                    std::thread::sleep(QUIT_GRACE);
-                    tracing::warn!("window did not close after quit, ending the process");
-                    std::process::exit(0);
-                });
+                quit_now(&session, &quit_flag, &menu_ctx, "quit");
             }
         }));
         // Windows: a click on the symbol opens the window, the menu is on the right button

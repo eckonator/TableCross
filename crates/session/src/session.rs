@@ -976,11 +976,24 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
             tracing::info!("local input takes control back from {}: {seen:?}", shared.name_of(to));
         }
         let mut dropped = Vec::new();
+        let over_edge = dragged_over_edge(&actions);
+        if over_edge && drag_before.is_none() && tc_clipboard::drag::can_continue() {
+            tracing::info!("the left button went over the edge; no drag was going on when it was pressed");
+        }
         if let Some(before) = drag_before
-            && dragged_over_edge(&actions)
+            && over_edge
         {
             let files = tc_clipboard::drag::files_since(before);
-            if !files.is_empty() {
+            if files.is_empty() {
+                tracing::info!(
+                    "the left button went over the edge without dragged files (drag pasteboard {} since the press)",
+                    if tc_clipboard::drag::change_count() == Some(before) {
+                        "unchanged"
+                    } else {
+                        "changed, but no file URLs"
+                    }
+                );
+            } else {
                 // Esc cancels the drag here, so nothing lands at the screen edge; the files go over
                 let esc = |down| Action::Inject(Message::Key { usage: ESCAPE, down });
                 actions.splice(0..0, [esc(true), esc(false)]);

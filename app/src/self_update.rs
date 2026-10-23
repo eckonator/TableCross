@@ -44,7 +44,10 @@ pub fn asset_suffix() -> Option<&'static str> {
     }
 }
 
-pub fn start(url: String, ctx: egui::Context) -> Receiver<Progress> {
+/// Downloads and installs the update at `url` in the background; when the new version is in
+/// place, `quit` ends this one (from the worker thread: a hidden window is not drawn and would
+/// never see the progress).
+pub fn start(url: String, ctx: egui::Context, quit: impl FnOnce() + Send + 'static) -> Receiver<Progress> {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("tablecross-self-update".into())
@@ -54,7 +57,11 @@ pub fn start(url: String, ctx: egui::Context) -> Receiver<Progress> {
                 ctx.request_repaint();
             };
             match run(&url, &report) {
-                Ok(()) => report(Progress::Restart),
+                Ok(()) => {
+                    tracing::info!("update installed, this version ends now");
+                    report(Progress::Restart);
+                    quit();
+                }
                 Err(e) => {
                     tracing::warn!("update failed: {e}");
                     report(Progress::Failed(e));

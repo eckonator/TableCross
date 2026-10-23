@@ -617,11 +617,8 @@ impl App {
             self.install_update(ctx);
         }
         let progress: Vec<_> = self.self_update.iter().flat_map(|job| job.try_iter()).collect();
-        for progress in progress {
-            if progress == crate::self_update::Progress::Restart {
-                // The new version starts as soon as this one has ended
-                self.quit(ctx, "update");
-            }
+        // At `Restart` the update has ended this version already
+        if let Some(progress) = progress.into_iter().last() {
             self.update_progress = Some(progress);
         }
         let due = self.update_checked.is_none_or(|t| t.elapsed() >= UPDATE_EVERY);
@@ -687,7 +684,10 @@ impl App {
         }
         if let Some(url) = self.new_version.as_ref().and_then(|n| n.asset.clone()) {
             self.update_progress = Some(crate::self_update::Progress::Downloading);
-            self.self_update = Some(crate::self_update::start(url, ctx.clone()));
+            let (session, quit_flag, quit_ctx) = (self.tray_session.clone(), self.quit_flag.clone(), ctx.clone());
+            self.self_update = Some(crate::self_update::start(url, ctx.clone(), move || {
+                crate::tray::quit_now(&session, &quit_flag, &quit_ctx, "update")
+            }));
         }
     }
 
