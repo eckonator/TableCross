@@ -65,6 +65,7 @@ impl App {
             egui::Grid::new("general")
                 .num_columns(2)
                 .spacing([16.0, 8.0])
+                .max_col_width(option_width(ui))
                 .show(ui, |ui| {
                     ui.label(tr("Language"));
                     let before = self.settings.language;
@@ -110,14 +111,15 @@ impl App {
                     ui.end_row();
 
                     ui.label(tr("Updates"));
-                    ui.horizontal(|ui| {
-                        let mut check = self.settings.update_check == Some(true);
-                        if ui.checkbox(&mut check, tr("Look for new versions on GitHub")).changed() {
-                            self.settings.update_check = Some(check);
-                            changed = true;
-                        }
-                        self.check_button(ui);
-                    });
+                    let mut check = self.settings.update_check == Some(true);
+                    if ui.checkbox(&mut check, tr("Look for new versions on GitHub")).changed() {
+                        self.settings.update_check = Some(check);
+                        changed = true;
+                    }
+                    ui.end_row();
+                    // On a row of its own: beside the box it pushed the card out of narrow windows
+                    ui.label("");
+                    self.check_button(ui);
                     ui.end_row();
                     ui.label("");
                     changed |= ui
@@ -185,6 +187,7 @@ impl App {
             egui::Grid::new("pointer")
                 .num_columns(2)
                 .spacing([16.0, 8.0])
+                .max_col_width(option_width(ui))
                 .show(ui, |ui| {
                     ui.label(tr("Top and bottom"));
                     let before = self.settings.edges;
@@ -207,19 +210,19 @@ impl App {
                     ui.end_row();
 
                     ui.label(tr("Corners"));
-                    let response = ui
-                        .add(
-                            egui::Slider::new(&mut self.settings.corner, 0..=100)
-                                .suffix(" pt")
-                                .text(tr("no switching this close to a corner")),
-                        )
-                        .on_hover_text(tr(
-                            "At left and right edges, so the pointer can reach things in the corners (0: off).",
-                        ));
-                    if response.changed() {
-                        changed = true;
-                        self.send(Command::Corner(f64::from(self.settings.corner)));
-                    }
+                    // The text under the slider, where it can wrap in narrow windows
+                    ui.vertical(|ui| {
+                        let response = ui
+                            .add(egui::Slider::new(&mut self.settings.corner, 0..=100).suffix(" pt"))
+                            .on_hover_text(tr(
+                                "At left and right edges, so the pointer can reach things in the corners (0: off).",
+                            ));
+                        if response.changed() {
+                            changed = true;
+                            self.send(Command::Corner(f64::from(self.settings.corner)));
+                        }
+                        ui.label(tr("no switching this close to a corner"));
+                    });
                     ui.end_row();
 
                     #[cfg(any(target_os = "macos", windows))]
@@ -313,6 +316,7 @@ impl App {
             egui::Grid::new("mac")
                 .num_columns(2)
                 .spacing([16.0, 8.0])
+                .max_col_width(option_width(ui))
                 .show(ui, |ui| {
                     ui.label(tr("Login screen"));
                     if ui
@@ -443,6 +447,7 @@ impl App {
             egui::Grid::new("network")
                 .num_columns(2)
                 .spacing([16.0, 8.0])
+                .max_col_width(option_width(ui))
                 .show(ui, |ui| {
                     ui.label(tr("Name of this computer"));
                     changed |= ui
@@ -641,4 +646,10 @@ fn edge_text(e: EdgeSetting) -> &'static str {
         EdgeSetting::Push => tr("after a moment of pushing"),
         EdgeSetting::DoubleTap => tr("after touching twice"),
     }
+}
+
+/// The widest an option may be in the settings grids, so long ones wrap in narrow windows instead of
+/// pushing the card out of the window. Leaves room for the labels on the left.
+fn option_width(ui: &egui::Ui) -> f32 {
+    (ui.available_width() - 150.0).max(200.0)
 }
