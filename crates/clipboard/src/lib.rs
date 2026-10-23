@@ -114,6 +114,15 @@ pub mod drag {
         crate::mac_drag::released_here();
     }
 
+    /// What to do when a drag continued here does not end even after letting go of it (it blocks
+    /// the desktop until this program ends): start anew, for one.
+    pub fn when_stuck(handler: Box<dyn Fn() + Send + Sync>) {
+        #[cfg(target_os = "macos")]
+        crate::mac_drag::when_stuck(handler);
+        #[cfg(not(target_os = "macos"))]
+        let _ = handler;
+    }
+
     /// The files dragged since `change_count` returned `before`.
     pub fn files_since(before: u64) -> Vec<PathBuf> {
         #[cfg(target_os = "macos")]

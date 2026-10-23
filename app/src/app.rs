@@ -203,6 +203,18 @@ impl App {
             .setup_step
             .map(|s| s.clamp(1, 3) - 1)
             .or((first_start && app.dev.page.is_none()).then_some(0));
+        // A drag of files that does not end blocks the desktop until this program ends
+        #[cfg(target_os = "macos")]
+        if app.demo.is_none() {
+            let (session, quit_flag, quit_ctx) = (app.tray_session.clone(), app.quit_flag.clone(), ctx.clone());
+            tc_clipboard::drag::when_stuck(Box::new(move || {
+                if let Err(e) = crate::self_update::restart() {
+                    tracing::warn!("cannot start anew by myself: {e}");
+                }
+                // Ending frees the desktop even where the new start fails
+                crate::tray::quit_now(&session, &quit_flag, &quit_ctx, "stuck drag");
+            }));
+        }
         if !app.dev.quitting_after_screenshot() {
             app.tray = crate::tray::Tray::new(
                 &ctx,

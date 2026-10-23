@@ -317,6 +317,18 @@ fn ended(window: &NSWindow) {
     }
 }
 
+/// Time for a drag to end after it was let go of here; then the program starts anew.
+const STUCK_AFTER: Duration = Duration::from_secs(4);
+
+/// What to do when a drag does not end (set by the application).
+static STUCK: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Sets what to do when a drag of ours does not end even after letting go of it: it blocks the
+/// whole desktop until this program ends.
+pub fn when_stuck(handler: Box<dyn Fn() + Send + Sync>) {
+    let _ = STUCK.set(handler);
+}
+
 /// Time for a drag to end after the button was let go on the controlling computer.
 const LET_GO: Duration = Duration::from_millis(800);
 
@@ -360,6 +372,25 @@ fn release_running(why: &str) {
         return;
     }
     tracing::info!("a drag from another computer is still going on ({why}), letting go of it here");
+    // Last resort: a drag that never ends blocks the whole desktop (the Dock among others)
+    let running: Vec<Retained<DragView>> = windows
+        .iter()
+        .filter_map(|w| view_of(w))
+        .filter(|v| v.running())
+        .collect();
+    let running = MainThreadBound::new(running, mtm);
+    std::thread::spawn(move || {
+        std::thread::sleep(STUCK_AFTER);
+        DispatchQueue::main().exec_async(move || {
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            if running.get(mtm).iter().any(|v| v.running()) {
+                tracing::error!("a drag from another computer does not end, starting anew to end it");
+                if let Some(stuck) = STUCK.get() {
+                    stuck();
+                }
+            }
+        });
+    });
     let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
         NSEventType::LeftMouseUp,
         NSEvent::mouseLocation(),

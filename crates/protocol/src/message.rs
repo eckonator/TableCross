@@ -300,6 +300,12 @@ pub enum Message {
     /// (the drag goes on over there); then the button is let go. From 0.4.68 on, only to peers
     /// that announced it.
     DragHome,
+    /// The pointer came over from computer `from` (also controlled by the sender) with the left
+    /// button held: files `from` offers as dropped next are dragged on here, with the button the
+    /// sender hands over. From 0.4.70 on, only to peers that announced it.
+    DragFrom {
+        from: String,
+    },
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -352,6 +358,7 @@ impl Message {
             Message::Screens { screens } => screens.len() <= MAX_PLACEMENTS,
             Message::ScreenSizes { mm } => mm.len() <= MAX_PLACEMENTS,
             Message::LogLines { text } => text.len() <= MAX_LOG_TEXT,
+            Message::DragFrom { from } => from.len() <= MAX_LAYOUT_TEXT,
             Message::KeyboardLayout { layout } => [&layout.id, &layout.language, &layout.name]
                 .iter()
                 .all(|t| t.len() <= MAX_LAYOUT_TEXT),
@@ -540,6 +547,9 @@ mod tests {
             },
             Message::LogOut,
             Message::DragHome,
+            Message::DragFrom {
+                from: "0123456789abcdef".into(),
+            },
         ]
     }
 
