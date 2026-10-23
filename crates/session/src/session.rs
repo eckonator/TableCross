@@ -902,7 +902,10 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
             if down {
                 drag_before = tc_clipboard::drag::change_count();
                 handed_over = false;
-            } else if handed_over {
+            } else {
+                tc_clipboard::drag::released_here();
+            }
+            if !down && handed_over {
                 // Cancelling the drag here makes macOS report a release of its own: only the real
                 // one may drop the files over there
                 if tc_input::system::left_button_held() == Some(true) {

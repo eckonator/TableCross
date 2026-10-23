@@ -287,6 +287,7 @@ fn view_of(window: &NSWindow) -> Option<Retained<DragView>> {
 
 /// Hides the latest drag's window to make room for a new one; kept while its drag goes on.
 fn put_aside() {
+    release_running("another drag comes");
     let Some(drag) = WINDOW.with(|w| w.borrow_mut().take()) else {
         return;
     };
@@ -325,34 +326,69 @@ const LET_GO: Duration = Duration::from_millis(800);
 pub fn let_go() {
     std::thread::spawn(|| {
         std::thread::sleep(LET_GO);
-        DispatchQueue::main().exec_async(|| {
-            let Some(mtm) = MainThreadMarker::new() else { return };
-            let mut windows: Vec<Retained<NSWindow>> = STARTED.with(|s| s.borrow().clone());
-            windows.extend(WINDOW.with(|w| w.borrow().as_ref().map(|d| d.window.clone())));
-            for window in windows {
-                if !view_of(&window).is_some_and(|v| v.running()) {
-                    continue;
-                }
-                let at = NSEvent::mouseLocation();
-                tracing::info!("the drag from another computer did not end with the button let go, letting go here");
-                let event =
-                    NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-                        NSEventType::LeftMouseUp,
-                        at,
-                        NSEventModifierFlags::empty(),
-                        NSProcessInfo::processInfo().systemUptime(),
-                        0,
-                        None,
-                        0,
-                        1,
-                        0.0,
-                    );
-                if let Some(event) = event {
-                    NSApplication::sharedApplication(mtm).postEvent_atStart(&event, false);
-                }
-            }
-        });
+        DispatchQueue::main().exec_async(|| release_running("the button was let go on the controlling computer"));
     });
+}
+
+/// The button was let go here (the drag of files dragged back goes on with the real button): some
+/// systems do not end a drag started from an event of our own with the real release.
+pub fn released_here() {
+    DispatchQueue::main().exec_async(|| release_running("the button was let go here"));
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGEventCreate(source: *const std::ffi::c_void) -> *mut std::ffi::c_void;
+    fn CGEventGetLocation(event: *mut std::ffi::c_void) -> NSPoint;
+    fn CGEventCreateMouseEvent(
+        source: *const std::ffi::c_void,
+        kind: u32,
+        position: NSPoint,
+        button: u32,
+    ) -> *mut std::ffi::c_void;
+    fn CGEventPostToPid(pid: i32, event: *mut std::ffi::c_void);
+    fn CFRelease(object: *mut std::ffi::c_void);
+}
+
+/// Ends the drags of ours still going on with a release of the left button, sent to this program
+/// only: as an application event and as a system event.
+fn release_running(why: &str) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let mut windows: Vec<Retained<NSWindow>> = STARTED.with(|s| s.borrow().clone());
+    windows.extend(WINDOW.with(|w| w.borrow().as_ref().map(|d| d.window.clone())));
+    if !windows.iter().any(|w| view_of(w).is_some_and(|v| v.running())) {
+        return;
+    }
+    tracing::info!("a drag from another computer is still going on ({why}), letting go of it here");
+    let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+        NSEventType::LeftMouseUp,
+        NSEvent::mouseLocation(),
+        NSEventModifierFlags::empty(),
+        NSProcessInfo::processInfo().systemUptime(),
+        0,
+        None,
+        0,
+        1,
+        0.0,
+    );
+    if let Some(event) = event {
+        NSApplication::sharedApplication(mtm).postEvent_atStart(&event, false);
+    }
+    // kCGEventLeftMouseUp, kCGMouseButtonLeft
+    const LEFT_UP: u32 = 2;
+    unsafe {
+        let current = CGEventCreate(std::ptr::null());
+        if current.is_null() {
+            return;
+        }
+        let at = CGEventGetLocation(current);
+        CFRelease(current);
+        let up = CGEventCreateMouseEvent(std::ptr::null(), LEFT_UP, at, 0);
+        if !up.is_null() {
+            CGEventPostToPid(std::process::id() as i32, up);
+            CFRelease(up);
+        }
+    }
 }
 
 /// Continues a drag of `names` that came over the edge: shows the catching window under the
