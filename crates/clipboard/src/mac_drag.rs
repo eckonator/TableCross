@@ -3,12 +3,12 @@
 //! drag of promised files. Where they are dropped, the Finder asks for them, and they are fetched
 //! and put right there.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::time::Duration;
 
 use block2::DynBlock;
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQueue, MainThreadBound};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
@@ -171,7 +171,9 @@ define_class!(
         #[unsafe(method(draggingSession:endedAtPoint:operation:))]
         fn ended(&self, _session: &NSDraggingSession, _at: NSPoint, operation: NSDragOperation) {
             tracing::info!("drag of files from another computer ended (operation {:?})", operation.0);
-            finish();
+            if let Some(window) = self.window() {
+                ended(&window);
+            }
         }
     }
 );
@@ -238,14 +240,64 @@ impl DragView {
     }
 }
 
-thread_local! {
-    /// The window of the drag going on (main thread only).
-    static WINDOW: RefCell<Option<Retained<NSWindow>>> = const { RefCell::new(None) };
+/// The window of a drag, and which drag it is.
+struct Drag {
+    number: u64,
+    window: Retained<NSWindow>,
 }
 
-fn finish() {
-    if let Some(window) = WINDOW.with(|w| w.borrow_mut().take()) {
-        window.orderOut(None);
+thread_local! {
+    // All main thread only
+    /// The window of the latest drag.
+    static WINDOW: RefCell<Option<Drag>> = const { RefCell::new(None) };
+    /// Windows of earlier drags that started and have not ended: the system still talks to their
+    /// views as the source of the drag, so they must not go away before.
+    static STARTED: RefCell<Vec<Retained<NSWindow>>> = const { RefCell::new(Vec::new()) };
+    static NUMBER: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The window of drag `number` if it is still the latest drag.
+fn window_of(number: u64) -> Option<Retained<NSWindow>> {
+    WINDOW.with(|w| {
+        w.borrow()
+            .as_ref()
+            .filter(|d| d.number == number)
+            .map(|d| d.window.clone())
+    })
+}
+
+fn view_of(window: &NSWindow) -> Option<Retained<DragView>> {
+    window.contentView().and_then(|v| v.downcast::<DragView>().ok())
+}
+
+/// Hides the latest drag's window to make room for a new one; kept while its drag goes on.
+fn put_aside() {
+    let Some(drag) = WINDOW.with(|w| w.borrow_mut().take()) else {
+        return;
+    };
+    drag.window.orderOut(None);
+    if view_of(&drag.window).is_some_and(|v| v.ivars().started.get()) {
+        tracing::info!("the drag before has not ended yet, keeping its window");
+        STARTED.with(|s| s.borrow_mut().push(drag.window));
+    }
+}
+
+/// The drag of `window` ended: it goes away (after the system is done calling its view).
+fn ended(window: &NSWindow) {
+    window.orderOut(None);
+    let latest = WINDOW.with(|w| {
+        let mut w = w.borrow_mut();
+        let mine = w.as_ref().is_some_and(|d| std::ptr::eq(&*d.window, window));
+        if mine { w.take().map(|d| d.window) } else { None }
+    });
+    let earlier = STARTED.with(|s| {
+        let mut s = s.borrow_mut();
+        let at = s.iter().position(|w| std::ptr::eq(&**w, window))?;
+        Some(s.remove(at))
+    });
+    if let (Some(window), Some(mtm)) = (latest.or(earlier), MainThreadMarker::new()) {
+        let window = MainThreadBound::new(window, mtm);
+        DispatchQueue::main().exec_async(move || drop(window));
     }
 }
 
@@ -255,7 +307,8 @@ fn finish() {
 pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>, gave_up: Box<dyn FnOnce() + Send>) {
     DispatchQueue::main().exec_async(move || {
         let Some(mtm) = MainThreadMarker::new() else { return };
-        finish();
+        put_aside();
+        let number = NUMBER.with(|n| n.replace(n.get() + 1) + 1);
         let at = NSEvent::mouseLocation();
         let size = NSSize::new(CATCHER, CATCHER);
         let frame = NSRect::new(NSPoint::new(at.x - CATCHER / 2.0, at.y - CATCHER / 2.0), size);
@@ -288,12 +341,13 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
         let view = DragView::new(mtm, size, files);
         window.setContentView(Some(&view));
         window.orderFrontRegardless();
-        WINDOW.with(|w| *w.borrow_mut() = Some(window));
+        WINDOW.with(|w| *w.borrow_mut() = Some(Drag { number, window }));
         std::thread::spawn(move || {
             std::thread::sleep(SETTLE);
             // Under the pointer where it is now: a quick drag has moved on since the window came
+            // Each step only for this drag: another may have come meanwhile
             DispatchQueue::main().exec_sync(|| {
-                if let Some(window) = WINDOW.with(|w| w.borrow().clone()) {
+                if let Some(window) = window_of(number) {
                     let at = NSEvent::mouseLocation();
                     window.setFrameOrigin(NSPoint::new(at.x - CATCHER / 2.0, at.y - CATCHER / 2.0));
                 }
@@ -302,11 +356,9 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
             // The press did not reach the window: the button is down now all the same, so the drag
             // starts from an event of our own
             std::thread::sleep(PRESS_ARRIVES);
-            DispatchQueue::main().exec_async(|| {
-                let Some(window) = WINDOW.with(|w| w.borrow().clone()) else { return };
-                let Some(view) = window.contentView().and_then(|v| v.downcast::<DragView>().ok()) else {
-                    return;
-                };
+            DispatchQueue::main().exec_async(move || {
+                let Some(window) = window_of(number) else { return };
+                let Some(view) = view_of(&window) else { return };
                 if view.ivars().started.get() {
                     return;
                 }
@@ -337,17 +389,11 @@ pub fn start(names: Vec<String>, fulfil: Fulfil, press: Box<dyn FnOnce() + Send>
             });
             // The drag did not start at all: give up
             std::thread::sleep(Duration::from_secs(3));
-            DispatchQueue::main().exec_async(|| {
-                let unused = WINDOW.with(|w| {
-                    w.borrow()
-                        .as_ref()
-                        .and_then(|w| w.contentView())
-                        .and_then(|v| v.downcast::<DragView>().ok())
-                        .is_some_and(|v| !v.ivars().started.get())
-                });
-                if unused {
+            DispatchQueue::main().exec_async(move || {
+                let Some(window) = window_of(number) else { return };
+                if view_of(&window).is_some_and(|v| !v.ivars().started.get()) {
                     tracing::warn!("the drag from another computer did not start here");
-                    finish();
+                    ended(&window);
                     gave_up();
                 }
             });

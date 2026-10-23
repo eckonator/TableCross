@@ -5,6 +5,7 @@
 
 mod app;
 mod autostart;
+mod crash;
 mod demo;
 mod devtools;
 mod edges;
@@ -48,9 +49,11 @@ fn main() -> eframe::Result {
     } else {
         logging::init(&dir)
     };
+    crash::log_panics();
     tracing::info!("TableCross {} starting", env!("CARGO_PKG_VERSION"));
-    if log_file.is_some() {
+    if let Some(log_file) = &log_file {
         tc_session::peer_logs::forward_system_logs(&dir);
+        crash::report_earlier_crashes(dir.join("logs").join("crash-seen.txt"), log_file.clone());
     }
     // The demo shows made-up values, not this computer's settings
     let mut settings = if dev.demo {
