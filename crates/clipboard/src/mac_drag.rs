@@ -13,7 +13,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession,
+    NSApplication, NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingItem, NSDraggingSession,
     NSDraggingSource, NSEvent, NSEventModifierFlags, NSEventType, NSFilePromiseProvider, NSFilePromiseProviderDelegate,
     NSImage, NSImageNameMultipleDocuments, NSScreenSaverWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior,
     NSWindowStyleMask,
@@ -131,7 +131,8 @@ struct ViewIvars {
     providers: Vec<Retained<NSFilePromiseProvider>>,
     /// The providers hold their delegates weakly.
     _files: Vec<Retained<DraggedFile>>,
-    started: std::cell::Cell<bool>,
+    started: Cell<bool>,
+    ended: Cell<bool>,
 }
 
 define_class!(
@@ -171,6 +172,7 @@ define_class!(
         #[unsafe(method(draggingSession:endedAtPoint:operation:))]
         fn ended(&self, _session: &NSDraggingSession, _at: NSPoint, operation: NSDragOperation) {
             tracing::info!("drag of files from another computer ended (operation {:?})", operation.0);
+            self.ivars().ended.set(true);
             if let Some(window) = self.window() {
                 ended(&window);
             }
@@ -194,7 +196,8 @@ impl DragView {
         let this = mtm.alloc::<Self>().set_ivars(ViewIvars {
             providers,
             _files: files,
-            started: std::cell::Cell::new(false),
+            started: Cell::new(false),
+            ended: Cell::new(false),
         });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
         unsafe { msg_send![super(this), initWithFrame: frame] }
@@ -227,16 +230,28 @@ impl DragView {
             })
             .collect();
         tracing::info!("drag of {} file(s) from another computer starts", items.len());
-        self.beginDraggingSessionWithItems_event_source(
-            &NSArray::from_retained_slice(&items),
-            event,
-            ProtocolObject::from_ref(self),
-        );
+        let items = NSArray::from_retained_slice(&items);
+        let source = ProtocolObject::<dyn NSDraggingSource>::from_ref(self);
+        // Asked for without the generated binding: that one panics when no session comes back, and
+        // a panic here (called from the system) ends the program
+        let session: Option<Retained<NSDraggingSession>> =
+            unsafe { msg_send![self, beginDraggingSessionWithItems: &*items, event: event, source: source] };
+        if session.is_none() {
+            // Another drag still going on, for one: the files go to Downloads when it gives up
+            tracing::warn!("the drag from another computer could not start here");
+            self.ivars().started.set(false);
+            return;
+        }
         // Out of the way, so the places below take the drop
         if let Some(window) = self.window() {
             window.setIgnoresMouseEvents(true);
             window.setAlphaValue(0.0);
         }
+    }
+
+    /// Started and not ended.
+    fn running(&self) -> bool {
+        self.ivars().started.get() && !self.ivars().ended.get()
     }
 }
 
@@ -299,6 +314,45 @@ fn ended(window: &NSWindow) {
         let window = MainThreadBound::new(window, mtm);
         DispatchQueue::main().exec_async(move || drop(window));
     }
+}
+
+/// Time for a drag to end after the button was let go on the controlling computer.
+const LET_GO: Duration = Duration::from_millis(800);
+
+/// The button was let go on the controlling computer: a drag that is still going on a little later
+/// did not see it (the system waits for a release that never comes, and no other drag can start
+/// meanwhile), so it gets a release of its own.
+pub fn let_go() {
+    std::thread::spawn(|| {
+        std::thread::sleep(LET_GO);
+        DispatchQueue::main().exec_async(|| {
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            let mut windows: Vec<Retained<NSWindow>> = STARTED.with(|s| s.borrow().clone());
+            windows.extend(WINDOW.with(|w| w.borrow().as_ref().map(|d| d.window.clone())));
+            for window in windows {
+                if !view_of(&window).is_some_and(|v| v.running()) {
+                    continue;
+                }
+                let at = NSEvent::mouseLocation();
+                tracing::info!("the drag from another computer did not end with the button let go, letting go here");
+                let event =
+                    NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                        NSEventType::LeftMouseUp,
+                        at,
+                        NSEventModifierFlags::empty(),
+                        NSProcessInfo::processInfo().systemUptime(),
+                        0,
+                        None,
+                        0,
+                        1,
+                        0.0,
+                    );
+                if let Some(event) = event {
+                    NSApplication::sharedApplication(mtm).postEvent_atStart(&event, false);
+                }
+            }
+        });
+    });
 }
 
 /// Continues a drag of `names` that came over the edge: shows the catching window under the

@@ -100,6 +100,13 @@ pub mod drag {
         let _ = (names, fulfil, press, gave_up);
     }
 
+    /// The left button was let go on the controlling computer: ends a drag continued here that
+    /// did not see it.
+    pub fn let_go() {
+        #[cfg(target_os = "macos")]
+        crate::mac_drag::let_go();
+    }
+
     /// The files dragged since `change_count` returned `before`.
     pub fn files_since(before: u64) -> Vec<PathBuf> {
         #[cfg(target_os = "macos")]

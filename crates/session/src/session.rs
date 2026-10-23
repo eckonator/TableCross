@@ -2287,6 +2287,7 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                     let mut files = shared.files.lock().expect("files lock");
                     if !files.left_up_seen {
                         tracing::info!("left button let go on the controlling computer");
+                        tc_clipboard::drag::let_go();
                     }
                     files.left_up_seen = true;
                 }
