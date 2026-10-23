@@ -885,12 +885,15 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
     let mut drag_before: Option<u64> = None;
     // The left button went over with dragged files
     let mut handed_over = false;
+    // The last left button event seen here (for the log)
+    let mut left_seen: Option<(Instant, bool)> = None;
     Box::new(move |event: Captured| {
         if let Captured::Button {
             button: MouseButton::Left,
             down,
         } = event
         {
+            left_seen = Some((Instant::now(), down));
             if down {
                 drag_before = tc_clipboard::drag::change_count();
                 handed_over = false;
@@ -977,6 +980,20 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
         }
         let mut dropped = Vec::new();
         let over_edge = dragged_over_edge(&actions);
+        if !over_edge
+            && actions.iter().any(|a| matches!(a, Action::Grab { .. }))
+            && tc_input::system::left_button_held() == Some(true)
+        {
+            let last = match left_seen {
+                Some((at, down)) => format!(
+                    "the last one seen here was {} {} ms ago",
+                    if down { "a press" } else { "a release" },
+                    at.elapsed().as_millis()
+                ),
+                None => "none was seen here".into(),
+            };
+            tracing::info!("the pointer leaves with the left button held, but no press is held here ({last})");
+        }
         if over_edge && drag_before.is_none() && tc_clipboard::drag::can_continue() {
             tracing::info!("the left button went over the edge; no drag was going on when it was pressed");
         }
