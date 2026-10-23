@@ -97,8 +97,8 @@ fn de(en: &str) -> Option<&'static str> {
             "Ordne die Computer so an, wie sie auf deinem Schreibtisch stehen."
         }
         "Desk" => "Schreibtisch",
-        "Drag the computers to where they stand on your desk, in their real size. Where two touch, the pointer crosses (green); while dragging, the screens show it at their edges as well. Drop a computer onto another one if both are used in turn at the same place." => {
-            "Zieh die Computer dorthin, wo sie auf deinem Schreibtisch stehen, in ihrer echten Größe. Wo sich zwei berühren, wechselt der Zeiger (grün); beim Ziehen zeigen das auch die Bildschirme an ihren Kanten. Zieh einen Computer auf einen anderen, wenn beide abwechselnd am selben Platz stehen."
+        "Drag the computers to where they stand on your desk, in their real size. Where two touch, the pointer crosses (green); while dragging, the screens show it at their edges as well. Drop a computer onto another one if both are used in turn at the same place. To move several together, draw a frame around them or click them with Shift held." => {
+            "Zieh die Computer dorthin, wo sie auf deinem Schreibtisch stehen, in ihrer echten Größe. Wo sich zwei berühren, wechselt der Zeiger (grün); beim Ziehen zeigen das auch die Bildschirme an ihren Kanten. Zieh einen Computer auf einen anderen, wenn beide abwechselnd am selben Platz stehen. Um mehrere zusammen zu verschieben, zieh einen Rahmen um sie oder klick sie mit gedrückter Umschalttaste an."
         }
         "Take over the current size" => "Aktuelle Größe übernehmen",
         "Takes the screens it has now; each computer also does this by itself when its screens change." => {

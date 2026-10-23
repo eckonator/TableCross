@@ -50,7 +50,8 @@ impl App {
             RichText::new(tr(
                 "Drag the computers to where they stand on your desk, in their real size. Where two touch, the \
                  pointer crosses (green); while dragging, the screens show it at their edges as well. Drop a \
-                 computer onto another one if both are used in turn at the same place.",
+                 computer onto another one if both are used in turn at the same place. To move several together, draw \
+                 a frame around them or click them with Shift held.",
             ))
             .color(p.muted),
         );
@@ -89,6 +90,18 @@ impl App {
         let mut dragging: Option<(String, Vec2)> = ui.ctx().data(|d| d.get_temp(drag_id));
         let from_list = egui::DragAndDrop::payload::<Dragged>(ui.ctx()).map(|d| d.0.clone());
         let moving = dragging.as_ref().map(|(m, _)| m.clone()).or(from_list.clone());
+        // Computers selected with a frame or ⇧-click move together
+        let selected_id = egui::Id::new("tc-selected");
+        let band_id = egui::Id::new("tc-band");
+        let mut selected: Vec<String> = ui.ctx().data(|d| d.get_temp(selected_id)).unwrap_or_default();
+        selected.retain(|id| desk.iter().any(|a| a.machine == *id));
+        let mut band: Option<(egui::Pos2, Vec<String>)> = ui.ctx().data(|d| d.get_temp(band_id));
+        let group: Vec<String> = match &moving {
+            Some(m) if selected.len() > 1 && selected.contains(m) => selected.clone(),
+            Some(m) => vec![m.clone()],
+            None => Vec::new(),
+        };
+        let mut parts: Vec<(String, egui::Rect)> = Vec::new();
         let mut shown_desk: Vec<Area> = desk.clone();
         egui::Frame::new()
             .fill(p.window)
@@ -99,7 +112,7 @@ impl App {
                 let height = (ui.available_width() * 0.6).clamp(340.0, 700.0);
                 let (canvas, _) =
                     ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
-                let canvas_response = ui.interact(canvas, egui::Id::new("tc-desk"), egui::Sense::hover());
+                let canvas_response = ui.interact(canvas, egui::Id::new("tc-desk"), egui::Sense::click_and_drag());
                 // Zoom so the desk fills the room, with space around it to drop computers
                 let lo = desk.iter().fold(egui::pos2(f32::INFINITY, f32::INFINITY), |m, a| {
                     egui::pos2(m.x.min(a.x), m.y.min(a.y))
@@ -121,32 +134,58 @@ impl App {
 
                 // A computer being dragged on the desk, or one from the list over the desk
                 let pointer = ui.ctx().pointer_interact_pos();
-                let target = moving.as_ref().and_then(|m| {
-                    let size = desk
-                        .iter()
-                        .find(|a| a.machine == *m)
-                        .map(|a| (a.w, a.h))
-                        .or_else(|| real_size(status, &me, m))
-                        .unwrap_or(STAND_IN);
+                // The group keeps its shape around the one under the pointer
+                let target: Option<Vec<Area>> = moving.as_ref().and_then(|m| {
+                    let start = desk.iter().find(|a| a.machine == *m);
+                    let members: Vec<Area> = match start {
+                        Some(start) => group
+                            .iter()
+                            .filter_map(|id| desk.iter().find(|a| a.machine == *id))
+                            .map(|a| Area {
+                                x: a.x - start.x,
+                                y: a.y - start.y,
+                                ..a.clone()
+                            })
+                            .collect(),
+                        None => {
+                            let size = real_size(status, &me, m);
+                            let (w, h) = size.unwrap_or(STAND_IN);
+                            vec![Area {
+                                machine: m.clone(),
+                                x: 0.0,
+                                y: 0.0,
+                                w,
+                                h,
+                                measured: size.is_some(),
+                            }]
+                        }
+                    };
+                    let size = members.iter().find(|a| a.machine == *m).map(|a| (a.w, a.h))?;
                     let grab = dragging
                         .as_ref()
                         .map_or(egui::vec2(size.0, size.1) * scale / 2.0, |(_, g)| *g);
                     let pos = pointer?;
                     canvas.expand(40.0).contains(pos).then_some(())?;
                     let raw = to_desk(pos - grab);
-                    snap(raw, size, m, &desk, SNAP_PX / scale).map(|(x, y)| (x, y, size))
+                    let shape: Vec<Member> = members
+                        .iter()
+                        .map(|a| (a.machine.as_str(), (a.x, a.y), (a.w, a.h)))
+                        .collect();
+                    let (x, y) = snap(raw, &shape, &desk, SNAP_PX / scale)?;
+                    Some(
+                        members
+                            .iter()
+                            .map(|a| Area {
+                                x: x + a.x,
+                                y: y + a.y,
+                                ..a.clone()
+                            })
+                            .collect(),
+                    )
                 });
-                if let (Some(m), Some((x, y, (w, h)))) = (&moving, target) {
-                    let measured = desk.iter().find(|a| a.machine == *m).is_none_or(|a| a.measured);
-                    shown_desk.retain(|a| a.machine != *m);
-                    shown_desk.push(Area {
-                        machine: m.clone(),
-                        x,
-                        y,
-                        w,
-                        h,
-                        measured,
-                    });
+                if let Some(moved) = &target {
+                    shown_desk.retain(|a| !moved.iter().any(|b| b.machine == a.machine));
+                    shown_desk.extend(moved.iter().cloned());
                 }
                 let shown = &shown_desk;
 
@@ -185,7 +224,16 @@ impl App {
                         let mut view = machine_view(status, &me, id);
                         view.in_turn = with_me && *id != me;
                         view.alone = alone && shown.len() > 1;
-                        let ghost = Some(id) == moving.as_ref();
+                        let ghost = group.contains(id);
+                        parts.push((id.clone(), part));
+                        if selected.contains(id) {
+                            ui.painter().rect_stroke(
+                                part,
+                                9.0,
+                                egui::Stroke::new(2.5, p.accent),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
                         ui.scope_builder(egui::UiBuilder::new().max_rect(part), |ui| {
                             if ghost || view.alone {
                                 ui.multiply_opacity(if ghost { 0.7 } else { 0.55 });
@@ -208,7 +256,19 @@ impl App {
                         if response.drag_started()
                             && let Some(pos) = response.interact_pointer_pos()
                         {
+                            // A computer outside the selection moves alone
+                            if !selected.contains(id) {
+                                selected.clear();
+                            }
                             dragging = Some((id.clone(), pos - to_screen(area.x, area.y)));
+                        }
+                        if response.clicked() && ui.input(|i| i.modifiers.shift || i.modifiers.command) {
+                            match selected.iter().position(|s| s == id) {
+                                Some(i) => {
+                                    selected.remove(i);
+                                }
+                                None => selected.push(id.clone()),
+                            }
                         }
                         let menu = |ui: &mut egui::Ui| tile_menu(ui, status, &me, id);
                         if part.width() >= NARROW {
@@ -230,13 +290,16 @@ impl App {
                 }
 
                 // Letting go
-                if let Some((id, _)) = dragging.clone() {
+                if dragging.is_some() {
                     if ui.input(|i| i.pointer.any_released()) || !ui.input(|i| i.pointer.any_down()) {
                         let zone: Option<egui::Rect> = ui.ctx().data(|d| d.get_temp(unplaced_zone_id));
-                        if id != me && pointer.is_some_and(|pos| zone.is_some_and(|z| z.contains(pos))) {
-                            change = Some(Change::Remove(id));
-                        } else if let Some((x, y, _)) = target {
-                            change = Some(Change::Move(id, x, y));
+                        if pointer.is_some_and(|pos| zone.is_some_and(|z| z.contains(pos))) {
+                            let leaving: Vec<String> = group.iter().filter(|m| **m != me).cloned().collect();
+                            if !leaving.is_empty() {
+                                change = Some(Change::Remove(leaving));
+                            }
+                        } else if let Some(moved) = target.clone() {
+                            change = Some(Change::Move(moved));
                         }
                         dragging = None;
                     } else {
@@ -249,12 +312,56 @@ impl App {
                     }
                     None => d.remove::<(String, Vec2)>(drag_id),
                 });
-                if let Some(payload) = canvas_response.dnd_release_payload::<Dragged>()
-                    && let Some((x, y, _)) = target
+                if canvas_response.dnd_release_payload::<Dragged>().is_some()
+                    && let Some(moved) = target.clone()
                 {
-                    change = Some(Change::Move(payload.0.clone(), x, y));
+                    change = Some(Change::Move(moved));
+                }
+
+                // A frame drawn on the free space selects what it touches; with ⇧ in addition
+                if canvas_response.drag_started()
+                    && let Some(from) = ui.input(|i| i.pointer.press_origin())
+                {
+                    let keep = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+                    band = Some((from, if keep { selected.clone() } else { Vec::new() }));
+                }
+                if let Some((from, before)) = &band {
+                    if let Some(to) = pointer {
+                        let frame = egui::Rect::from_two_pos(*from, to);
+                        selected = before.clone();
+                        for (id, part) in &parts {
+                            if frame.intersects(*part) && !selected.contains(id) {
+                                selected.push(id.clone());
+                            }
+                        }
+                        ui.painter().rect(
+                            frame,
+                            3.0,
+                            p.accent.gamma_multiply(0.12),
+                            egui::Stroke::new(1.0, p.accent),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if !ui.input(|i| i.pointer.any_down()) {
+                        band = None;
+                    }
+                }
+                if canvas_response.clicked() && !ui.input(|i| i.modifiers.shift || i.modifiers.command) {
+                    selected.clear();
                 }
             });
+        if !selected.is_empty() && dragging.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            selected.clear();
+        }
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(selected_id, selected.clone());
+            match &band {
+                Some(b) => {
+                    d.insert_temp(band_id, b.clone());
+                }
+                None => d.remove::<(egui::Pos2, Vec<String>)>(band_id),
+            }
+        });
         self.live_edges(ui.ctx(), status, &me, moving.is_some().then_some(&shown_desk));
         ui.add_space(12.0);
 
@@ -317,25 +424,15 @@ impl App {
             }
         }
         match change {
-            Some(Change::Move(id, x, y)) => {
-                let (w, h, measured) = desk
-                    .iter()
-                    .find(|a| a.machine == id)
-                    .map(|a| (a.w, a.h, a.measured))
-                    .or_else(|| real_size(status, &me, &id).map(|(w, h)| (w, h, true)))
-                    .unwrap_or((STAND_IN.0, STAND_IN.1, false));
-                let mut desk: Vec<Area> = desk.into_iter().filter(|a| a.machine != id).collect();
-                desk.push(Area {
-                    machine: id,
-                    x,
-                    y,
-                    w,
-                    h,
-                    measured,
-                });
+            Some(Change::Move(moved)) => {
+                let mut desk: Vec<Area> = desk
+                    .into_iter()
+                    .filter(|a| !moved.iter().any(|m| m.machine == a.machine))
+                    .collect();
+                desk.extend(moved);
                 self.arrange(desk);
             }
-            Some(Change::Remove(id)) => self.arrange(desk.into_iter().filter(|a| a.machine != id).collect()),
+            Some(Change::Remove(ids)) => self.arrange(desk.into_iter().filter(|a| !ids.contains(&a.machine)).collect()),
             Some(Change::Resize(id)) => {
                 if let Some(size) = real_size(status, &me, &id) {
                     let resized = tc_core::resized(&desk, |a| (a.machine == id).then_some(size), &me);
@@ -520,8 +617,9 @@ impl App {
 
 /// What a click or a drag on the desk asks for.
 enum Change {
-    Move(String, f32, f32),
-    Remove(String),
+    /// The computers at their new places (one, or a group keeping its shape).
+    Move(Vec<Area>),
+    Remove(Vec<String>),
     Resize(String),
     ScreenSizes,
     ArrangeScreens,
@@ -581,7 +679,7 @@ fn tile_menu(ui: &mut egui::Ui, status: &Status, me: &str, id: &str) -> Option<C
         }
     }
     if id != me && ui.button(tr("Take off the desk")).clicked() {
-        change = Some(Change::Remove(id.to_string()));
+        change = Some(Change::Remove(vec![id.to_string()]));
     }
     change
 }
@@ -694,15 +792,20 @@ fn shared_edge(a: &Area, b: &Area) -> Option<((f32, f32), (f32, f32))> {
     })
 }
 
-/// Where a computer of `size` dropped at `raw` lands: at an edge of a nearby computer, aligned with
-/// its corners or middle when close, onto it (shared place), or else where it is. Dropped over part
-/// of another computer, it goes to the nearest free place beside it; `None` only where there is
-/// none. `reach`: snapping distance in thousands of points.
-fn snap(raw: (f32, f32), size: (f32, f32), moving: &str, desk: &[Area], reach: f32) -> Option<(f32, f32)> {
-    let (w, h) = size;
+/// One of the computers moved together: its id, where it sits relative to the one under the
+/// pointer, and its size (thousands of points).
+type Member<'a> = (&'a str, (f32, f32), (f32, f32));
+
+/// Where a computer (or a group keeping its shape) dropped at `raw` lands: at an edge of a nearby
+/// computer, aligned with its corners or middle when close, onto it (shared place, single computers
+/// only), or else where it is. Dropped over part of another computer, it goes to the nearest free
+/// place beside it; `None` only where there is none. `raw` and the result are the place of the one
+/// under the pointer; any member of the group may snap. `reach`: snapping distance in thousands of
+/// points.
+fn snap(raw: (f32, f32), group: &[Member], desk: &[Area], reach: f32) -> Option<(f32, f32)> {
     let others: Vec<(f32, f32, f32, f32)> = desk
         .iter()
-        .filter(|a| a.machine != moving)
+        .filter(|a| !group.iter().any(|(m, ..)| *m == a.machine))
         .map(|a| (a.x, a.y, a.w, a.h))
         .collect();
     // Along an edge: aligned with the nearest corner or the middle when close, else free (keeping some
@@ -716,15 +819,32 @@ fn snap(raw: (f32, f32), size: (f32, f32), moving: &str, desk: &[Area], reach: f
             .unwrap_or_else(|| v.clamp(start - own + reach, start + len - reach))
     };
     // Sharing a place only when dropped close to it, never as the way out of an overlap
-    let shared: Vec<(f32, f32)> = others.iter().map(|&(x, y, ..)| (x, y)).collect();
+    let shared: Vec<(f32, f32)> = match group {
+        [_] => others.iter().map(|&(x, y, ..)| (x, y)).collect(),
+        _ => Vec::new(),
+    };
     let mut candidates: Vec<(f32, f32)> = Vec::new();
-    for &(x, y, ow, oh) in &others {
-        candidates.push((x + ow, along(raw.1, y, oh, h)));
-        candidates.push((x - w, along(raw.1, y, oh, h)));
-        candidates.push((along(raw.0, x, ow, w), y + oh));
-        candidates.push((along(raw.0, x, ow, w), y - h));
+    for &(_, (dx, dy), (w, h)) in group {
+        let (rx, ry) = (raw.0 + dx, raw.1 + dy);
+        for &(x, y, ow, oh) in &others {
+            for (cx, cy) in [
+                (x + ow, along(ry, y, oh, h)),
+                (x - w, along(ry, y, oh, h)),
+                (along(rx, x, ow, w), y + oh),
+                (along(rx, x, ow, w), y - h),
+            ] {
+                candidates.push((cx - dx, cy - dy));
+            }
+        }
     }
-    let free = |c: (f32, f32)| !others.iter().any(|o| overlaps((c.0, c.1, w, h), *o));
+    // A group never shares a place: one of it right on another computer is in the way as well
+    let free = |c: (f32, f32)| {
+        group.iter().all(|&(_, (dx, dy), (w, h))| {
+            let (x, y) = (c.0 + dx, c.1 + dy);
+            let on = |o: &(f32, f32, f32, f32)| group.len() > 1 && (x - o.0).abs() < EPS && (y - o.1).abs() < EPS;
+            !others.iter().any(|o| overlaps((x, y, w, h), *o) || on(o))
+        })
+    };
     let distance = |c: (f32, f32)| (c.0 - raw.0).hypot(c.1 - raw.1);
     let round = |v: f32| (v * 100.0).round() / 100.0;
     let nearest = |within: f32, from: &[(f32, f32)]| {
@@ -1015,7 +1135,11 @@ fn screens_and_sizes(status: &Status, me: &str, id: &str) -> Option<ScreensAndSi
 
 #[cfg(test)]
 mod tests {
-    use super::{Area, shared_edge, snap};
+    use super::{Area, shared_edge};
+
+    fn snap(raw: (f32, f32), size: (f32, f32), id: &str, desk: &[Area], reach: f32) -> Option<(f32, f32)> {
+        super::snap(raw, &[(id, (0.0, 0.0), size)], desk, reach)
+    }
 
     fn area(m: &str, x: f32, y: f32, w: f32, h: f32) -> Area {
         Area {
@@ -1052,6 +1176,26 @@ mod tests {
         assert_eq!(snap((5.6, 0.3), twin, "twin", &desk, 0.2), Some((5.6, 1.08)));
         // Far away: stays there
         assert_eq!(snap((9.0, 5.0), book, "book", &desk, 0.2), Some((9.0, 5.0)));
+    }
+
+    #[test]
+    fn a_group_keeps_its_shape_and_snaps_with_any_member() {
+        // Two computers side by side moved together; a third stays
+        let desk = vec![
+            area("left", 0.0, 0.0, 2.0, 1.0),
+            area("right", 2.0, 0.0, 2.0, 1.0),
+            area("other", 10.0, 0.0, 2.0, 1.0),
+        ];
+        let group = [("left", (0.0, 0.0), (2.0, 1.0)), ("right", (2.0, 0.0), (2.0, 1.0))];
+        // The right one reaches the other one's left edge: the group stops there, aligned
+        assert_eq!(super::snap((6.1, 0.1), &group, &desk, 0.2), Some((6.0, 0.0)));
+        // The left one reaches its right edge
+        assert_eq!(super::snap((11.9, 0.05), &group, &desk, 0.2), Some((12.0, 0.0)));
+        // Dropped onto it, the group goes beside it and does not share its place
+        let placed = super::snap((10.0, 0.0), &group, &desk, 0.2).unwrap();
+        assert!(placed != (10.0, 0.0) && placed != (8.0, 0.0), "{placed:?}");
+        // The members never move against each other: only the group's place comes back
+        assert_eq!(super::snap((20.0, 5.0), &group, &desk, 0.2), Some((20.0, 5.0)));
     }
 
     #[test]
