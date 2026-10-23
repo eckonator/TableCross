@@ -295,6 +295,11 @@ pub enum Message {
     /// Log the user out (someone logged out all computers at once). Applications may still ask to
     /// save their documents. From 0.4.52 on, only to peers that announced it.
     LogOut,
+    /// Instead of letting go of the left button: the pointer went back to the controlling
+    /// computer with the button held. Files being dragged on the receiver are offered as dropped
+    /// (the drag goes on over there); then the button is let go. From 0.4.68 on, only to peers
+    /// that announced it.
+    DragHome,
 }
 
 /// Longest text in one `Message::LogLines`.
@@ -534,6 +539,7 @@ mod tests {
                 },
             },
             Message::LogOut,
+            Message::DragHome,
         ]
     }
 

@@ -68,6 +68,9 @@ const KEYBOARD_SINCE: (u32, u32, u32) = (0, 4, 36);
 /// First version that understands `Message::LogOut`.
 const LOG_OUT_SINCE: (u32, u32, u32) = (0, 4, 52);
 
+/// First version that understands `Message::DragHome`.
+const DRAG_HOME_SINCE: (u32, u32, u32) = (0, 4, 68);
+
 fn version(app_version: &str) -> (u32, u32, u32) {
     let mut parts = app_version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
     (
@@ -110,6 +113,11 @@ pub fn knows_keyboard(app_version: &str) -> bool {
 /// Whether a peer running `app_version` understands `Message::LogOut`.
 pub fn knows_log_out(app_version: &str) -> bool {
     version(app_version) >= LOG_OUT_SINCE
+}
+
+/// Whether a peer running `app_version` understands `Message::DragHome`.
+pub fn knows_drag_home(app_version: &str) -> bool {
+    version(app_version) >= DRAG_HOME_SINCE
 }
 
 pub fn save(dir: &Path, file: &LayoutFile) -> Result<()> {

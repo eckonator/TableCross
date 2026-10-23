@@ -417,6 +417,11 @@ struct FileState {
     /// The controlling computer let go of the left button since the pointer came here (a drag
     /// that came over ended before its files were announced).
     left_up_seen: bool,
+    /// State of the drag pasteboard when the controlling computer pressed the left button here.
+    remote_press: Option<u64>,
+    /// The pointer went back from this peer with the left button held: what it drags comes as
+    /// dropped files, and the drag goes on here.
+    drag_home: Option<(String, Instant)>,
     /// What we put on the clipboard after a transfer (not announced again).
     written: Vec<PathBuf>,
     cancels: Cancels,
@@ -1028,6 +1033,11 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
                 }
             }
         }
+        if actions.iter().any(|a| matches!(a, Action::Ungrab { .. }))
+            && tc_input::system::left_button_held() == Some(true)
+        {
+            drag_home(&shared, &mut actions);
+        }
         execute(actions, &shared.node, shared.inject.as_deref());
         // Announced only now: the pointer must arrive over there before the files do
         if !dropped.is_empty() {
@@ -1035,6 +1045,28 @@ fn handler(shared: Arc<Shared>) -> tc_input::Handler {
         }
         !grabbed
     })
+}
+
+/// The pointer comes back with the left button held: instead of letting go there, the computer
+/// it comes from offers what it drags (if it does), and the drag goes on here.
+fn drag_home(shared: &Shared, actions: &mut [Action]) {
+    let release = Message::MouseButton {
+        button: MouseButton::Left,
+        down: false,
+    };
+    for action in actions {
+        if let Action::Send { to, message } = action
+            && *message == release
+            && shared.peer_knows(to, layout_file::knows_drag_home)
+        {
+            tracing::info!(
+                "back from {} with the left button held: files dragged there come along",
+                shared.name_of(to)
+            );
+            *message = Message::DragHome;
+            shared.files.lock().expect("files lock").drag_home = Some((to.clone(), Instant::now()));
+        }
+    }
 }
 
 /// The pointer left this computer with the left button held (the button is let go at the edge).
@@ -1710,6 +1742,59 @@ fn continue_drag(shared: &Arc<Shared>, peer: Fingerprint, id: u64, names: &[Stri
     true
 }
 
+/// The controlling computer took the pointer back with the left button held: files dragged here
+/// since it pressed the button go over (the drag here is cancelled, the button let go after this).
+fn drag_leaves(shared: &Arc<Shared>, peer: Fingerprint) {
+    let from = peer.to_string();
+    if shared.engine.lock().expect("engine lock").role() != Role::ControlledBy(from) {
+        return;
+    }
+    let Some(before) = shared.files.lock().expect("files lock").remote_press.take() else {
+        return;
+    };
+    let files = tc_clipboard::drag::files_since(before);
+    if files.is_empty() {
+        tracing::info!("the pointer went back with the left button held, no files dragged here");
+        return;
+    }
+    tracing::info!(
+        "{} file(s) dragged back to {}",
+        files.len(),
+        shared.name_of(&peer.to_string())
+    );
+    // Esc cancels the drag here, so nothing lands at the screen edge
+    let esc = |down| Action::Inject(Message::Key { usage: ESCAPE, down });
+    shared.execute(vec![esc(true), esc(false)]);
+    let _ = shared.internal.send(Internal::Dropped(files));
+}
+
+/// Files dragged back from `peer` are offered: the drag goes on here while the button is still
+/// held. Returns false where it cannot (then they are fetched into Downloads).
+fn continue_drag_home(shared: &Arc<Shared>, id: u64, names: &[String]) -> bool {
+    let refused = if !tc_clipboard::drag::can_continue() {
+        Some("not on this system")
+    } else if names.is_empty() {
+        Some("no names")
+    } else if tc_input::system::left_button_held() != Some(true) {
+        Some("the button was let go already")
+    } else {
+        None
+    };
+    if let Some(why) = refused {
+        tracing::info!("files dragged back go to Downloads: {why}");
+        return false;
+    }
+    let fulfil = new_promise(shared, id);
+    let internal = shared.internal.clone();
+    let gave_up = Box::new(move || {
+        let _ = internal.send(Internal::DragGaveUp(id));
+    });
+    tracing::info!("files dragged back, the drag goes on here");
+    // The button is held here for real: nothing to press
+    tc_clipboard::drag::continue_drag(names.to_vec(), fulfil, Box::new(|| {}), gave_up);
+    true
+}
+
 /// Promised files are being pasted here: ask the peer for them.
 fn fetch_promised(shared: &Arc<Shared>, id: u64) {
     let mut state = shared.files.lock().expect("files lock");
@@ -2182,7 +2267,21 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
                 size,
                 pasteable,
             });
-            if dropped
+            // Dragged back from the computer the pointer just left
+            const HOME_WAIT: Duration = Duration::from_secs(10);
+            let home = dropped
+                && shared
+                    .files
+                    .lock()
+                    .expect("files lock")
+                    .drag_home
+                    .take_if(|(from, at)| *from == peer.to_string() && at.elapsed() < HOME_WAIT)
+                    .is_some();
+            if home {
+                if !continue_drag_home(shared, id, &names) {
+                    request_files(shared);
+                }
+            } else if dropped
                 && !continue_drag(shared, peer, id, &names)
                 && matches!(shared.engine.lock().expect("engine lock").role(), Role::ControlledBy(_))
             {
@@ -2307,9 +2406,20 @@ fn handle_event(shared: &Arc<Shared>, event: Event) {
             tracing::info!("{} logs out all computers", shared.name_of(&peer.to_string()));
             log_out_here();
         }
-        Event::Message { peer, message } => {
+        Event::Message { peer, mut message } => {
+            if message == Message::DragHome {
+                drag_leaves(shared, peer);
+                message = Message::MouseButton {
+                    button: MouseButton::Left,
+                    down: false,
+                };
+            }
             match message {
                 Message::Enter { .. } => shared.files.lock().expect("files lock").left_up_seen = false,
+                Message::MouseButton {
+                    button: MouseButton::Left,
+                    down: true,
+                } => shared.files.lock().expect("files lock").remote_press = tc_clipboard::drag::change_count(),
                 Message::MouseButton {
                     button: MouseButton::Left,
                     down: false,
